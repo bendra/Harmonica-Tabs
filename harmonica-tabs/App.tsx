@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { HARMONICA_KEYS } from './src/data/keys';
@@ -80,6 +81,8 @@ function Dropdown<T extends string | number>(props: {
 }
 
 export default function App() {
+  const { width, height } = useWindowDimensions();
+  const isSmallScreen = Math.min(width, height) < 420;
   const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
   const [selectedScales, setSelectedScales] = useState<ScaleSelection[]>([]);
@@ -133,31 +136,29 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Harmonica Scale Visualizer</Text>
 
-        <Text style={styles.sectionTitle}>Harmonica Key</Text>
-        <Dropdown
-          label="Harmonica Key"
-          value={harmonicaKey.label}
-          options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
-          onChange={(label) => {
-            const key = HARMONICA_KEYS.find((item) => item.label === label);
-            if (key) setHarmonicaKey(key);
-          }}
-        />
-
-        <Text style={styles.sectionTitle}>Overbend Notation</Text>
-        <View style={styles.toggleRow}>
-          <Pressable
-            onPress={() => setNotation('apostrophe')}
-            style={[styles.toggleButton, notation === 'apostrophe' && styles.toggleButtonActive]}
-          >
-            <Text style={[styles.toggleText, notation === 'apostrophe' && styles.toggleTextActive]}>' (context)</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setNotation('degree')}
-            style={[styles.toggleButton, notation === 'degree' && styles.toggleButtonActive]}
-          >
-            <Text style={[styles.toggleText, notation === 'degree' && styles.toggleTextActive]}>°</Text>
-          </Pressable>
+        <View style={styles.topRow}>
+          <View style={styles.topRowKey}>
+            <Dropdown
+              label="Harmonica key"
+              value={harmonicaKey.label}
+              options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
+              onChange={(label) => {
+                const key = HARMONICA_KEYS.find((item) => item.label === label);
+                if (key) setHarmonicaKey(key);
+              }}
+            />
+          </View>
+          <View style={styles.topRowToggle}>
+            <Dropdown
+              label="Overbend Symbol"
+              value={notation}
+              options={[
+                { label: "'", value: 'apostrophe' },
+                { label: '°', value: 'degree' },
+              ]}
+              onChange={(value) => setNotation(value as OverbendNotation)}
+            />
+          </View>
         </View>
 
         <Text style={styles.sectionTitle}>Add Scale</Text>
@@ -195,23 +196,39 @@ export default function App() {
               const selectedIndex = altSelections[key] ?? 0;
               return group.options[selectedIndex] ?? group.options[0];
             });
-            const chordEligible = new Set<string>();
-            const byHoleAndDir = new Map<string, string>();
-            defaultOptions.forEach((option) => {
-              if (option.technique !== 'blow' && option.technique !== 'draw') return;
-              const dir = option.technique === 'blow' ? 'B' : 'D';
-              const key = `${option.hole}:${dir}`;
-              byHoleAndDir.set(key, key);
+
+            const blowHoles: number[] = [];
+            const drawHoles: number[] = [];
+
+            groups.forEach((group) => {
+              group.options.forEach((option) => {
+                if (option.technique === 'blow') blowHoles.push(option.hole);
+                if (option.technique === 'draw') drawHoles.push(option.hole);
+              });
             });
-            byHoleAndDir.forEach((_, key) => {
-              const [holeText, dir] = key.split(':');
-              const hole = Number(holeText);
-              const prev = `${hole - 1}:${dir}`;
-              const next = `${hole + 1}:${dir}`;
-              if (byHoleAndDir.has(prev) || byHoleAndDir.has(next)) {
-                chordEligible.add(key);
-              }
-            });
+
+            function buildChordRuns(holes: number[], dir: 'B' | 'D') {
+              const unique = Array.from(new Set(holes)).sort((a, b) => a - b);
+              const runs: number[][] = [];
+              let current: number[] = [];
+              unique.forEach((hole) => {
+                if (current.length === 0 || hole === current[current.length - 1] + 1) {
+                  current.push(hole);
+                } else {
+                  if (current.length >= 2) runs.push(current);
+                  current = [hole];
+                }
+              });
+              if (current.length >= 2) runs.push(current);
+              return runs.map((run) => ({
+                start: run[0],
+                dir,
+                tabs: run.map((hole) => (dir === 'B' ? `${hole}` : `-${hole}`)).join(' '),
+              }));
+            }
+
+            const blowChords = buildChordRuns(blowHoles, 'B').sort((a, b) => a.start - b.start);
+            const drawChords = buildChordRuns(drawHoles, 'D').sort((a, b) => a.start - b.start);
             return (
               <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={styles.resultRow}>
                 <View style={styles.resultHeader}>
@@ -230,31 +247,46 @@ export default function App() {
                       const key = getAltKey(scale, group);
                       const selectedIndex = altSelections[key] ?? 0;
                       const option = group.options[selectedIndex] ?? group.options[0];
-                      const chordKey = `${option.hole}:${option.technique === 'blow' ? 'B' : 'D'}`;
-                      const shouldUnderline =
-                        (option.technique === 'blow' || option.technique === 'draw') &&
-                        chordEligible.has(chordKey);
+                      const hasGAlt =
+                        group.options.some((token) => token.tab === '-2') &&
+                        group.options.some((token) => token.tab === '3');
                       return (
-                        <View key={key} style={styles.tabGroup}>
+                        <Pressable
+                          key={key}
+                          onPress={() => {
+                            if (group.options.length > 1) {
+                              cycleAlt(scale, group);
+                            }
+                          }}
+                          style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
+                        >
                           <Text
                             style={[
                               styles.resultTabs,
+                              isSmallScreen && styles.resultTabsSmall,
                               option.isRoot && styles.resultTabsRoot,
-                              shouldUnderline && styles.resultTabsChord,
+                              hasGAlt && option.tab === '-2' ? styles.resultTabsChord : undefined,
                             ]}
                           >
                             {option.tab}
                           </Text>
-                          {group.options.length > 1 && (
-                            <Pressable onPress={() => cycleAlt(scale, group)} style={styles.altButton}>
-                              <Text style={styles.altButtonText}>Alt</Text>
-                            </Pressable>
-                          )}
-                        </View>
+                        </Pressable>
                       );
                     })}
                   </View>
                 )}
+                <View style={styles.chordsRow}>
+                  <Text style={styles.chordsLabel}>Blow Chords</Text>
+                  <Text style={[styles.chordsText, isSmallScreen && styles.chordsTextSmall]}>
+                    {blowChords.length === 0 ? 'None' : blowChords.map((chord) => chord.tabs).join(' | ')}
+                  </Text>
+                </View>
+                <View style={styles.chordsRow}>
+                  <Text style={styles.chordsLabel}>Draw Chords</Text>
+                  <Text style={[styles.chordsText, isSmallScreen && styles.chordsTextSmall]}>
+                    {drawChords.length === 0 ? 'None' : drawChords.map((chord) => chord.tabs).join(' | ')}
+                  </Text>
+                </View>
               </View>
             );
           })}
@@ -277,12 +309,12 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '700',
     color: '#f3f4f6',
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#e5e7eb',
   },
@@ -301,7 +333,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#334155',
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 12,
     backgroundColor: '#0f172a',
@@ -332,45 +364,34 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     fontWeight: '600',
   },
-  toggleRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  toggleButton: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-  },
-  toggleButtonActive: {
-    backgroundColor: '#22c55e',
-    borderColor: '#22c55e',
-  },
-  toggleText: {
-    color: '#e2e8f0',
-    fontWeight: '600',
-  },
-  toggleTextActive: {
-    color: '#0f172a',
-  },
-  scalePickerRow: {
+  topRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'flex-end',
     gap: 12,
   },
+  topRowKey: {
+    flex: 1,
+    minWidth: 180,
+  },
+  topRowToggle: {
+    minWidth: 140,
+  },
+  scalePickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
   scalePickerColumn: {
     flex: 1,
-    minWidth: 160,
+    minWidth: 120,
   },
   addButton: {
     alignSelf: 'flex-end',
     backgroundColor: '#38bdf8',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     borderRadius: 10,
   },
   addButtonText: {
@@ -379,23 +400,24 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: '#ef4444',
   },
   removeButtonText: {
     color: '#0f172a',
     fontWeight: '700',
+    fontSize: 12,
   },
   resultsList: {
     gap: 12,
   },
   resultRow: {
-    padding: 12,
+    padding: 14,
     borderRadius: 12,
     backgroundColor: '#0b1220',
     borderWidth: 1,
-    borderColor: '#1f2937',
+    borderColor: '#182233',
   },
   resultHeader: {
     flexDirection: 'row',
@@ -408,15 +430,22 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontWeight: '700',
     flex: 1,
+    fontSize: 16,
   },
   resultTabs: {
     color: '#f8fafc',
     fontFamily: 'Courier',
     lineHeight: 20,
+    fontSize: 14,
+  },
+  resultTabsSmall: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   resultTabsRoot: {
     fontWeight: '700',
     color: '#facc15',
+    fontSize: 16,
   },
   resultTabsChord: {
     textDecorationLine: 'underline',
@@ -424,31 +453,45 @@ const styles = StyleSheet.create({
   helperText: {
     color: '#94a3b8',
   },
+  chordsRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    gap: 6,
+  },
+  chordsLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  chordsText: {
+    color: '#e2e8f0',
+    fontFamily: 'Courier',
+    fontSize: 12,
+  },
+  chordsTextSmall: {
+    fontSize: 11,
+  },
   tabGroupList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   tabGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    gap: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#1f2937',
-    backgroundColor: '#0f172a',
+    borderColor: '#1a2230',
+    backgroundColor: '#121826',
   },
-  altButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: '#334155',
-  },
-  altButtonText: {
-    color: '#e2e8f0',
-    fontSize: 12,
-    fontWeight: '700',
+  tabGroupCompact: {
+    paddingHorizontal: 0,
+    gap: 4,
   },
 });
