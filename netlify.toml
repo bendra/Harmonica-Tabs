@@ -1,0 +1,4 @@
+[build]
+  base = "harmonica-tabs"
+  command = "npm run build:netlify"
+  publish = "dist"
