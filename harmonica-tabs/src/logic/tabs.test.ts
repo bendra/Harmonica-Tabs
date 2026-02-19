@@ -18,4 +18,25 @@ describe('buildTabsForScale', () => {
     expect(altOptions).toEqual(['-2', '3']);
     expect(withAlt[0].options[0].tab).toBe('-2');
   });
+
+  it('renders overbends using the selected notation', () => {
+    const degree = buildTabsForScale({ rootPc: 4, scaleId: 'major' }, 0, 'degree');
+    const apostrophe = buildTabsForScale({ rootPc: 4, scaleId: 'major' }, 0, 'apostrophe');
+
+    const degreeTabs = degree.flatMap((group) => group.options.map((option) => option.tab));
+    const apostropheTabs = apostrophe.flatMap((group) => group.options.map((option) => option.tab));
+
+    expect(degreeTabs).toContain('4°');
+    expect(apostropheTabs).toContain("4'");
+  });
+
+  it('excludes overbends on holes 2, 3, and 8', () => {
+    const degree = buildTabsForScale({ rootPc: 4, scaleId: 'major' }, 0, 'degree');
+    const degreeTabs = degree.flatMap((group) => group.options.map((option) => option.tab));
+
+    expect(degreeTabs).not.toContain('2°');
+    expect(degreeTabs).not.toContain('3°');
+    expect(degreeTabs).not.toContain('8°');
+    expect(degreeTabs).not.toContain('-8°');
+  });
 });
