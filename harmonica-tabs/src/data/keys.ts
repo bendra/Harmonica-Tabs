@@ -6,23 +6,21 @@ export type HarmonicaKey = {
   preferFlats: boolean;
 };
 
-const FLAT_KEYS = new Set<NoteName>(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb']);
+const FLAT_KEYS = new Set<NoteName>(['F', 'Bb', 'Eb', 'Ab', 'Db']);
 
 const KEY_ORDER: NoteName[] = [
   'C',
-  'G',
-  'D',
-  'A',
-  'E',
-  'B',
-  'F#',
-  'C#',
-  'F',
-  'Bb',
-  'Eb',
-  'Ab',
   'Db',
-  'Gb',
+  'D',
+  'Eb',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'Ab',
+  'A',
+  'Bb',
+  'B',
 ];
 
 export const HARMONICA_KEYS: HarmonicaKey[] = KEY_ORDER.map((label) => ({

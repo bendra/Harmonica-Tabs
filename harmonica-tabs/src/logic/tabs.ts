@@ -73,14 +73,12 @@ export type TabGroup = {
   options: TabToken[];
 };
 
-export function buildTabsForScale(
-  selection: ScaleSelection,
+export function buildTabsForPcSet(
+  pcs: Set<number>,
+  rootPc: number,
   harmonicaPc: number,
   notation: OverbendNotation,
 ): TabGroup[] {
-  const scaleDef = getScaleDef(selection.scaleId);
-  if (!scaleDef) return [];
-  const scalePcs = getScalePcs(selection.rootPc, selection.scaleId);
   const layout = transposeLayout(RICHTER_C_LAYOUT, harmonicaPc);
   const tabs: TabToken[] = [];
 
@@ -89,7 +87,7 @@ export function buildTabsForScale(
 
     if (hole.blowBends.length > 0) {
       hole.blowBends.forEach((pc, index) => {
-        if (!scalePcs.has(pc)) return;
+        if (!pcs.has(pc)) return;
         const midi = hole.blowBendsMidi[index];
         if (midi === hole.blowMidi || midi === hole.drawMidi) return;
         const steps = normalizePc(hole.blow - pc);
@@ -97,13 +95,13 @@ export function buildTabsForScale(
       });
     }
 
-    if (scalePcs.has(hole.blow)) {
+    if (pcs.has(hole.blow)) {
       candidates.push({ hole: hole.hole, technique: 'blow', pc: hole.blow, midi: hole.blowMidi });
     }
 
     if (hole.drawBends.length > 0) {
       hole.drawBends.forEach((pc, index) => {
-        if (!scalePcs.has(pc)) return;
+        if (!pcs.has(pc)) return;
         const midi = hole.drawBendsMidi[index];
         if (midi === hole.drawMidi || midi === hole.blowMidi) return;
         const steps = normalizePc(hole.draw - pc);
@@ -111,14 +109,14 @@ export function buildTabsForScale(
       });
     }
 
-    if (scalePcs.has(hole.draw)) {
+    if (pcs.has(hole.draw)) {
       candidates.push({ hole: hole.hole, technique: 'draw', pc: hole.draw, midi: hole.drawMidi });
     }
 
     if (
       hole.overblow !== undefined &&
       hole.overblowMidi !== undefined &&
-      scalePcs.has(hole.overblow) &&
+      pcs.has(hole.overblow) &&
       shouldIncludeOverblow(hole.hole)
     ) {
       candidates.push({ hole: hole.hole, technique: 'overblow', pc: hole.overblow, midi: hole.overblowMidi });
@@ -127,7 +125,7 @@ export function buildTabsForScale(
     if (
       hole.overdraw !== undefined &&
       hole.overdrawMidi !== undefined &&
-      scalePcs.has(hole.overdraw) &&
+      pcs.has(hole.overdraw) &&
       shouldIncludeOverdraw(hole.hole)
     ) {
       candidates.push({ hole: hole.hole, technique: 'overdraw', pc: hole.overdraw, midi: hole.overdrawMidi });
@@ -139,12 +137,13 @@ export function buildTabsForScale(
         tab: formatTab(candidate, notation),
         pc,
         midi: candidate.midi,
-        isRoot: pc === normalizePc(selection.rootPc),
+        isRoot: pc === normalizePc(rootPc),
         hole: candidate.hole,
         technique: candidate.technique,
       });
     });
   });
+
   const grouped = new Map<number, TabToken[]>();
   tabs.forEach((token) => {
     const entry = grouped.get(token.midi);
@@ -165,14 +164,25 @@ export function buildTabsForScale(
         if (a.hole !== b.hole) return a.hole - b.hole;
         return a.tab.localeCompare(b.tab);
       });
-      const pc = sorted[0]?.pc ?? normalizePc(selection.rootPc);
+      const pc = sorted[0]?.pc ?? normalizePc(rootPc);
       return {
         pc,
         midi,
-        isRoot: pc === normalizePc(selection.rootPc),
+        isRoot: pc === normalizePc(rootPc),
         options: sorted,
       } satisfies TabGroup;
     });
+}
+
+export function buildTabsForScale(
+  selection: ScaleSelection,
+  harmonicaPc: number,
+  notation: OverbendNotation,
+): TabGroup[] {
+  const scaleDef = getScaleDef(selection.scaleId);
+  if (!scaleDef) return [];
+  const scalePcs = getScalePcs(selection.rootPc, selection.scaleId);
+  return buildTabsForPcSet(scalePcs, selection.rootPc, harmonicaPc, notation);
 }
 
 function getTechniqueRank(technique: TabToken['technique']): number {
