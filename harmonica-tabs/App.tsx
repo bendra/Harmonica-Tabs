@@ -170,6 +170,7 @@ export default function App() {
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
   const holdMs = 400;
+  const toneToleranceCents = 10;
 
   useEffect(() => {
     detectorRef.current = createWebAudioPitchDetector();
@@ -291,6 +292,8 @@ export default function App() {
   const midis = groups.map((group) => group.midi);
   const pitchMatch = isListening && frequency ? matchFrequencyToTabs(midis, frequency, 25) : null;
   const caretPos = mainSelected ? getCaretPosition(pitchMatch, tabLayouts) : null;
+  const mainInTune =
+    pitchMatch !== null && Math.abs(pitchMatch.centsOffset) <= toneToleranceCents;
   const activeTab = pitchMatch ? selectedTabs[pitchMatch.activeIndex] : null;
   const effectiveConfidence = listenSource === 'web' ? detectedConfidence : frequency ? 1 : 0;
   const statusText = isListening
@@ -472,6 +475,7 @@ export default function App() {
                   <View
                     style={[
                       styles.tabCaret,
+                      mainInTune && styles.tabCaretInTune,
                       { left: caretPos.left, top: caretPos.top, width: caretSize, height: caretSize },
                     ]}
                   />
@@ -575,6 +579,8 @@ export default function App() {
                         const rowCaretPos = rowSelected
                           ? getCaretPosition(rowMatch, arpeggioLayouts[item.id] ?? [])
                           : null;
+                        const rowInTune =
+                          rowMatch !== null && Math.abs(rowMatch.centsOffset) <= toneToleranceCents;
                         return (
                           <Pressable
                             key={item.id}
@@ -604,6 +610,7 @@ export default function App() {
                                     <View
                                       style={[
                                         styles.tabCaret,
+                                        rowInTune && styles.tabCaretInTune,
                                         {
                                           left: rowCaretPos.left,
                                           top: rowCaretPos.top,
@@ -1094,8 +1101,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 999,
     borderWidth: 2,
-    borderColor: '#38bdf8',
-    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderColor: 'rgba(56, 189, 248, 0.45)',
+    backgroundColor: 'rgba(56, 189, 248, 0.06)',
     zIndex: 3,
+  },
+  tabCaretInTune: {
+    borderColor: '#16e05d',
+    backgroundColor: 'rgba(22, 224, 93, 0.4)',
+    shadowColor: '#16e05d',
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
   },
 });

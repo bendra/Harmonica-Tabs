@@ -15,6 +15,7 @@ Use this document to capture implementation decisions and rationale.
 
 4. Frequency-to-tab mapping details (tolerance, tie-breaking, between-tabs behavior):
    - Answer: Place the caret between the two neighboring tabs by pitch and position it proportionally using cents (log frequency), not linear Hz. If the detected frequency falls between `f_low` and `f_high`, compute `t = (c - c_low) / (c_high - c_low)` where `c = 1200 * log2(f / 440) + 6900`, and place the caret at `t` between those two chips. If below/above the displayed range, pin to the ends. If multiple tabs share a pitch, treat them as one stop for caret placement.
+   - Visual in-tune threshold: If the detected pitch is within +/-10 cents of the matched row note, the floating circle turns bright green.
 
 5. UI indicator for “between tabs” (e.g., floating caret):
    - Answer: Floating caret
