@@ -1,4 +1,17 @@
+# Default build settings used for production deploys (usually from `main`).
 [build]
+  base = "harmonica-tabs"
+  command = "npm run build:netlify"
+  publish = "dist"
+
+# Applied to branch deploy previews unless a branch-specific context overrides it.
+[context.branch-deploy]
+  base = "harmonica-tabs"
+  command = "npm run build:netlify"
+  publish = "dist"
+
+# Optional explicit branch context for the experimental tone-recognition branch.
+[context."tone-recognition"]
   base = "harmonica-tabs"
   command = "npm run build:netlify"
   publish = "dist"
