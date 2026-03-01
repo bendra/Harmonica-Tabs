@@ -495,6 +495,7 @@ export default function App() {
                         });
                       }}
                       onPress={() => {
+                        setMainSelected((prev) => !prev);
                         if (group.options.length > 1) {
                           cycleAlt(scale, group);
                         }
@@ -578,53 +579,54 @@ export default function App() {
                                 {item.label} · {formatNotes(item.orderedPcs, item.rootPc)}
                               </Text>
                             </View>
-                            {tabTokens.length === 0 ? (
-                              <Text style={styles.arpeggioTabs}>No tabs available.</Text>
-                            ) : (
-                              <View style={styles.arpeggioTabList}>
-                                {rowCaretPos !== null && (
-                                  <View
-                                    style={[
-                                      styles.tabCaret,
-                                      {
-                                        left: rowCaretPos.left,
-                                        top: rowCaretPos.top,
-                                        width: caretSize,
-                                        height: caretSize,
-                                      },
-                                    ]}
-                                  />
-                                )}
-                                {tabTokens.map((token, index) => (
-                                  <View
-                                    key={`${item.id}:tab:${index}`}
-                                    onLayout={(event) => {
-                                      const { x, y, width, height } = event.nativeEvent.layout;
-                                      setArpeggioLayouts((prev) => {
-                                        const next = { ...prev };
-                                        const row = [...(next[item.id] ?? [])];
-                                        row[index] = { x, y, width, height };
-                                        next[item.id] = row;
-                                        return next;
-                                      });
-                                    }}
-                                    style={[
-                                      styles.arpeggioTabChip,
-                                      token.isRoot && styles.arpeggioTabChipRoot,
-                                    ]}
-                                  >
-                                    <Text
+                            {rowSelected &&
+                              (tabTokens.length === 0 ? (
+                                <Text style={styles.arpeggioTabs}>No tabs available.</Text>
+                              ) : (
+                                <View style={styles.arpeggioTabList}>
+                                  {rowCaretPos !== null && (
+                                    <View
                                       style={[
-                                        styles.arpeggioTabText,
-                                        token.isRoot && styles.arpeggioTabTextRoot,
+                                        styles.tabCaret,
+                                        {
+                                          left: rowCaretPos.left,
+                                          top: rowCaretPos.top,
+                                          width: caretSize,
+                                          height: caretSize,
+                                        },
+                                      ]}
+                                    />
+                                  )}
+                                  {tabTokens.map((token, index) => (
+                                    <View
+                                      key={`${item.id}:tab:${index}`}
+                                      onLayout={(event) => {
+                                        const { x, y, width, height } = event.nativeEvent.layout;
+                                        setArpeggioLayouts((prev) => {
+                                          const next = { ...prev };
+                                          const row = [...(next[item.id] ?? [])];
+                                          row[index] = { x, y, width, height };
+                                          next[item.id] = row;
+                                          return next;
+                                        });
+                                      }}
+                                      style={[
+                                        styles.arpeggioTabChip,
+                                        token.isRoot && styles.arpeggioTabChipRoot,
                                       ]}
                                     >
-                                      {token.tab}
-                                    </Text>
-                                  </View>
-                                ))}
-                              </View>
-                            )}
+                                      <Text
+                                        style={[
+                                          styles.arpeggioTabText,
+                                          token.isRoot && styles.arpeggioTabTextRoot,
+                                        ]}
+                                      >
+                                        {token.tab}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              ))}
                           </Pressable>
                         );
                       })
