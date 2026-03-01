@@ -465,7 +465,7 @@ export default function App() {
                 </Text>
               </View>
             </Pressable>
-            {groups.length === 0 ? (
+            {!mainSelected ? null : groups.length === 0 ? (
               <Text style={styles.resultTabs}>No tabs available.</Text>
             ) : (
               <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.tabGroupList}>
