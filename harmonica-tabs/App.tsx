@@ -467,7 +467,7 @@ export default function App() {
             {!mainSelected ? null : groups.length === 0 ? (
               <Text style={styles.resultTabs}>No tabs available.</Text>
             ) : (
-              <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.tabGroupList}>
+              <View style={styles.tabGroupList}>
                 {caretPos !== null && (
                   <View
                     style={[
@@ -495,16 +495,19 @@ export default function App() {
                       }}
                       onPress={() => {
                         setMainSelected((prev) => !prev);
-                        if (group.options.length > 1) {
-                          cycleAlt(scale, group);
-                        }
                       }}
                       style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
                     >
                       {hasGAlt && (
-                        <View pointerEvents="none" style={styles.tabAltIcon}>
+                        <Pressable
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            cycleAlt(scale, group);
+                          }}
+                          style={styles.tabAltIcon}
+                        >
                           <Text style={styles.tabAltIconText}>alt</Text>
-                        </View>
+                        </Pressable>
                       )}
                       <Text
                         style={[
@@ -518,7 +521,7 @@ export default function App() {
                     </Pressable>
                   );
                 })}
-              </Pressable>
+              </View>
             )}
             {arpeggioSections.length > 0 && (
               <View style={styles.arpeggioSection}>
@@ -542,10 +545,24 @@ export default function App() {
                             const selectedIndex = altSelections[key] ?? 0;
                             const option = group.options[selectedIndex] ?? group.options[0];
                             return option
-                              ? { tab: option.tab, isRoot: group.isRoot, midi: group.midi }
+                              ? {
+                                  tab: option.tab,
+                                  isRoot: group.isRoot,
+                                  midi: group.midi,
+                                  hasGAlt:
+                                    group.options.some((token) => token.tab === '-2') &&
+                                    group.options.some((token) => token.tab === '3'),
+                                  group,
+                                }
                               : null;
                           })
-                          .filter(Boolean) as Array<{ tab: string; isRoot: boolean; midi: number }>;
+                          .filter(Boolean) as Array<{
+                            tab: string;
+                            isRoot: boolean;
+                            midi: number;
+                            hasGAlt: boolean;
+                            group: TabGroup;
+                          }>;
                         const rowSelected = arpeggioItemSelected[item.id] ?? false;
                         const rowMatch =
                           isListening && frequency && rowSelected
@@ -614,6 +631,17 @@ export default function App() {
                                         token.isRoot && styles.arpeggioTabChipRoot,
                                       ]}
                                     >
+                                      {token.hasGAlt && (
+                                        <Pressable
+                                          onPress={(event) => {
+                                            event.stopPropagation?.();
+                                            cycleAlt(scale, token.group);
+                                          }}
+                                          style={styles.tabAltIcon}
+                                        >
+                                          <Text style={styles.tabAltIconText}>alt</Text>
+                                        </Pressable>
+                                      )}
                                       <Text
                                         style={[
                                           styles.arpeggioTabText,
