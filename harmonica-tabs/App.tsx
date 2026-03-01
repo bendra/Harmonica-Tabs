@@ -24,21 +24,20 @@ function formatScaleLabel(rootPc: number, scaleId: string, preferFlats: boolean)
   return `${rootName} ${scale ? scale.name : 'Scale'}`;
 }
 
-function buildScaleKeyOptions(preferFlats: boolean): NoteName[] {
-  return [
-    'C',
-    preferFlats ? 'Db' : 'C#',
-    'D',
-    preferFlats ? 'Eb' : 'D#',
-    'E',
-    'F',
-    preferFlats ? 'Gb' : 'F#',
-    'G',
-    preferFlats ? 'Ab' : 'G#',
-    'A',
-    preferFlats ? 'Bb' : 'A#',
-    'B',
-  ];
+type ScaleKeyOption = {
+  position: number;
+  note: NoteName;
+};
+
+function buildScaleKeyOptions(harmonicaPc: number, preferFlats: boolean): ScaleKeyOption[] {
+  return Array.from({ length: 12 }, (_, index) => {
+    const position = index + 1;
+    const rootPc = (harmonicaPc + index * 7) % 12;
+    return {
+      position,
+      note: pcToNote(rootPc, preferFlats),
+    };
+  });
 }
 
 type DropdownOption<T> = {
@@ -213,12 +212,12 @@ export default function App() {
   }, [scale.rootPc, scale.scaleId, harmonicaKey.label, notation, groups.length]);
 
   const scaleKeyOptions = useMemo(
-    () => buildScaleKeyOptions(harmonicaKey.preferFlats),
-    [harmonicaKey.preferFlats],
+    () => buildScaleKeyOptions(harmonicaKey.pc, harmonicaKey.preferFlats),
+    [harmonicaKey.pc, harmonicaKey.preferFlats],
   );
 
   const scaleKeyDropdownOptions = useMemo<DropdownOption<NoteName>[]>(
-    () => scaleKeyOptions.map((note) => ({ label: note, value: note })),
+    () => scaleKeyOptions.map(({ position, note }) => ({ label: `${position} - ${note}`, value: note })),
     [scaleKeyOptions],
   );
 
@@ -384,7 +383,7 @@ export default function App() {
         <View style={styles.scalePickerRow}>
           <View style={styles.scalePickerColumn}>
             <Dropdown
-              label="Scale Key"
+              label="Scale Position/Key"
               value={scaleRoot}
               options={scaleKeyDropdownOptions}
               onChange={setScaleRoot}
