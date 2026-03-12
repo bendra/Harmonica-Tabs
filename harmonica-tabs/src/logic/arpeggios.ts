@@ -1,8 +1,14 @@
 import { SCALE_DEFINITIONS } from '../data/scales';
 import { normalizePc } from '../data/notes';
 
+/**
+ * Supported arpeggio section families.
+ */
 export type ArpeggioKind = 'triads' | 'sevenths' | 'blues';
 
+/**
+ * One generated arpeggio/chord option for display and tab rendering.
+ */
 export type ArpeggioSpec = {
   id: string;
   label: string;
@@ -12,6 +18,9 @@ export type ArpeggioSpec = {
   kind: ArpeggioKind;
 };
 
+/**
+ * UI section grouping arpeggios of a single kind.
+ */
 export type ArpeggioSection = {
   id: ArpeggioKind;
   title: string;
@@ -20,11 +29,17 @@ export type ArpeggioSection = {
   items: ArpeggioSpec[];
 };
 
+/**
+ * Converts a scale degree number to a Roman numeral label.
+ */
 function romanNumeral(index: number): string {
   const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
   return numerals[index - 1] ?? `${index}`;
 }
 
+/**
+ * Identifies basic triad quality from root-relative intervals.
+ */
 function triadQuality(intervals: number[]): string {
   const third = intervals[1];
   const fifth = intervals[2];
@@ -35,6 +50,9 @@ function triadQuality(intervals: number[]): string {
   return 'other';
 }
 
+/**
+ * Identifies common seventh-chord quality from root-relative intervals.
+ */
 function seventhQuality(intervals: number[]): string {
   const third = intervals[1];
   const fifth = intervals[2];
@@ -47,10 +65,16 @@ function seventhQuality(intervals: number[]): string {
   return 'other7';
 }
 
+/**
+ * Applies intervals to a root pitch class and normalizes to 0-11.
+ */
 function intervalsToPcs(rootPc: number, intervals: number[]): number[] {
   return intervals.map((interval) => normalizePc(rootPc + interval));
 }
 
+/**
+ * Builds diatonic triads from a scale interval list.
+ */
 function buildDiatonicTriads(rootPc: number, intervals: number[]): ArpeggioSpec[] {
   const count = intervals.length;
   return intervals.map((interval, index) => {
@@ -79,6 +103,9 @@ function buildDiatonicTriads(rootPc: number, intervals: number[]): ArpeggioSpec[
   });
 }
 
+/**
+ * Builds diatonic seventh chords when the selected scale has 7 notes.
+ */
 function buildDiatonicSevenths(rootPc: number, intervals: number[]): ArpeggioSpec[] {
   if (intervals.length < 7) return [];
   const count = intervals.length;
@@ -110,6 +137,9 @@ function buildDiatonicSevenths(rootPc: number, intervals: number[]): ArpeggioSpe
   });
 }
 
+/**
+ * Returns a simple I-IV-V dominant blues chord set.
+ */
 function buildCommonBluesChords(rootPc: number): ArpeggioSpec[] {
   const roots = [
     { label: 'I7', offset: 0 },
@@ -130,6 +160,9 @@ function buildCommonBluesChords(rootPc: number): ArpeggioSpec[] {
   });
 }
 
+/**
+ * Builds requested arpeggio sections for the active scale/root.
+ */
 export function buildArpeggioSections(
   rootPc: number,
   scaleId: string,

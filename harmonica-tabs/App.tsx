@@ -16,19 +16,29 @@ import { noteToPc, pcToNote, NoteName } from './src/data/notes';
 import { buildArpeggioSections } from './src/logic/arpeggios';
 import { buildTabsForPcSet, buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from './src/logic/tabs';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
+import { transposeTabText } from './src/logic/transposer';
 import { createWebAudioPitchDetector } from './src/logic/web-audio';
 
+/**
+ * Human-readable label for the active scale selection.
+ */
 function formatScaleLabel(rootPc: number, scaleId: string, preferFlats: boolean): string {
   const scale = SCALE_DEFINITIONS.find((item) => item.id === scaleId);
   const rootName = pcToNote(rootPc, preferFlats);
   return `${rootName} ${scale ? scale.name : 'Scale'}`;
 }
 
+/**
+ * Key option metadata derived from harmonica position playing.
+ */
 type ScaleKeyOption = {
   position: number;
   note: NoteName;
 };
 
+/**
+ * Builds the 12 position-playing key options for the selected harmonica.
+ */
 function buildScaleKeyOptions(harmonicaPc: number, preferFlats: boolean): ScaleKeyOption[] {
   return Array.from({ length: 12 }, (_, index) => {
     const position = index + 1;
@@ -50,6 +60,11 @@ type SingleSelectOption<T extends string> = {
   value: T;
 };
 
+type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
+
+/**
+ * Reusable single-value dropdown rendered with a modal menu.
+ */
 function Dropdown<T extends string | number>(props: {
   label: string;
   value: T;
@@ -115,6 +130,9 @@ function Dropdown<T extends string | number>(props: {
   );
 }
 
+/**
+ * Toggle-style single select list used for arpeggio mode selection.
+ */
 function SingleSelectGroup<T extends string>(props: {
   label: string;
   options: SingleSelectOption<T>[];
@@ -144,15 +162,20 @@ function SingleSelectGroup<T extends string>(props: {
   );
 }
 
+/**
+ * Main app screen for harmonica scale, arpeggio, and pitch-tracking views.
+ */
 export default function App() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = Math.min(width, height) < 420;
+  const [screen, setScreen] = useState<'main' | 'properties'>('main');
   const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
+  const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
+  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>('-2');
   const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(null);
   const [scaleRoot, setScaleRoot] = useState<NoteName>('C');
   const [scaleId, setScaleId] = useState<string>(SCALE_DEFINITIONS[0].id);
-  const [altSelections, setAltSelections] = useState<Record<string, number>>({});
   const [isListening, setIsListening] = useState(false);
   const [simFrequency, setSimFrequency] = useState('440');
   const [detectedFrequency, setDetectedFrequency] = useState<number | null>(null);
@@ -160,6 +183,9 @@ export default function App() {
   const [detectedRms, setDetectedRms] = useState(0);
   const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [pagerIndex, setPagerIndex] = useState(0);
+  const [transposerInput, setTransposerInput] = useState('');
+  const [transposerDirection, setTransposerDirection] = useState<'up' | 'down'>('down');
   const [listenError, setListenError] = useState<string | null>(null);
   const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
@@ -168,6 +194,7 @@ export default function App() {
   >({});
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
+  const pagerRef = useRef<ScrollView>(null);
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
   const holdMs = 400;
   const toneToleranceCents = 10;
@@ -190,12 +217,8 @@ export default function App() {
   );
 
   const selectedTabs = useMemo(() => {
-    return groups.map((group) => {
-      const key = getAltKey(scale, group);
-      const selectedIndex = altSelections[key] ?? 0;
-      return group.options[selectedIndex] ?? group.options[0];
-    });
-  }, [groups, altSelections, scale]);
+    return groups.map((group) => getPreferredTabOption(group));
+  }, [groups, gAltPreference]);
 
   const arpeggioSections = useMemo(
     () =>
@@ -217,29 +240,89 @@ export default function App() {
     [harmonicaKey.pc, harmonicaKey.preferFlats],
   );
 
+  const visibleScaleKeyOptions = useMemo(() => {
+    if (positionKeyFilter === 'all') return scaleKeyOptions;
+    if (positionKeyFilter === '1-2-3') {
+      return scaleKeyOptions.filter((option) => option.position <= 3);
+    }
+    return scaleKeyOptions.filter((option) => option.position <= 3 || option.position === 5);
+  }, [scaleKeyOptions, positionKeyFilter]);
+
   const scaleKeyDropdownOptions = useMemo<DropdownOption<NoteName>[]>(
-    () => scaleKeyOptions.map(({ position, note }) => ({ label: `${position} - ${note}`, value: note })),
-    [scaleKeyOptions],
+    () => visibleScaleKeyOptions.map(({ position, note }) => ({ label: `${position} - ${note}`, value: note })),
+    [visibleScaleKeyOptions],
   );
 
   const scaleNameDropdownOptions = useMemo<DropdownOption<string>[]>(
     () => SCALE_DEFINITIONS.map((scale) => ({ label: scale.name, value: scale.id })),
     [],
   );
+  const pageWidth = Math.max(width - 40, 280);
+  const targetPosition = scaleKeyOptions.find((option) => option.note === scaleRoot)?.position ?? 1;
 
-  function getAltKey(scale: ScaleSelection, group: TabGroup): string {
-    return `${scale.rootPc}:${scale.scaleId}:${group.midi}`;
+  const transposerDownResult = useMemo(
+    () =>
+      transposeTabText({
+        input: transposerInput,
+        sourceHarmonicaPc: harmonicaKey.pc,
+        targetRootPc: scale.rootPc,
+        notation,
+        altPreference: gAltPreference,
+        direction: 'down',
+      }),
+    [transposerInput, harmonicaKey.pc, scale.rootPc, notation, gAltPreference],
+  );
+  const transposerUpResult = useMemo(
+    () =>
+      transposeTabText({
+        input: transposerInput,
+        sourceHarmonicaPc: harmonicaKey.pc,
+        targetRootPc: scale.rootPc,
+        notation,
+        altPreference: gAltPreference,
+        direction: 'up',
+      }),
+    [transposerInput, harmonicaKey.pc, scale.rootPc, notation, gAltPreference],
+  );
+  const defaultDirection: 'up' | 'down' =
+    transposerDownResult.unavailableCount === 0
+      ? 'down'
+      : transposerUpResult.unavailableCount === 0
+        ? 'up'
+        : 'down';
+
+  useEffect(() => {
+    if (scaleKeyDropdownOptions.some((option) => option.value === scaleRoot)) return;
+    const nextOption = scaleKeyDropdownOptions[0];
+    if (nextOption) {
+      setScaleRoot(nextOption.value);
+    }
+  }, [scaleKeyDropdownOptions, scaleRoot]);
+  const transposerResult = transposerDirection === 'down' ? transposerDownResult : transposerUpResult;
+  const pagerTabs = [
+    { page: 0 as const, label: 'Visualizer' },
+    { page: 1 as const, label: 'Transposer' },
+  ];
+
+  useEffect(() => {
+    setTransposerDirection(defaultDirection);
+  }, [defaultDirection]);
+
+  /**
+   * Applies the global -2/3 preference when both choices exist for a tab group.
+   */
+  function getPreferredTabOption(group: TabGroup) {
+    const hasMinusTwo = group.options.some((token) => token.tab === '-2');
+    const hasThree = group.options.some((token) => token.tab === '3');
+    if (hasMinusTwo && hasThree) {
+      return group.options.find((token) => token.tab === gAltPreference) ?? group.options[0];
+    }
+    return group.options[0];
   }
 
-  function cycleAlt(scale: ScaleSelection, group: TabGroup) {
-    const key = getAltKey(scale, group);
-    setAltSelections((prev) => {
-      const current = prev[key] ?? 0;
-      const next = (current + 1) % group.options.length;
-      return { ...prev, [key]: next };
-    });
-  }
-
+  /**
+   * Renders an ordered note list with the root visually emphasized.
+   */
   function formatNotes(pcs: number[], rootPc: number) {
     return pcs.map((pc, index) => (
       <Text key={`${pc}:${index}`} style={pc === rootPc ? styles.arpeggioNotesRoot : undefined}>
@@ -250,6 +333,9 @@ export default function App() {
 
   const caretSize = 18;
 
+  /**
+   * Computes the caret position between neighboring tab elements from pitch match interpolation.
+   */
   function getCaretPosition(
     match: TabPitchMatch | null,
     layouts: Array<{ x: number; y: number; width: number; height: number }>,
@@ -304,6 +390,9 @@ export default function App() {
         : 'No signal'
     : 'Off';
 
+  /**
+   * Starts microphone/sim listening and wires detector updates into state.
+   */
   async function startListening() {
     setListenError(null);
     setDetectedFrequency(null);
@@ -331,6 +420,9 @@ export default function App() {
     setIsListening(true);
   }
 
+  /**
+   * Stops listening and clears detector-related state.
+   */
   function stopListening() {
     detectorRef.current?.stop();
     setIsListening(false);
@@ -344,333 +436,455 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Harmonica Scale Visualizer</Text>
-
-        <View style={styles.topRow}>
-          <View style={styles.topRowKey}>
-            <Dropdown
-              label="Harmonica key"
-              value={harmonicaKey.label}
-              options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
-              onChange={(label) => {
-                const key = HARMONICA_KEYS.find((item) => item.label === label);
-                if (key) setHarmonicaKey(key);
-              }}
-            />
-          </View>
-          <View style={styles.topRowToggle}>
-            <Dropdown
-              label="Overbend Symbol"
-              value={notation}
-              options={[
-                { label: "'", value: 'apostrophe' },
-                { label: '°', value: 'degree' },
-              ]}
-              onChange={(value) => setNotation(value as OverbendNotation)}
-            />
-          </View>
-          <View style={styles.topRowToggle}>
-            <SingleSelectGroup
-              label="Arpeggios"
-              value={arpeggioSelection}
-              options={[
-                { label: 'Triads', value: 'triads' },
-                { label: '7th', value: 'sevenths' },
-                { label: 'Common Blues Chords', value: 'blues' },
-              ]}
-              onChange={setArpeggioSelection}
-            />
-          </View>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>{screen === 'main' ? 'Harmonica Scale Visualizer' : 'Properties'}</Text>
+          <Pressable
+            onPress={() => setScreen((prev) => (prev === 'main' ? 'properties' : 'main'))}
+            style={styles.gearButton}
+          >
+            <Text style={styles.gearButtonText}>{screen === 'main' ? '⚙' : '←'}</Text>
+          </Pressable>
         </View>
 
-        <View style={styles.scalePickerRow}>
-          <View style={styles.scalePickerColumn}>
-            <Dropdown
-              label="Scale Position/Key"
-              value={scaleRoot}
-              options={scaleKeyDropdownOptions}
-              onChange={setScaleRoot}
-            />
+        {screen === 'properties' ? (
+          <View style={styles.propertiesCard}>
+            <Text style={styles.propertiesTitle}>Display</Text>
+            <View style={styles.propertiesField}>
+              <Dropdown
+                label="Overbend Symbol"
+                value={notation}
+                options={[
+                  { label: "'", value: 'apostrophe' },
+                  { label: '°', value: 'degree' },
+                ]}
+                onChange={(value) => setNotation(value as OverbendNotation)}
+              />
+            </View>
+            <View style={styles.propertiesField}>
+              <Dropdown
+                label="Position/Key Set"
+                value={positionKeyFilter}
+                options={[
+                  { label: '1, 2, 3', value: '1-2-3' },
+                  { label: '1, 2, 3, 5', value: '1-2-3-5' },
+                  { label: 'all', value: 'all' },
+                ]}
+                onChange={(value) => setPositionKeyFilter(value as PositionKeyFilter)}
+              />
+            </View>
+            <View style={styles.propertiesField}>
+              <Dropdown
+                label="2 Draw / 3 Blow Preference"
+                value={gAltPreference}
+                options={[
+                  { label: '-2', value: '-2' },
+                  { label: '3', value: '3' },
+                ]}
+                onChange={(value) => setGAltPreference(value as '-2' | '3')}
+              />
+            </View>
+            <View style={styles.propertiesRow}>
+              <Pressable
+                onPress={() => setShowDebug((prev) => !prev)}
+                style={[styles.debugToggle, showDebug && styles.debugToggleActive]}
+              >
+                <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
+              </Pressable>
+            </View>
           </View>
-          <View style={styles.scalePickerColumn}>
-            <Dropdown
-              label="Scale Name"
-              value={scaleId}
-              options={scaleNameDropdownOptions}
-              onChange={setScaleId}
-            />
-          </View>
-        </View>
-
-        <View style={styles.listenCard}>
-          <View style={styles.listenRow}>
-            <Pressable
-              onPress={() => {
-                if (isListening) {
-                  stopListening();
-                } else {
-                  startListening();
-                }
-              }}
-              style={[styles.listenButton, isListening && styles.listenButtonActive]}
-            >
-              <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
-                {isListening ? 'Stop' : 'Listen'}
-              </Text>
-            </Pressable>
-            <Text style={styles.listenValue}>{statusText}</Text>
-            <Pressable onPress={() => setShowDebug((prev) => !prev)} style={styles.debugToggle}>
-              <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
-            </Pressable>
-          </View>
-          {showDebug && (
-            <View style={styles.debugPanel}>
-              <Text style={styles.debugText}>
-                RMS: {detectedRms.toFixed(4)} · Conf: {detectedConfidence.toFixed(2)} · Hz:{' '}
-                {detectedFrequency ? detectedFrequency.toFixed(1) : '—'}
-              </Text>
-              <Text style={styles.debugText}>
-                Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Hold: {holdMs}ms
-              </Text>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>Source</Text>
-                <Text style={styles.debugTextInline}>
-                  {listenSource === 'web'
-                    ? 'Mic input (web)'
-                    : listenSource === 'sim'
-                      ? 'Simulated Hz (fallback)'
-                      : '—'}
-                </Text>
+        ) : (
+          <>
+            <View style={styles.topRow}>
+              <View style={styles.topRowKey}>
+                <Dropdown
+                  label="Harmonica key"
+                  value={harmonicaKey.label}
+                  options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
+                  onChange={(label) => {
+                    const key = HARMONICA_KEYS.find((item) => item.label === label);
+                    if (key) setHarmonicaKey(key);
+                  }}
+                />
               </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>Sim Hz</Text>
-                <TextInput
-                  value={simFrequency}
-                  onChangeText={setSimFrequency}
-                  keyboardType="numeric"
-                  style={styles.debugInput}
-                  placeholder="440"
-                  placeholderTextColor="#64748b"
+              <View style={styles.topRowKey}>
+                <Dropdown
+                  label="Target Position/Key"
+                  value={scaleRoot}
+                  options={scaleKeyDropdownOptions}
+                  onChange={setScaleRoot}
                 />
               </View>
             </View>
-          )}
-        </View>
 
-        <View style={styles.resultsList}>
-          <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={styles.resultRow}>
-            <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.resultHeader}>
-              <View style={styles.checkboxRow}>
-                <Text style={styles.checkbox}>{mainSelected ? '☑' : '☐'}</Text>
-                <Text style={styles.resultTitle}>
-                  {formatScaleLabel(scale.rootPc, scale.scaleId, harmonicaKey.preferFlats)}
-                </Text>
-              </View>
-            </Pressable>
-            {!mainSelected ? null : groups.length === 0 ? (
-              <Text style={styles.resultTabs}>No tabs available.</Text>
-            ) : (
-              <View style={styles.tabGroupList}>
-                {caretPos !== null && (
-                  <View
-                    style={[
-                      styles.tabCaret,
-                      mainInTune && styles.tabCaretInTune,
-                      { left: caretPos.left, top: caretPos.top, width: caretSize, height: caretSize },
-                    ]}
-                  />
-                )}
-                {groups.map((group, index) => {
-                  const key = getAltKey(scale, group);
-                  const option = selectedTabs[index];
-                  const hasGAlt =
-                    group.options.some((token) => token.tab === '-2') &&
-                    group.options.some((token) => token.tab === '3');
+            <View style={styles.pagerShell}>
+              <ScrollView
+                ref={pagerRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={(event) => {
+                  const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+                  const boundedPage = nextPage <= 0 ? 0 : 1;
+                  setPagerIndex((prev) => (prev === boundedPage ? prev : boundedPage));
+                }}
+                onMomentumScrollEnd={(event) => {
+                  const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+                  setPagerIndex(nextPage === 0 ? 0 : 1);
+                }}
+              >
+                <View style={[styles.pagerPage, { width: pageWidth }]}>
+                  <View style={styles.pageOneHeader}>
+                    <View style={styles.scalePickerColumn}>
+                      <Dropdown
+                        label="Scale Name"
+                        value={scaleId}
+                        options={scaleNameDropdownOptions}
+                        onChange={setScaleId}
+                      />
+                    </View>
+                    <View style={styles.topRowToggle}>
+                      <SingleSelectGroup
+                        label="Arpeggios"
+                        value={arpeggioSelection}
+                        options={[
+                          { label: 'Triads', value: 'triads' },
+                          { label: '7th', value: 'sevenths' },
+                          { label: 'Blues', value: 'blues' },
+                        ]}
+                        onChange={setArpeggioSelection}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.listenCard}>
+                    <View style={styles.listenRow}>
+                      <Pressable
+                        onPress={() => {
+                          if (isListening) {
+                            stopListening();
+                          } else {
+                            startListening();
+                          }
+                        }}
+                        style={[styles.listenButton, isListening && styles.listenButtonActive]}
+                      >
+                        <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
+                          {isListening ? 'Stop' : 'Listen'}
+                        </Text>
+                      </Pressable>
+                      <Text style={styles.listenValue}>{statusText}</Text>
+                    </View>
+                    {showDebug && (
+                      <View style={styles.debugPanel}>
+                        <Text style={styles.debugPanelLabel}>Debug Panel</Text>
+                        <Text style={styles.debugText}>
+                          RMS: {detectedRms.toFixed(4)} · Conf: {detectedConfidence.toFixed(2)} · Hz:{' '}
+                          {detectedFrequency ? detectedFrequency.toFixed(1) : '—'}
+                        </Text>
+                        <Text style={styles.debugText}>
+                          Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Hold: {holdMs}ms
+                        </Text>
+                        <View style={styles.debugRow}>
+                          <Text style={styles.debugLabel}>Source</Text>
+                          <Text style={styles.debugTextInline}>
+                            {listenSource === 'web'
+                              ? 'Mic input (web)'
+                              : listenSource === 'sim'
+                                ? 'Simulated Hz (fallback)'
+                                : '—'}
+                          </Text>
+                        </View>
+                        <View style={styles.debugRow}>
+                          <Text style={styles.debugLabel}>Sim Hz</Text>
+                          <TextInput
+                            value={simFrequency}
+                            onChangeText={setSimFrequency}
+                            keyboardType="numeric"
+                            style={styles.debugInput}
+                            placeholder="440"
+                            placeholderTextColor="#64748b"
+                          />
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.resultsList}>
+                    <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={styles.resultRow}>
+                      <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.resultHeader}>
+                        <View style={styles.checkboxRow}>
+                          <Text style={styles.checkbox}>{mainSelected ? '☑' : '☐'}</Text>
+                          <Text style={styles.resultTitle}>
+                            {formatScaleLabel(scale.rootPc, scale.scaleId, harmonicaKey.preferFlats)}
+                          </Text>
+                        </View>
+                      </Pressable>
+                      {!mainSelected ? null : groups.length === 0 ? (
+                        <Text style={styles.resultTabs}>No tabs available.</Text>
+                      ) : (
+                        <View style={styles.tabGroupList}>
+                          {caretPos !== null && (
+                            <View
+                              style={[
+                                styles.tabCaret,
+                                mainInTune && styles.tabCaretInTune,
+                                { left: caretPos.left, top: caretPos.top, width: caretSize, height: caretSize },
+                              ]}
+                            />
+                          )}
+                          {groups.map((group, index) => {
+                            const option = selectedTabs[index];
+                            return (
+                              <Pressable
+                                key={`${scale.rootPc}:${scale.scaleId}:${group.midi}`}
+                                onLayout={(event) => {
+                                  const { x, y, width, height } = event.nativeEvent.layout;
+                                  setTabLayouts((prev) => {
+                                    const next = [...prev];
+                                    next[index] = { x, y, width, height };
+                                    return next;
+                                  });
+                                }}
+                                onPress={() => {
+                                  setMainSelected((prev) => !prev);
+                                }}
+                                style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.resultTabs,
+                                    isSmallScreen && styles.resultTabsSmall,
+                                    option.isRoot && styles.resultTabsRoot,
+                                  ]}
+                                >
+                                  {option.tab}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      )}
+                      {arpeggioSections.length > 0 && (
+                        <View style={styles.arpeggioSection}>
+                          {arpeggioSections.map((section) => (
+                            <View key={`arp:${section.id}`} style={styles.arpeggioBlock}>
+                              <Text style={styles.arpeggioTitle}>{section.title}</Text>
+                              {section.note && <Text style={styles.arpeggioNote}>{section.note}</Text>}
+                              {section.items.length === 0 ? (
+                                <Text style={styles.arpeggioEmpty}>{section.emptyNote ?? 'None'}</Text>
+                              ) : (
+                                section.items.map((item) => {
+                                  const tabGroups = buildTabsForPcSet(
+                                    item.pcs,
+                                    item.rootPc,
+                                    harmonicaKey.pc,
+                                    notation,
+                                  );
+                                  const tabTokens = tabGroups
+                                    .map((group) => {
+                                      const option = getPreferredTabOption(group);
+                                      return option
+                                        ? {
+                                            tab: option.tab,
+                                            isRoot: group.isRoot,
+                                            midi: group.midi,
+                                          }
+                                        : null;
+                                    })
+                                    .filter(Boolean) as Array<{
+                                      tab: string;
+                                      isRoot: boolean;
+                                      midi: number;
+                                    }>;
+                                  const rowSelected = arpeggioItemSelected[item.id] ?? false;
+                                  const rowMatch =
+                                    isListening && frequency && rowSelected
+                                      ? matchFrequencyToTabs(
+                                          tabTokens.map((token) => token.midi),
+                                          frequency,
+                                          25,
+                                        )
+                                      : null;
+                                  const rowCaretPos = rowSelected
+                                    ? getCaretPosition(rowMatch, arpeggioLayouts[item.id] ?? [])
+                                    : null;
+                                  const rowInTune =
+                                    rowMatch !== null && Math.abs(rowMatch.centsOffset) <= toneToleranceCents;
+                                  return (
+                                    <Pressable
+                                      key={item.id}
+                                      onPress={(event) => {
+                                        event.stopPropagation?.();
+                                        setArpeggioItemSelected((prev) => ({
+                                          ...prev,
+                                          [item.id]: !(prev[item.id] ?? false),
+                                        }));
+                                      }}
+                                      style={styles.arpeggioRow}
+                                    >
+                                      <View style={styles.checkboxRow}>
+                                        <Text style={styles.checkbox}>
+                                          {arpeggioItemSelected[item.id] ? '☑' : '☐'}
+                                        </Text>
+                                        <Text style={styles.arpeggioLabel}>
+                                          {item.label} · {formatNotes(item.orderedPcs, item.rootPc)}
+                                        </Text>
+                                      </View>
+                                      {rowSelected &&
+                                        (tabTokens.length === 0 ? (
+                                          <Text style={styles.arpeggioTabs}>No tabs available.</Text>
+                                        ) : (
+                                          <View style={styles.arpeggioTabList}>
+                                            {rowCaretPos !== null && (
+                                              <View
+                                                style={[
+                                                  styles.tabCaret,
+                                                  rowInTune && styles.tabCaretInTune,
+                                                  {
+                                                    left: rowCaretPos.left,
+                                                    top: rowCaretPos.top,
+                                                    width: caretSize,
+                                                    height: caretSize,
+                                                  },
+                                                ]}
+                                              />
+                                            )}
+                                            {tabTokens.map((token, index) => (
+                                              <View
+                                                key={`${item.id}:tab:${index}`}
+                                                onLayout={(event) => {
+                                                  const { x, y, width, height } = event.nativeEvent.layout;
+                                                  setArpeggioLayouts((prev) => {
+                                                    const next = { ...prev };
+                                                    const row = [...(next[item.id] ?? [])];
+                                                    row[index] = { x, y, width, height };
+                                                    next[item.id] = row;
+                                                    return next;
+                                                  });
+                                                }}
+                                                style={[
+                                                  styles.arpeggioTabChip,
+                                                  token.isRoot && styles.arpeggioTabChipRoot,
+                                                ]}
+                                              >
+                                                <Text
+                                                  style={[
+                                                    styles.arpeggioTabValue,
+                                                    token.isRoot && styles.arpeggioTabValueRoot,
+                                                  ]}
+                                                >
+                                                  {token.tab}
+                                                </Text>
+                                              </View>
+                                            ))}
+                                          </View>
+                                        ))}
+                                    </Pressable>
+                                  );
+                                })
+                              )}
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={[styles.pagerPage, { width: pageWidth }]}>
+                  <View style={styles.transposerCard}>
+                    <Text style={styles.transposerTitle}>Tab Transposer</Text>
+                    <Text style={styles.transposerMeta}>
+                      Assumes pasted tabs are first position on a {harmonicaKey.label} harmonica.
+                    </Text>
+                    <Text style={styles.transposerMeta}>
+                      Target: position {targetPosition} ({pcToNote(scale.rootPc, harmonicaKey.preferFlats)})
+                    </Text>
+                    <TextInput
+                      style={styles.transposerInput}
+                      multiline
+                      value={transposerInput}
+                      onChangeText={setTransposerInput}
+                      placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
+                      placeholderTextColor="#64748b"
+                      textAlignVertical="top"
+                    />
+                    <View style={styles.transposerDirectionRow}>
+                      <Text style={styles.transposerSectionLabel}>Direction</Text>
+                      <View style={styles.transposerDirectionOptions}>
+                        <Pressable
+                          onPress={() => setTransposerDirection('down')}
+                          style={[
+                            styles.transposerDirectionOption,
+                            transposerDirection === 'down' && styles.transposerDirectionOptionActive,
+                          ]}
+                        >
+                          <Text style={styles.transposerDirectionText}>
+                            {transposerDirection === 'down' ? '◉' : '○'} Down
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => setTransposerDirection('up')}
+                          style={[
+                            styles.transposerDirectionOption,
+                            transposerDirection === 'up' && styles.transposerDirectionOptionActive,
+                          ]}
+                        >
+                          <Text style={styles.transposerDirectionText}>
+                            {transposerDirection === 'up' ? '◉' : '○'} Up
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    <Text style={styles.transposerSectionLabel}>Transposed Output</Text>
+                    <View style={styles.transposerOutputBox}>
+                      <Text style={styles.transposerOutputText}>
+                        {transposerInput.trim().length === 0
+                          ? 'Enter tabs above to generate a transposed tab.'
+                          : transposerResult.outputSegments.map((segment, index) => (
+                              <Text
+                                key={`out:${index}`}
+                                style={segment.kind === 'error' ? styles.transposerOutputError : undefined}
+                              >
+                                {segment.text}
+                              </Text>
+                            ))}
+                      </Text>
+                    </View>
+                    {transposerResult.warnings.length > 0 && (
+                      <View style={styles.transposerWarnings}>
+                        {transposerResult.warnings.map((warning, index) => (
+                          <Text key={`warning:${index}`} style={styles.transposerWarningText}>
+                            • {warning}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </ScrollView>
+
+              <View style={styles.pagerDotsRow}>
+                {pagerTabs.map((tab) => {
+                  const selected = pagerIndex === tab.page;
                   return (
                     <Pressable
-                      key={key}
-                      onLayout={(event) => {
-                        const { x, y, width, height } = event.nativeEvent.layout;
-                        setTabLayouts((prev) => {
-                          const next = [...prev];
-                          next[index] = { x, y, width, height };
-                          return next;
-                        });
-                      }}
+                      key={`dot:${tab.page}`}
                       onPress={() => {
-                        setMainSelected((prev) => !prev);
+                        setPagerIndex(tab.page);
+                        pagerRef.current?.scrollTo({ x: tab.page * pageWidth, animated: true });
                       }}
-                      style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
+                      style={[styles.pagerDot, selected && styles.pagerDotActive]}
                     >
-                      {hasGAlt && (
-                        <Pressable
-                          onPress={(event) => {
-                            event.stopPropagation?.();
-                            cycleAlt(scale, group);
-                          }}
-                          style={styles.tabAltIcon}
-                        >
-                          <Text style={styles.tabAltIconText}>alt</Text>
-                        </Pressable>
-                      )}
-                      <Text
-                        style={[
-                          styles.resultTabs,
-                          isSmallScreen && styles.resultTabsSmall,
-                          option.isRoot && styles.resultTabsRoot,
-                        ]}
-                      >
-                        {option.tab}
-                      </Text>
+                      <Text style={[styles.pagerDotText, selected && styles.pagerDotTextActive]}>{tab.label}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-            )}
-            {arpeggioSections.length > 0 && (
-              <View style={styles.arpeggioSection}>
-                {arpeggioSections.map((section) => (
-                  <View key={`arp:${section.id}`} style={styles.arpeggioBlock}>
-                    <Text style={styles.arpeggioTitle}>{section.title}</Text>
-                    {section.note && <Text style={styles.arpeggioNote}>{section.note}</Text>}
-                    {section.items.length === 0 ? (
-                      <Text style={styles.arpeggioEmpty}>{section.emptyNote ?? 'None'}</Text>
-                    ) : (
-                      section.items.map((item) => {
-                        const tabGroups = buildTabsForPcSet(
-                          item.pcs,
-                          item.rootPc,
-                          harmonicaKey.pc,
-                          notation,
-                        );
-                        const tabTokens = tabGroups
-                          .map((group) => {
-                            const key = getAltKey(scale, group);
-                            const selectedIndex = altSelections[key] ?? 0;
-                            const option = group.options[selectedIndex] ?? group.options[0];
-                            return option
-                              ? {
-                                  tab: option.tab,
-                                  isRoot: group.isRoot,
-                                  midi: group.midi,
-                                  hasGAlt:
-                                    group.options.some((token) => token.tab === '-2') &&
-                                    group.options.some((token) => token.tab === '3'),
-                                  group,
-                                }
-                              : null;
-                          })
-                          .filter(Boolean) as Array<{
-                            tab: string;
-                            isRoot: boolean;
-                            midi: number;
-                            hasGAlt: boolean;
-                            group: TabGroup;
-                          }>;
-                        const rowSelected = arpeggioItemSelected[item.id] ?? false;
-                        const rowMatch =
-                          isListening && frequency && rowSelected
-                            ? matchFrequencyToTabs(
-                                tabTokens.map((token) => token.midi),
-                                frequency,
-                                25,
-                              )
-                            : null;
-                        const rowCaretPos = rowSelected
-                          ? getCaretPosition(rowMatch, arpeggioLayouts[item.id] ?? [])
-                          : null;
-                        const rowInTune =
-                          rowMatch !== null && Math.abs(rowMatch.centsOffset) <= toneToleranceCents;
-                        return (
-                          <Pressable
-                            key={item.id}
-                            onPress={(event) => {
-                              event.stopPropagation?.();
-                              setArpeggioItemSelected((prev) => ({
-                                ...prev,
-                                [item.id]: !(prev[item.id] ?? false),
-                              }));
-                            }}
-                            style={styles.arpeggioRow}
-                          >
-                            <View style={styles.checkboxRow}>
-                              <Text style={styles.checkbox}>
-                                {arpeggioItemSelected[item.id] ? '☑' : '☐'}
-                              </Text>
-                              <Text style={styles.arpeggioLabel}>
-                                {item.label} · {formatNotes(item.orderedPcs, item.rootPc)}
-                              </Text>
-                            </View>
-                            {rowSelected &&
-                              (tabTokens.length === 0 ? (
-                                <Text style={styles.arpeggioTabs}>No tabs available.</Text>
-                              ) : (
-                                <View style={styles.arpeggioTabList}>
-                                  {rowCaretPos !== null && (
-                                    <View
-                                      style={[
-                                        styles.tabCaret,
-                                        rowInTune && styles.tabCaretInTune,
-                                        {
-                                          left: rowCaretPos.left,
-                                          top: rowCaretPos.top,
-                                          width: caretSize,
-                                          height: caretSize,
-                                        },
-                                      ]}
-                                    />
-                                  )}
-                                  {tabTokens.map((token, index) => (
-                                    <View
-                                      key={`${item.id}:tab:${index}`}
-                                      onLayout={(event) => {
-                                        const { x, y, width, height } = event.nativeEvent.layout;
-                                        setArpeggioLayouts((prev) => {
-                                          const next = { ...prev };
-                                          const row = [...(next[item.id] ?? [])];
-                                          row[index] = { x, y, width, height };
-                                          next[item.id] = row;
-                                          return next;
-                                        });
-                                      }}
-                                      style={[
-                                        styles.arpeggioTabChip,
-                                        token.isRoot && styles.arpeggioTabChipRoot,
-                                      ]}
-                                    >
-                                      {token.hasGAlt && (
-                                        <Pressable
-                                          onPress={(event) => {
-                                            event.stopPropagation?.();
-                                            cycleAlt(scale, token.group);
-                                          }}
-                                          style={styles.tabAltIcon}
-                                        >
-                                          <Text style={styles.tabAltIconText}>alt</Text>
-                                        </Pressable>
-                                      )}
-                                      <Text
-                                        style={[
-                                          styles.arpeggioTabText,
-                                          token.isRoot && styles.arpeggioTabTextRoot,
-                                        ]}
-                                      >
-                                        {token.tab}
-                                      </Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              ))}
-                          </Pressable>
-                        );
-                      })
-                    )}
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-        </View>
+            </View>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -696,6 +910,55 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: '#f3f4f6',
+    flex: 1,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  gearButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gearButtonText: {
+    color: '#e2e8f0',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  propertiesCard: {
+    borderRadius: 12,
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#182233',
+    padding: 12,
+    gap: 10,
+  },
+  propertiesTitle: {
+    color: '#e2e8f0',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  propertiesField: {
+    gap: 6,
+  },
+  propertiesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  propertiesLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   sectionTitle: {
     fontSize: 15,
@@ -795,16 +1058,61 @@ const styles = StyleSheet.create({
   },
   topRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'flex-end',
     gap: 12,
   },
   topRowKey: {
     flex: 1,
-    minWidth: 180,
+    minWidth: 0,
   },
   topRowToggle: {
-    minWidth: 140,
+    flex: 1,
+    minWidth: 160,
+  },
+  pagerShell: {
+    gap: 10,
+  },
+  pagerPage: {
+    gap: 10,
+  },
+  pageOneHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  pagerDotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 2,
+    paddingTop: 2,
+  },
+  pagerDot: {
+    minWidth: 118,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  pagerDotActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#38bdf8',
+  },
+  pagerDotText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pagerDotTextActive: {
+    color: '#082f49',
+    fontWeight: '700',
   },
   scalePickerRow: {
     flexDirection: 'row',
@@ -816,6 +1124,7 @@ const styles = StyleSheet.create({
   scalePickerColumn: {
     flex: 1,
     minWidth: 120,
+    alignSelf: 'flex-start',
   },
   resultsList: {
     gap: 10,
@@ -867,33 +1176,6 @@ const styles = StyleSheet.create({
     color: '#facc15',
     fontSize: 16,
   },
-  tabAltIcon: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    opacity: 0.45,
-    zIndex: 0,
-  },
-  tabAltIconText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#cbd5f5',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.85)',
-    borderColor: 'rgba(226, 232, 240, 0.8)',
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    textShadowColor: 'rgba(0, 0, 0, 0.6)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
   helperText: {
     color: '#94a3b8',
   },
@@ -939,17 +1221,20 @@ const styles = StyleSheet.create({
     width: 28,
   },
   debugToggle: {
-    marginLeft: 'auto',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#1f2937',
-    backgroundColor: '#0b1220',
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+  },
+  debugToggleActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
   },
   debugToggleText: {
-    color: '#94a3b8',
-    fontSize: 10,
+    color: '#e2e8f0',
+    fontSize: 12,
     textTransform: 'uppercase',
     letterSpacing: 1,
     fontWeight: '700',
@@ -957,6 +1242,13 @@ const styles = StyleSheet.create({
   debugPanel: {
     paddingTop: 4,
     gap: 2,
+  },
+  debugPanelLabel: {
+    color: '#64748b',
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
   },
   debugRow: {
     flexDirection: 'row',
@@ -1062,12 +1354,12 @@ const styles = StyleSheet.create({
   arpeggioTabChipRoot: {
     borderColor: 'transparent',
   },
-  arpeggioTabText: {
+  arpeggioTabValue: {
     color: '#e2e8f0',
     fontSize: 11,
     fontFamily: 'Courier',
   },
-  arpeggioTabTextRoot: {
+  arpeggioTabValueRoot: {
     color: '#facc15',
     fontWeight: '700',
   },
@@ -1112,5 +1404,90 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 0 },
+  },
+  transposerCard: {
+    borderRadius: 12,
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#182233',
+    padding: 12,
+    gap: 8,
+  },
+  transposerTitle: {
+    color: '#e2e8f0',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  transposerMeta: {
+    color: '#94a3b8',
+    fontSize: 12,
+  },
+  transposerInput: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: '#0f172a',
+    color: '#e2e8f0',
+    fontFamily: 'Courier',
+    fontSize: 13,
+  },
+  transposerSectionLabel: {
+    color: '#94a3b8',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
+  },
+  transposerDirectionRow: {
+    gap: 6,
+  },
+  transposerDirectionOptions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  transposerDirectionOption: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  transposerDirectionOptionActive: {
+    borderColor: '#38bdf8',
+  },
+  transposerDirectionText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  transposerOutputBox: {
+    borderWidth: 1,
+    borderColor: '#182233',
+    borderRadius: 10,
+    backgroundColor: '#0a101b',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    minHeight: 120,
+  },
+  transposerOutputText: {
+    color: '#f8fafc',
+    fontFamily: 'Courier',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  transposerOutputError: {
+    color: '#ef4444',
+    fontWeight: '700',
+  },
+  transposerWarnings: {
+    gap: 4,
+  },
+  transposerWarningText: {
+    color: '#fda4af',
+    fontSize: 12,
   },
 });

@@ -1,15 +1,27 @@
+/**
+ * Converts a MIDI note number to frequency in Hz (A4 = 440 Hz).
+ */
 export function midiToFrequency(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
+/**
+ * Converts a frequency in Hz to fractional MIDI note number.
+ */
 export function frequencyToMidi(frequency: number): number {
   return 69 + 12 * Math.log2(frequency / 440);
 }
 
+/**
+ * Converts frequency in Hz to absolute cents (100 cents per MIDI step).
+ */
 export function frequencyToCents(frequency: number): number {
   return frequencyToMidi(frequency) * 100;
 }
 
+/**
+ * Describes where a detected frequency sits relative to available tab notes.
+ */
 export type TabPitchMatch = {
   activeIndex: number;
   leftIndex: number;
@@ -19,6 +31,9 @@ export type TabPitchMatch = {
   withinTolerance: boolean;
 };
 
+/**
+ * Matches a detected frequency to the nearest available tab note and neighbors.
+ */
 export function matchFrequencyToTabs(
   midis: number[],
   frequency: number,

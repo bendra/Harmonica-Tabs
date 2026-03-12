@@ -1,3 +1,6 @@
+/**
+ * Streaming pitch detector update emitted from the microphone loop.
+ */
 type PitchUpdate = {
   frequency: number | null;
   confidence: number;
@@ -6,6 +9,9 @@ type PitchUpdate = {
 
 type PitchUpdateHandler = (update: PitchUpdate) => void;
 
+/**
+ * Creates a minimal Web Audio pitch detector with start/stop controls.
+ */
 export function createWebAudioPitchDetector() {
   let audioContext: any = null;
   let source: any = null;
@@ -16,12 +22,18 @@ export function createWebAudioPitchDetector() {
   let emaFrequency: number | null = null;
   let onUpdateRef: PitchUpdateHandler | null = null;
 
+  /**
+   * Checks browser support for required media and audio APIs.
+   */
   function isSupported() {
     const mediaDevices = (globalThis as any).navigator?.mediaDevices;
     const AudioContextCtor = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
     return Boolean(mediaDevices?.getUserMedia && AudioContextCtor);
   }
 
+  /**
+   * Starts microphone capture and emits pitch updates.
+   */
   async function start(onUpdate: PitchUpdateHandler) {
     if (running) return;
     onUpdateRef = onUpdate;
@@ -69,6 +81,9 @@ export function createWebAudioPitchDetector() {
     running = true;
   }
 
+  /**
+   * Stops processing and releases audio resources.
+   */
   function stop() {
     if (!running) return;
     try {
@@ -92,6 +107,9 @@ export function createWebAudioPitchDetector() {
   return { isSupported, start, stop };
 }
 
+/**
+ * Calculates root-mean-square energy of an audio frame.
+ */
 function calculateRms(input: Float32Array) {
   const size = input.length;
   let rms = 0;
@@ -102,6 +120,9 @@ function calculateRms(input: Float32Array) {
   return Math.sqrt(rms / size);
 }
 
+/**
+ * Estimates pitch using normalized auto-correlation with parabolic refinement.
+ */
 function detectPitch(input: Float32Array, sampleRate: number) {
   const rms = calculateRms(input);
   if (rms < 0.005) return null;
