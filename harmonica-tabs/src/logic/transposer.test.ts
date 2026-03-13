@@ -34,6 +34,15 @@ describe('parseTabText', () => {
     const parsed = parseTabText('C %');
     expect(parsed.warnings).toEqual(['Unrecognized token: C', 'Unrecognized token: %']);
   });
+
+  it('accepts curly apostrophes and normalizes them', () => {
+    const parsed = parseTabText('4 -3’ -3’’');
+    const tokens = parsed.segments
+      .filter((segment): segment is { kind: 'token'; raw: string; canonical: string } => segment.kind === 'token')
+      .map((segment) => segment.canonical);
+
+    expect(tokens).toEqual(['4', "-3'", "-3''"]);
+  });
 });
 
 describe('transposeTabText', () => {
@@ -63,11 +72,12 @@ describe('transposeTabText', () => {
 
     expect(result.output).toContain('4x');
     expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.outputSegments.some((segment) => segment.text === '4x' && segment.kind === 'error')).toBe(true);
   });
 
   it('marks invalid tokens as error segments in output', () => {
     const result = transposeTabText({
-      input: "C 11 7’ -7’ %",
+      input: 'C 11 %',
       sourceHarmonicaPc: 0,
       targetRootPc: 7,
       notation: 'apostrophe',

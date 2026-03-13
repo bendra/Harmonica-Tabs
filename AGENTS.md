@@ -10,3 +10,4 @@
 - Prefer one chat per coherent goal; start a new chat when the goal/context shifts.
 - Plan first before implementing new features.
 - If work becomes unexpectedly difficult or unclear, pause implementation and return to planning.
+- Before starting any new task, read the project docs first, especially `docs/UI_MAP.md`.

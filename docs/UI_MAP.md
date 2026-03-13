@@ -40,8 +40,14 @@ SafeAreaView (styles.safeArea)
          └─ Properties Card (styles.propertiesCard)
             ├─ Section Title (styles.propertiesTitle)
             ├─ Overbend Symbol Select (styles.propertiesField + styles.dropdown*)
+            ├─ Position/Key Set Select (styles.propertiesField + styles.dropdown*)
             ├─ 2 Draw / 3 Blow Preference Select (styles.propertiesField + styles.dropdown*)
-            └─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle
+            ├─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle)
+            └─ Tab Symbols Help Button (styles.propertiesRow + styles.debugToggle)
+      └─ Tab Symbols Screen (`screen === 'tab-symbols'`)
+         └─ Symbols Card (styles.propertiesCard)
+            ├─ Section Title (styles.propertiesTitle)
+            └─ Symbol Rows (styles.symbolRow + styles.symbolKey + styles.symbolMeaning)
 ```
 
 ## Naming Reference
@@ -53,6 +59,7 @@ SafeAreaView (styles.safeArea)
 - **Dropdowns**: `dropdown`, `dropdownLabel`, `dropdownTrigger`, `dropdownItem`
 - **Toggle Group**: `toggleGroup`, `toggleRow`, `toggleItem`
 - **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`
+- **Tab Symbols**: `symbolRow`, `symbolKey`, `symbolMeaning`
 - **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue`, `debugPanel`, `debugPanelLabel`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`

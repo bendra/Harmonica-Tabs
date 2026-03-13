@@ -3,6 +3,7 @@ import {
   SafeAreaView,
   ScrollView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -17,6 +18,7 @@ import { buildArpeggioSections } from './src/logic/arpeggios';
 import { buildTabsForPcSet, buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from './src/logic/tabs';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import { transposeTabText } from './src/logic/transposer';
+import { insertAtSelection, sanitizeTransposerInput, TextSelection } from './src/logic/transposer-input';
 import { createWebAudioPitchDetector } from './src/logic/web-audio';
 
 /**
@@ -61,6 +63,7 @@ type SingleSelectOption<T extends string> = {
 };
 
 type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
+type QuickSymbol = { label: string; value: string };
 
 /**
  * Reusable single-value dropdown rendered with a modal menu.
@@ -168,7 +171,7 @@ function SingleSelectGroup<T extends string>(props: {
 export default function App() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = Math.min(width, height) < 420;
-  const [screen, setScreen] = useState<'main' | 'properties'>('main');
+  const [screen, setScreen] = useState<'main' | 'properties' | 'tab-symbols'>('main');
   const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
   const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
@@ -185,6 +188,7 @@ export default function App() {
   const [showDebug, setShowDebug] = useState(false);
   const [pagerIndex, setPagerIndex] = useState(0);
   const [transposerInput, setTransposerInput] = useState('');
+  const [transposerSelection, setTransposerSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [transposerDirection, setTransposerDirection] = useState<'up' | 'down'>('down');
   const [listenError, setListenError] = useState<string | null>(null);
   const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
@@ -195,6 +199,7 @@ export default function App() {
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
   const pagerRef = useRef<ScrollView>(null);
+  const transposerInputRef = useRef<TextInput>(null);
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
   const holdMs = 400;
   const toneToleranceCents = 10;
@@ -303,6 +308,13 @@ export default function App() {
     { page: 0 as const, label: 'Visualizer' },
     { page: 1 as const, label: 'Transposer' },
   ];
+  const quickSymbols: QuickSymbol[] = [
+    { label: '-', value: '-' },
+    { label: "'", value: "'" },
+    { label: '°', value: '°' },
+    { label: 'space', value: ' ' },
+    { label: '↵', value: '\n' },
+  ];
 
   useEffect(() => {
     setTransposerDirection(defaultDirection);
@@ -329,6 +341,18 @@ export default function App() {
         {index === 0 ? pcToNote(pc, harmonicaKey.preferFlats) : `–${pcToNote(pc, harmonicaKey.preferFlats)}`}
       </Text>
     ));
+  }
+
+  function handleTransposerInputChange(value: string) {
+    const sanitized = sanitizeTransposerInput(value);
+    setTransposerInput(sanitized);
+  }
+
+  function insertQuickSymbol(symbol: string) {
+    const { nextValue, nextSelection } = insertAtSelection(transposerInput, transposerSelection, symbol);
+    setTransposerInput(nextValue);
+    setTransposerSelection(nextSelection);
+    transposerInputRef.current?.focus();
   }
 
   const caretSize = 18;
@@ -433,15 +457,23 @@ export default function App() {
     setLastDetectedAt(null);
   }
 
+  const headerTitle =
+    screen === 'main' ? 'Harmonica Scale Visualizer' : screen === 'properties' ? 'Properties' : 'Tab Symbols';
+
+  function handleHeaderButtonPress() {
+    setScreen((prev) => {
+      if (prev === 'main') return 'properties';
+      if (prev === 'tab-symbols') return 'properties';
+      return 'main';
+    });
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.headerRow}>
-          <Text style={styles.title}>{screen === 'main' ? 'Harmonica Scale Visualizer' : 'Properties'}</Text>
-          <Pressable
-            onPress={() => setScreen((prev) => (prev === 'main' ? 'properties' : 'main'))}
-            style={styles.gearButton}
-          >
+          <Text style={styles.title}>{headerTitle}</Text>
+          <Pressable onPress={handleHeaderButtonPress} style={styles.gearButton}>
             <Text style={styles.gearButtonText}>{screen === 'main' ? '⚙' : '←'}</Text>
           </Pressable>
         </View>
@@ -490,6 +522,40 @@ export default function App() {
               >
                 <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
               </Pressable>
+            </View>
+            <View style={styles.propertiesRow}>
+              <Pressable onPress={() => setScreen('tab-symbols')} style={styles.debugToggle}>
+                <Text style={styles.debugToggleText}>Tab symbols help</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : screen === 'tab-symbols' ? (
+          <View style={styles.propertiesCard}>
+            <Text style={styles.propertiesTitle}>Tab Symbols</Text>
+            <Text style={styles.helperText}>Quick guide for reading tabs shown in this app.</Text>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbolKey}>4</Text>
+              <Text style={styles.symbolMeaning}>Blow on hole 4.</Text>
+            </View>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbolKey}>-4</Text>
+              <Text style={styles.symbolMeaning}>Draw on hole 4.</Text>
+            </View>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbolKey}>-4'</Text>
+              <Text style={styles.symbolMeaning}>Draw bend (one semitone).</Text>
+            </View>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbolKey}>-3''</Text>
+              <Text style={styles.symbolMeaning}>Deeper bend (two semitones).</Text>
+            </View>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbolKey}>4° / -7°</Text>
+              <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to °.</Text>
+            </View>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbolKey}>4' / -7'</Text>
+              <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to '.</Text>
             </View>
           </View>
         ) : (
@@ -802,14 +868,32 @@ export default function App() {
                       Target: position {targetPosition} ({pcToNote(scale.rootPc, harmonicaKey.preferFlats)})
                     </Text>
                     <TextInput
+                      ref={transposerInputRef}
                       style={styles.transposerInput}
                       multiline
                       value={transposerInput}
-                      onChangeText={setTransposerInput}
+                      onChangeText={handleTransposerInputChange}
+                      onSelectionChange={(event) => setTransposerSelection(event.nativeEvent.selection)}
+                      selection={transposerSelection}
+                      keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      spellCheck={false}
                       placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
                       placeholderTextColor="#64748b"
                       textAlignVertical="top"
                     />
+                    <View style={styles.transposerQuickRow}>
+                      {quickSymbols.map((symbol) => (
+                        <Pressable
+                          key={`symbol:${symbol.label}`}
+                          onPress={() => insertQuickSymbol(symbol.value)}
+                          style={styles.transposerQuickButton}
+                        >
+                          <Text style={styles.transposerQuickButtonText}>{symbol.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
                     <View style={styles.transposerDirectionRow}>
                       <Text style={styles.transposerSectionLabel}>Direction</Text>
                       <View style={styles.transposerDirectionOptions}>
@@ -1239,6 +1323,29 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     fontWeight: '700',
   },
+  symbolRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#182233',
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  symbolKey: {
+    color: '#f8fafc',
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    width: 62,
+  },
+  symbolMeaning: {
+    color: '#cbd5e1',
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   debugPanel: {
     paddingTop: 4,
     gap: 2,
@@ -1440,6 +1547,25 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
     fontWeight: '700',
+  },
+  transposerQuickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  transposerQuickButton: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  transposerQuickButtonText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'lowercase',
   },
   transposerDirectionRow: {
     gap: 6,

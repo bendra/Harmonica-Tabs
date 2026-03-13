@@ -59,6 +59,10 @@ function isUnsupportedTokenStartChar(value: string): boolean {
   return /[A-Za-z%]/.test(value);
 }
 
+function isApostropheChar(value: string | undefined): boolean {
+  return value === "'" || value === '’';
+}
+
 function parseTokenAt(input: string, start: number): TokenMatch | null {
   if (!isBoundary(input, start - 1)) return null;
 
@@ -89,13 +93,12 @@ function parseTokenAt(input: string, start: number): TokenMatch | null {
     suffix = '°';
     cursor += 1;
   } else {
-    while (input[cursor] === "'") {
+    while (isApostropheChar(input[cursor])) {
       suffix += "'";
       cursor += 1;
     }
   }
 
-  if (input[cursor] === '’') return null;
   if (!isBoundary(input, cursor)) return null;
 
   const raw = input.slice(start, cursor);
@@ -135,7 +138,8 @@ export function parseTabText(input: string): ParseResult {
         fragmentEnd += 1;
       }
       const fragment = input.slice(cursor, fragmentEnd);
-      textBuffer.push(fragment);
+      flushText();
+      segments.push({ kind: 'invalid', raw: fragment });
       if (/\S/.test(fragment)) {
         unknownFragments.add(fragment);
       }
