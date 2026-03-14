@@ -18,7 +18,12 @@ import { buildArpeggioSections } from './src/logic/arpeggios';
 import { buildTabsForPcSet, buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from './src/logic/tabs';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import { transposeTabText } from './src/logic/transposer';
-import { insertAtSelection, sanitizeTransposerInput, TextSelection } from './src/logic/transposer-input';
+import {
+  cleanupTransposerInput,
+  insertAtSelection,
+  TextSelection,
+  TransposerCleanupOptions,
+} from './src/logic/transposer-input';
 import { createWebAudioPitchDetector } from './src/logic/web-audio';
 
 /**
@@ -190,6 +195,8 @@ export default function App() {
   const [transposerInput, setTransposerInput] = useState('');
   const [transposerSelection, setTransposerSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [transposerDirection, setTransposerDirection] = useState<'up' | 'down'>('down');
+  const [stripInvalidTransposerContent, setStripInvalidTransposerContent] = useState(true);
+  const [removeExcessTransposerWhitespace, setRemoveExcessTransposerWhitespace] = useState(true);
   const [listenError, setListenError] = useState<string | null>(null);
   const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
@@ -315,10 +322,28 @@ export default function App() {
     { label: 'space', value: ' ' },
     { label: '↵', value: '\n' },
   ];
+  const transposerCleanupOptions = useMemo<TransposerCleanupOptions>(
+    () => ({
+      stripInvalidContent: stripInvalidTransposerContent,
+      removeExcessWhitespace: removeExcessTransposerWhitespace,
+    }),
+    [stripInvalidTransposerContent, removeExcessTransposerWhitespace],
+  );
 
   useEffect(() => {
     setTransposerDirection(defaultDirection);
   }, [defaultDirection]);
+
+  useEffect(() => {
+    const cleaned = cleanupTransposerInput(transposerInput, transposerCleanupOptions);
+    if (cleaned === transposerInput) return;
+
+    setTransposerInput(cleaned);
+    setTransposerSelection((prev) => ({
+      start: Math.min(prev.start, cleaned.length),
+      end: Math.min(prev.end, cleaned.length),
+    }));
+  }, [transposerCleanupOptions, transposerInput]);
 
   /**
    * Applies the global -2/3 preference when both choices exist for a tab group.
@@ -344,12 +369,16 @@ export default function App() {
   }
 
   function handleTransposerInputChange(value: string) {
-    const sanitized = sanitizeTransposerInput(value);
-    setTransposerInput(sanitized);
+    setTransposerInput(cleanupTransposerInput(value, transposerCleanupOptions));
   }
 
   function insertQuickSymbol(symbol: string) {
-    const { nextValue, nextSelection } = insertAtSelection(transposerInput, transposerSelection, symbol);
+    const { nextValue, nextSelection } = insertAtSelection(
+      transposerInput,
+      transposerSelection,
+      symbol,
+      transposerCleanupOptions,
+    );
     setTransposerInput(nextValue);
     setTransposerSelection(nextSelection);
     transposerInputRef.current?.focus();
@@ -523,6 +552,29 @@ export default function App() {
                 <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
               </Pressable>
             </View>
+            <Text style={styles.propertiesTitle}>Transposer Input</Text>
+            <Pressable
+              onPress={() => setStripInvalidTransposerContent((prev) => !prev)}
+              style={[
+                styles.propertiesToggleButton,
+                stripInvalidTransposerContent && styles.propertiesToggleButtonActive,
+              ]}
+            >
+              <Text style={styles.propertiesToggleText}>
+                {stripInvalidTransposerContent ? '☑' : '☐'} Strip invalid content from transposer input
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setRemoveExcessTransposerWhitespace((prev) => !prev)}
+              style={[
+                styles.propertiesToggleButton,
+                removeExcessTransposerWhitespace && styles.propertiesToggleButtonActive,
+              ]}
+            >
+              <Text style={styles.propertiesToggleText}>
+                {removeExcessTransposerWhitespace ? '☑' : '☐'} Remove excess white space in transposer input
+              </Text>
+            </Pressable>
             <View style={styles.propertiesRow}>
               <Pressable onPress={() => setScreen('tab-symbols')} style={styles.debugToggle}>
                 <Text style={styles.debugToggleText}>Tab symbols help</Text>
@@ -1322,6 +1374,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
     fontWeight: '700',
+  },
+  propertiesToggleButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+  },
+  propertiesToggleButtonActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  propertiesToggleText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
   },
   symbolRow: {
     flexDirection: 'row',

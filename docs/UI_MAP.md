@@ -42,6 +42,8 @@ SafeAreaView (styles.safeArea)
             ├─ Overbend Symbol Select (styles.propertiesField + styles.dropdown*)
             ├─ Position/Key Set Select (styles.propertiesField + styles.dropdown*)
             ├─ 2 Draw / 3 Blow Preference Select (styles.propertiesField + styles.dropdown*)
+            ├─ Strip Invalid Content Toggle (styles.propertiesToggleButton + styles.propertiesToggleText)
+            ├─ Remove Excess White Space Toggle (styles.propertiesToggleButton + styles.propertiesToggleText)
             ├─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle)
             └─ Tab Symbols Help Button (styles.propertiesRow + styles.debugToggle)
       └─ Tab Symbols Screen (`screen === 'tab-symbols'`)
@@ -59,6 +61,7 @@ SafeAreaView (styles.safeArea)
 - **Dropdowns**: `dropdown`, `dropdownLabel`, `dropdownTrigger`, `dropdownItem`
 - **Toggle Group**: `toggleGroup`, `toggleRow`, `toggleItem`
 - **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`
+- **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
 - **Tab Symbols**: `symbolRow`, `symbolKey`, `symbolMeaning`
 - **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue`, `debugPanel`, `debugPanelLabel`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`

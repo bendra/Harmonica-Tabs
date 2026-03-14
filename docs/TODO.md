@@ -6,6 +6,7 @@
 - Revisit `-2` vs `3` toggle behavior for chord visualization.
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.
+- Persist transposer cleanup preferences across sessions.
 - data persistence (web and native)
 - accessability
 - localization

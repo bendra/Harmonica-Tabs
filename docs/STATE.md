@@ -21,6 +21,7 @@
 - Pager page 1 (Visualizer): Scale Name + Arpeggios + listen/debug + generated tabs/arpeggios.
 - Pager page 2 (Tab Transposer): multiline input, transposed output, and parser/transpose warnings.
 - Tab transposer uses exact up/down transposition only; no automatic octave fallback.
+- Transposer input can optionally strip pasted non-tab content and normalize excess whitespace live as you type/paste.
 - Properties screen is still separate via gear button.
 
 ## Tests

@@ -3,13 +3,175 @@ export type TextSelection = {
   end: number;
 };
 
-const DISALLOWED_INPUT = /[^0-9+\-'\u00B0\s]/g;
+export type TransposerCleanupOptions = {
+  stripInvalidContent: boolean;
+  removeExcessWhitespace: boolean;
+};
 
-export function sanitizeTransposerInput(value: string): string {
-  return value.replaceAll('’', "'").replace(DISALLOWED_INPUT, '');
+const DISALLOWED_INPUT = /[^0-9+\-'\u00B0\s]/g;
+const SPACE_RUN = /[ \t]+/g;
+
+type TokenMatch = {
+  raw: string;
+  end: number;
+};
+
+type TrailingSeparator = 'none' | 'space' | 'newline';
+
+function normalizeRawInput(value: string): string {
+  return (value ?? '').replaceAll('’', "'");
 }
 
-export function insertAtSelection(value: string, selection: TextSelection, text: string): {
+function isAlphanumeric(value: string | undefined): boolean {
+  return value !== undefined && /[A-Za-z0-9]/.test(value);
+}
+
+function isBoundary(input: string, index: number): boolean {
+  if (index < 0 || index >= input.length) return true;
+  return !isAlphanumeric(input[index]);
+}
+
+function isTokenStartChar(value: string | undefined): boolean {
+  return value !== undefined && (value === '+' || value === '-' || /[0-9]/.test(value));
+}
+
+function isApostropheChar(value: string | undefined): boolean {
+  return value === "'";
+}
+
+function parseTokenAt(input: string, start: number): TokenMatch | null {
+  if (!isBoundary(input, start - 1)) return null;
+
+  let cursor = start;
+  const first = input[cursor];
+  if (first === '+' || first === '-') {
+    cursor += 1;
+  }
+
+  if (cursor >= input.length) return null;
+
+  const firstDigit = input[cursor];
+  if (firstDigit === '1' && input[cursor + 1] === '0') {
+    cursor += 2;
+  } else if (firstDigit !== undefined && /[1-9]/.test(firstDigit)) {
+    cursor += 1;
+  } else {
+    return null;
+  }
+
+  if (input[cursor] === '°') {
+    cursor += 1;
+  } else {
+    while (isApostropheChar(input[cursor])) {
+      cursor += 1;
+    }
+  }
+
+  if (!isBoundary(input, cursor)) return null;
+
+  return {
+    raw: input.slice(start, cursor),
+    end: cursor,
+  };
+}
+
+function getTrailingSeparator(value: string): TrailingSeparator {
+  if (/\n$/.test(value)) return 'newline';
+  if (/[ \t]$/.test(value)) return 'space';
+  return 'none';
+}
+
+function collapseWhitespace(value: string, trailingSeparator: TrailingSeparator): string {
+  const normalized = value
+    .split('\n')
+    .map((line) => line.trim().replace(SPACE_RUN, ' '))
+    .join('\n');
+
+  if (normalized.length > 0) {
+    if (trailingSeparator === 'newline') return `${normalized}\n`;
+    if (trailingSeparator === 'space') return `${normalized} `;
+  }
+
+  return normalized;
+}
+
+function extractTabContent(input: string, removeExcessWhitespace: boolean): string {
+  const lines = input.split('\n');
+  const keptLines: string[] = [];
+
+  lines.forEach((line) => {
+    let cursor = 0;
+    let previousEnd = 0;
+    let extracted = '';
+    let hasToken = false;
+    let tokenCount = 0;
+
+    while (cursor < line.length) {
+      if (isTokenStartChar(line[cursor]) && isBoundary(line, cursor - 1)) {
+        const token = parseTokenAt(line, cursor);
+        if (token) {
+          extracted += line.slice(previousEnd, cursor).replace(/[^\s]/g, '');
+          extracted += token.raw;
+          previousEnd = token.end;
+          cursor = token.end;
+          hasToken = true;
+          tokenCount += 1;
+          continue;
+        }
+      }
+
+      cursor += 1;
+    }
+
+    if (hasToken) {
+      const letterCount = (line.match(/[A-Za-z]/g) ?? []).length;
+      if (letterCount > 0 && tokenCount < 2) {
+        return;
+      }
+
+      extracted += line.slice(previousEnd).replace(/[^\s]/g, '');
+      keptLines.push(removeExcessWhitespace ? extracted.trim().replace(SPACE_RUN, ' ') : extracted);
+      return;
+    }
+
+    const containsOnlyTabChars = !/[A-Za-z]/.test(line) && !/[^0-9+\-'\u00B0\s]/.test(line);
+    if (containsOnlyTabChars) {
+      keptLines.push(removeExcessWhitespace ? line.trim().replace(SPACE_RUN, ' ') : line);
+    }
+  });
+
+  const filteredLines = keptLines.filter((line) => line.length > 0);
+  const joined = filteredLines.join('\n');
+  const trailingSeparator = filteredLines.length > 0 ? getTrailingSeparator(input) : 'none';
+
+  if (removeExcessWhitespace) {
+    return collapseWhitespace(joined, trailingSeparator);
+  }
+
+  return joined;
+}
+
+export function sanitizeTransposerInput(value: string): string {
+  return normalizeRawInput(value).replace(DISALLOWED_INPUT, '');
+}
+
+export function cleanupTransposerInput(value: string, options: TransposerCleanupOptions): string {
+  const normalized = normalizeRawInput(value);
+  if (options.stripInvalidContent) {
+    return extractTabContent(normalized, options.removeExcessWhitespace);
+  }
+
+  const sanitized = normalized.replace(DISALLOWED_INPUT, '');
+  if (!options.removeExcessWhitespace) return sanitized;
+  return collapseWhitespace(sanitized, getTrailingSeparator(normalized));
+}
+
+export function insertAtSelection(
+  value: string,
+  selection: TextSelection,
+  text: string,
+  options?: TransposerCleanupOptions,
+): {
   nextValue: string;
   nextSelection: TextSelection;
 } {
@@ -18,8 +180,10 @@ export function insertAtSelection(value: string, selection: TextSelection, text:
   const start = Math.max(0, Math.min(selection.start, maxIndex));
   const end = Math.max(start, Math.min(selection.end, maxIndex));
   const insertion = sanitizeTransposerInput(text);
-  const nextValue = `${source.slice(0, start)}${insertion}${source.slice(end)}`;
-  const cursor = start + insertion.length;
+  const merged = `${source.slice(0, start)}${insertion}${source.slice(end)}`;
+  const nextValue = options ? cleanupTransposerInput(merged, options) : merged;
+  const cursor = Math.min(nextValue.length, start + insertion.length);
+
   return {
     nextValue,
     nextSelection: { start: cursor, end: cursor },
