@@ -1,6 +1,6 @@
 # Architecture Snapshot
 
-Date: 2026-03-02  
+Date: 2026-03-15  
 Status: Rapid exploration (structure and behavior are still changing quickly)
 
 This document describes the app as it exists today. It is intentionally practical: enough context for a typically-skilled React/TypeScript developer to contribute safely without reverse-engineering the whole codebase.
@@ -9,7 +9,7 @@ This document describes the app as it exists today. It is intentionally practica
 
 - App: `harmonica-tabs` (Expo + React Native + TypeScript, web-first usage today).
 - Purpose: show playable harmonica tabs for selected scales/arpeggios on 10-hole Richter diatonic harmonica.
-- Current extra capability: live pitch tracking on web (Web Audio), including visual caret placement between neighboring tab chips.
+- Current extra capability: live pitch tracking on web (Web Audio), including visual caret placement between neighboring tab chips and tone-follow cursor advancement in the transposer.
 
 Out of scope today:
 - Alternate tunings/instrument types.
@@ -33,6 +33,8 @@ Out of scope today:
 - `tabs.ts`: core mapping from pitch classes to playable tab groups. Includes bend/overbend formatting and ordering.
 - `arpeggios.ts`: generates triad/7th/blues arpeggio sections from selected scale root/definition.
 - `pitch.ts`: MIDI/frequency/cents conversions + nearest tab matching + interpolation factor `t`.
+- `transposer.ts`: parses transposer input and produces both render segments and playable output-token metadata.
+- `transposer-follow.ts`: pure cursor-advance state machine for tone-follow behavior.
 - `web-audio.ts`: web microphone pitch detector (autocorrelation-like approach + EMA smoothing).
 
 ### UI layer
@@ -43,14 +45,17 @@ Out of scope today:
 In `App.tsx`, state is split by concern:
 - Musical selection: harmonica key, scale root, scale id, overbend notation, arpeggio section selection.
 - Alternate tab choice: `altSelections` keyed by `rootPc:scaleId:midi`.
-- Pitch listening: start/stop status, source (`web`/`sim`), detected frequency/confidence/rms, hold timer, debug controls.
+- Pitch listening: start/stop status, detector snapshot (`frequency`, `confidence`, `rms`, `source`, `lastDetectedAt`), hold timer, debug controls.
 - Visual tracking: measured layouts for main tabs and each arpeggio row, selection checkboxes controlling which row receives caret.
+- Transposer follow: tone-follow enabled state, active output token index, hold/re-arm state, and tone-follow settings.
 
 Derived values (`useMemo`) drive most rendering:
 - `groups` from `buildTabsForScale(...)`.
 - `selectedTabs` (post-alt-selection projection of groups).
 - `arpeggioSections` from `buildArpeggioSections(...)`.
 - `pitchMatch` from `matchFrequencyToTabs(...)`.
+- `transposerResult` from `transposeTabText(...)`, including playable output tokens.
+- `transposerFollowEvaluation` from `evaluateTransposerFollow(...)`.
 
 ## 5. Core Flows
 
@@ -72,6 +77,14 @@ Derived values (`useMemo`) drive most rendering:
 4. Caret is drawn between measured chip centers (or aligned to active row on wrap).
 5. In-tune visual threshold uses `±10` cents (`toneToleranceCents`).
 
+### D) Tone-followed transposer output
+1. User enters/pastes tabs and the transposer produces render segments plus playable output tokens.
+2. User starts shared listening from the transposer page; tone follow is implied while listening is active.
+3. `evaluateTransposerFollow(...)` checks the current output token against the shared detector snapshot using tolerance, confidence, and hold-duration settings.
+4. Matching tokens advance the cursor; repeated identical notes require a release before the next advance.
+5. Clicking a playable output token moves the cursor manually, and any transposer-output change resets the cursor to the first playable token.
+6. The transposer output scroll view measures token positions and auto-scrolls minimally when the active token falls outside the visible viewport.
+
 ## 6. Important Behavioral Rules
 
 - Standard 10-hole Richter only.
@@ -80,6 +93,7 @@ Derived values (`useMemo`) drive most rendering:
 - Enharmonic spelling follows harmonica key flat/sharp preference.
 - Alternate selection is currently most visible for G (`-2` vs `3`) where both exist at same MIDI pitch.
 - If mic is unavailable/blocked/unsupported, app runs with simulated frequency input.
+- Detector-specific code remains isolated so a future native audio pipeline can feed the same detector snapshot and transposer-follow logic.
 
 ## 7. Testing and Quality Gates
 

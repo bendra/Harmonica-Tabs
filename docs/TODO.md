@@ -7,7 +7,9 @@
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.
 - Consider whether the transposer's explicit `Paste` action should grow into a fuller clipboard/edit menu.
+- Add native (iOS/Android) detector producers that feed the same shared detector snapshot used by tone follow.
 - Persist transposer cleanup preferences across sessions.
+- Persist tone-follow settings across sessions if they prove useful.
 - Consider persisting the transposer keyboard choice across sessions if users ask for it.
 - Consider a helper hint for the transposer `Clean Input` flow beyond the current mobile pad guidance.
 - data persistence (web and native)

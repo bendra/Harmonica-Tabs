@@ -31,11 +31,16 @@ SafeAreaView (styles.safeArea)
       │  │  │  │        └─ Arpeggio Section (styles.arpeggioSection, conditional)
       │  │  │  └─ Page 2: Tab Transposer (styles.pagerPage)
       │  │  │     └─ Transposer Card (styles.transposerCard)
+      │  │  │        ├─ Tone Follow Controls (styles.transposerFollowControls)
+      │  │  │        │  └─ Shared Listen Button (styles.listenButton)
+      │  │  │        ├─ Tone Follow Status (styles.transposerFollowStatus)
       │  │  │        ├─ Input (styles.transposerInput)
       │  │  │        ├─ Mobile Pad Hint (styles.transposerPadHint, conditional)
       │  │  │        ├─ Paste Status (styles.transposerPadStatus, conditional)
       │  │  │        ├─ Direction Radio + Clean Input (styles.transposerDirectionRow + styles.transposerDirectionOption + styles.transposerActionButton)
       │  │  │        ├─ Output Box (styles.transposerOutputBox + styles.transposerOutputText)
+      │  │  │        │  └─ Clickable Output Tokens (styles.transposerOutputToken + active/matched variants)
+      │  │  │        │     └─ Auto-scroll keeps active token visible
       │  │  │        └─ Warnings (styles.transposerWarnings + styles.transposerWarningText)
       │  │  └─ Pager Dots (styles.pagerDotsRow + styles.pagerDot)
       │  └─ Tab Pad Modal (native + touch-first web, conditional)
@@ -56,6 +61,9 @@ SafeAreaView (styles.safeArea)
             ├─ Transposer Keyboard Buttons (styles.propertiesChoiceRow + styles.propertiesChoiceButton)
             ├─ Strip Invalid Content Toggle (styles.propertiesToggleButton + styles.propertiesToggleText)
             ├─ Remove Excess White Space Toggle (styles.propertiesToggleButton + styles.propertiesToggleText)
+            ├─ Tone Tolerance Select (styles.propertiesField + styles.dropdown*)
+            ├─ Minimum Confidence Select (styles.propertiesField + styles.dropdown*)
+            ├─ Hold Duration Select (styles.propertiesField + styles.dropdown*)
             ├─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle)
             └─ Tab Symbols Help Button (styles.propertiesRow + styles.debugToggle)
       └─ Tab Symbols Screen (`screen === 'tab-symbols'`)
@@ -80,5 +88,5 @@ SafeAreaView (styles.safeArea)
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
-- **Tab Transposer**: `transposerCard`, `transposerTitle`, `transposerMeta`, `transposerInput`, `transposerPadHint`, `transposerPadStatus`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerWarnings`
+- **Tab Transposer**: `transposerCard`, `transposerTitle`, `transposerMeta`, `transposerFollowControls`, `transposerFollowStatus`, `transposerInput`, `transposerPadHint`, `transposerPadStatus`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
 - **Tab Pad**: `transposerPadOverlay`, `transposerPadSheet`, `transposerPadHandle`, `transposerPadTitle`, `transposerPadPreview`, `transposerPadSection`, `transposerPadOptionRow`, `transposerPadOptionButton`, `transposerPadHoleGrid`, `transposerPadHoleButton`, `transposerPadActionRow`

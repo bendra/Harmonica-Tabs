@@ -63,8 +63,40 @@ function findTransposerOutputScroll(root: any) {
   return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'transposer-output-scroll');
 }
 
+function measureTransposerOutput(root: any, height: number) {
+  const outputScroll = findTransposerOutputScroll(root);
+
+  act(() => {
+    outputScroll.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 320, height } } });
+  });
+
+  return outputScroll;
+}
+
+function measureTransposerToken(root: any, tokenIndex: number, y: number, height = 20) {
+  const token = findByTestId(root, `transposer-output-token:${tokenIndex}`);
+
+  act(() => {
+    token.props.onLayout({ nativeEvent: { layout: { x: 0, y, width: 24, height } } });
+  });
+
+  return token;
+}
+
+function setTransposerOutputScrollY(root: any, y: number) {
+  const outputScroll = findTransposerOutputScroll(root);
+
+  act(() => {
+    outputScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 0, y } } });
+  });
+}
+
 function findVisibleModal(root: any) {
   return root.findAll((node: any) => node.type === 'Modal')[0] ?? null;
+}
+
+function findByTestId(root: any, testID: string) {
+  return root.find((node: any) => node.props?.testID === testID);
 }
 
 function findModalBackdropPressable(root: any) {
@@ -81,6 +113,26 @@ function stubWebInputEnvironment(params: { coarsePointerMatches: boolean; maxTou
   });
   vi.stubGlobal('navigator', {
     maxTouchPoints: params.maxTouchPoints,
+  });
+}
+
+function switchToCustomTabPad(root: any) {
+  const gearButton = findPressableByText(root, '⚙');
+
+  act(() => {
+    gearButton.props.onPress();
+  });
+
+  const customPadButton = findPressableByText(root, '○ Custom Tab Pad');
+
+  act(() => {
+    customPadButton.props.onPress();
+  });
+
+  const backButton = findPressableByText(root, '←');
+
+  act(() => {
+    backButton.props.onPress();
   });
 }
 
@@ -137,7 +189,7 @@ describe('App navigation', () => {
     expect(scrollToSpy).toHaveBeenLastCalledWith({ x: 360, animated: false });
   });
 
-  it('defaults touch-first web to the tab pad and exposes the keyboard setting in properties', () => {
+  it('defaults touch-first web to the native keyboard and exposes the keyboard setting in properties', () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
 
     let renderer: any;
@@ -154,11 +206,11 @@ describe('App navigation', () => {
     });
 
     expect(findAllText(root, 'Keyboard').length).toBeGreaterThan(0);
-    expect(findAllText(root, '◉ Custom Tab Pad').length).toBeGreaterThan(0);
-    expect(findAllText(root, '○ Native Keyboard').length).toBeGreaterThan(0);
+    expect(findAllText(root, '○ Custom Tab Pad').length).toBeGreaterThan(0);
+    expect(findAllText(root, '◉ Native Keyboard').length).toBeGreaterThan(0);
   });
 
-  it('lets touch-first web switch the transposer back to the native keyboard from properties', () => {
+  it('lets touch-first web switch the transposer to the custom tab pad from properties', () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
 
     let renderer: any;
@@ -168,34 +220,15 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
-    const gearButton = findPressableByText(root, '⚙');
-
-    act(() => {
-      gearButton.props.onPress();
-    });
-
-    const nativeKeyboardButton = findPressableByText(root, '○ Native Keyboard');
-
-    act(() => {
-      nativeKeyboardButton.props.onPress();
-    });
-
-    expect(findAllText(root, '◉ Native Keyboard').length).toBeGreaterThan(0);
-    expect(findAllText(root, '○ Custom Tab Pad').length).toBeGreaterThan(0);
-
-    const backButton = findPressableByText(root, '←');
-
-    act(() => {
-      backButton.props.onPress();
-    });
+    switchToCustomTabPad(root);
 
     expect(
       findAllText(
         root,
         'Custom tab pad is active. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings for the browser edit menu.',
       ).length,
-    ).toBe(0);
-    expect(findAllText(root, 'Paste')).toHaveLength(0);
+    ).toBeGreaterThan(0);
+    expect(findAllTransposerInputShells(root)).toHaveLength(1);
   });
 
   it('keeps desktop-style web on the native keyboard unless properties changes it', () => {
@@ -236,6 +269,187 @@ describe('App navigation', () => {
 
     expect(outputScroll.props.nestedScrollEnabled).toBe(true);
     expect(maxHeightStyle?.maxHeight).toBe(256);
+  });
+
+  it('lets clicking a transposed output token move the active cursor', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    const firstToken = findByTestId(root, 'transposer-output-token:0');
+    const secondToken = findByTestId(root, 'transposer-output-token:1');
+
+    expect((firstToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8')).toBe(
+      true,
+    );
+
+    act(() => {
+      secondToken.props.onPress();
+    });
+
+    const updatedFirstToken = findByTestId(root, 'transposer-output-token:0');
+    const updatedSecondToken = findByTestId(root, 'transposer-output-token:1');
+
+    expect(
+      (updatedFirstToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8'),
+    ).toBe(false);
+    expect(
+      (updatedSecondToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8'),
+    ).toBe(true);
+  });
+
+  it('auto-scrolls the output when a newly active token is below the visible area', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    measureTransposerOutput(root, 40);
+    measureTransposerToken(root, 0, 0, 20);
+    const secondToken = measureTransposerToken(root, 1, 80, 20);
+
+    scrollToSpy.mockClear();
+
+    act(() => {
+      secondToken.props.onPress();
+    });
+
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 76, animated: true });
+  });
+
+  it('does not auto-scroll when the active token is already visible', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    measureTransposerOutput(root, 120);
+    measureTransposerToken(root, 0, 0, 20);
+    const secondToken = measureTransposerToken(root, 1, 40, 20);
+
+    scrollToSpy.mockClear();
+
+    act(() => {
+      secondToken.props.onPress();
+    });
+
+    expect(scrollToSpy).not.toHaveBeenCalled();
+  });
+
+  it('resets the active transposer cursor when the transposed output changes', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    act(() => {
+      findByTestId(root, 'transposer-output-token:1').props.onPress();
+    });
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    const firstToken = findByTestId(root, 'transposer-output-token:0');
+    const secondToken = findByTestId(root, 'transposer-output-token:1');
+
+    expect((firstToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8')).toBe(
+      true,
+    );
+    expect((secondToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8')).toBe(
+      false,
+    );
+  });
+
+  it('scrolls back up when output changes and the reset token is above the visible area', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    measureTransposerOutput(root, 40);
+    measureTransposerToken(root, 0, 0, 20);
+    measureTransposerToken(root, 1, 80, 20);
+    setTransposerOutputScrollY(root, 80);
+
+    scrollToSpy.mockClear();
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    measureTransposerToken(root, 0, 0, 20);
+
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });
+  });
+
+  it('lets the transposer page control the shared listen state', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    await act(async () => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+    const listenButton = findByTestId(root, 'transposer-listen-button');
+
+    expect(flattenTextChildren(listenButton.children).trim()).toBe('Listen');
+
+    await act(async () => {
+      await listenButton.props.onPress();
+    });
+
+    const updatedButton = findByTestId(root, 'transposer-listen-button');
+
+    expect(flattenTextChildren(updatedButton.children).trim()).toBe('Stop');
   });
 
   it('lets desktop-style web switch to the custom tab pad from properties', () => {
@@ -287,6 +501,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
     const textInput = findTextInput(root);
 
@@ -327,6 +542,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
     const textInput = findTextInput(root);
 
@@ -361,6 +577,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
     const textInput = findTextInput(root);
 
@@ -387,6 +604,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
     const textInput = findTextInput(root);
 
@@ -413,6 +631,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
 
     act(() => {
@@ -449,6 +668,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
 
     await act(async () => {
@@ -479,6 +699,7 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
+    switchToCustomTabPad(root);
     const inputShell = findTransposerInputShell(root);
 
     await act(async () => {

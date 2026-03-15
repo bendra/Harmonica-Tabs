@@ -15,7 +15,15 @@ export type ParseResult = {
 
 export type OutputSegment = {
   text: string;
-  kind: 'normal' | 'error';
+  kind: 'normal' | 'error' | 'token';
+  tokenIndex?: number;
+};
+
+export type PlayableOutputToken = {
+  tokenIndex: number;
+  text: string;
+  canonical: string;
+  midi: number;
 };
 
 export type TransposeTabTextInput = {
@@ -30,6 +38,7 @@ export type TransposeTabTextInput = {
 export type TransposeTabTextResult = {
   output: string;
   outputSegments: OutputSegment[];
+  playableTokens: PlayableOutputToken[];
   warnings: string[];
   parsedTokenCount: number;
   transposedTokenCount: number;
@@ -230,6 +239,7 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
   const unknownSourceTokens: string[] = [];
   const unresolvedTokens: string[] = [];
   const outputSegments: OutputSegment[] = [];
+  const playableTokens: PlayableOutputToken[] = [];
 
   parsed.segments.forEach((segment) => {
       if (segment.kind === 'text') {
@@ -252,8 +262,15 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
       const targetMidi = sourceMidi + semitoneShift;
       const targetToken = targetMidiToToken.get(targetMidi);
       if (targetToken) {
+        const tokenIndex = playableTokens.length;
         transposedTokenCount += 1;
-        outputSegments.push({ text: targetToken, kind: 'normal' });
+        playableTokens.push({
+          tokenIndex,
+          text: targetToken,
+          canonical: targetToken,
+          midi: targetMidi,
+        });
+        outputSegments.push({ text: targetToken, kind: 'token', tokenIndex });
         return;
       }
 
@@ -276,6 +293,7 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
   return {
     output,
     outputSegments,
+    playableTokens,
     warnings,
     parsedTokenCount,
     transposedTokenCount,

@@ -63,6 +63,15 @@ describe('transposeTabText', () => {
 
     expect(result.output).toBe('6 -6');
     expect(result.transposedTokenCount).toBe(2);
+    expect(result.playableTokens).toEqual([
+      { tokenIndex: 0, text: '6', canonical: '6', midi: 79 },
+      { tokenIndex: 1, text: '-6', canonical: '-6', midi: 81 },
+    ]);
+    expect(result.outputSegments).toEqual([
+      { text: '6', kind: 'token', tokenIndex: 0 },
+      { text: ' ', kind: 'normal' },
+      { text: '-6', kind: 'token', tokenIndex: 1 },
+    ]);
   });
 
   it('keeps unknown tokens unchanged and marks them as errors', () => {
@@ -148,5 +157,31 @@ describe('transposeTabText', () => {
     expect(result.outputSegments).toEqual([{ text: '2', kind: 'error' }]);
     expect(result.warnings.some((warning) => warning.includes('No exact down transposition available'))).toBe(true);
     expect(result.unavailableCount).toBe(1);
+  });
+
+  it('only exposes successfully transposed tabs as playable output tokens', () => {
+    const result = transposeTabText({
+      input: '4 xyz 2 -2',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 7,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'down',
+    });
+
+    expect(result.output).toBe('-2 xyz 2 -1');
+    expect(result.playableTokens).toEqual([
+      { tokenIndex: 0, text: '-2', canonical: '-2', midi: 67 },
+      { tokenIndex: 1, text: '-1', canonical: '-1', midi: 62 },
+    ]);
+    expect(result.outputSegments).toEqual([
+      { text: '-2', kind: 'token', tokenIndex: 0 },
+      { text: ' ', kind: 'normal' },
+      { text: 'xyz', kind: 'error' },
+      { text: ' ', kind: 'normal' },
+      { text: '2', kind: 'error' },
+      { text: ' ', kind: 'normal' },
+      { text: '-1', kind: 'token', tokenIndex: 1 },
+    ]);
   });
 });

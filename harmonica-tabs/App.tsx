@@ -19,6 +19,12 @@ import { buildTabsForPcSet, buildTabsForScale, OverbendNotation, ScaleSelection,
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import { transposeTabText } from './src/logic/transposer';
 import {
+  createTransposerFollowState,
+  DetectorSnapshot,
+  evaluateTransposerFollow,
+  TransposerFollowState,
+} from './src/logic/transposer-follow';
+import {
   cleanupTransposerInput,
   deleteBackwardAtSelection,
   insertAtSelection,
@@ -104,6 +110,75 @@ const TAB_PAD_SUFFIX_OPTIONS: TabPadSuffixOption[] = [
 ];
 
 const TAB_PAD_HOLES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+const AUDIO_SIGNAL_HOLD_MS = 400;
+const AUDIO_CONFIDENCE_GATE = 0.2;
+const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
+
+function sanitizeDecimalInput(value: string): string {
+  let sawDot = false;
+  let result = '';
+
+  for (const char of value) {
+    if (/[0-9]/.test(char)) {
+      result += char;
+      continue;
+    }
+    if (char === '.' && !sawDot) {
+      sawDot = true;
+      result += char;
+    }
+  }
+
+  return result;
+}
+
+function parseBoundedNumber(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function parseBoundedInteger(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function formatToneFollowStatus(params: {
+  isListening: boolean;
+  currentTokenText: string | null;
+  status: 'idle' | 'listening' | 'holding' | 'advanced' | 'waiting-for-release' | 'no-match';
+  centsOffset: number | null;
+}): string {
+  const { centsOffset, currentTokenText, isListening, status } = params;
+  const targetLabel = currentTokenText ? `Target ${currentTokenText}` : 'No target';
+
+  if (!isListening) {
+    return `${targetLabel} • Listening off`;
+  }
+
+  if (status === 'holding') {
+    return `${targetLabel} • Holding${centsOffset === null ? '' : ` ${formatCents(centsOffset)}`}`;
+  }
+
+  if (status === 'advanced') {
+    return `${targetLabel} • Advanced`;
+  }
+
+  if (status === 'waiting-for-release') {
+    return `${targetLabel} • Release note before the next match`;
+  }
+
+  if (status === 'no-match') {
+    return `${targetLabel} • Waiting for match${centsOffset === null ? '' : ` ${formatCents(centsOffset)}`}`;
+  }
+
+  if (status === 'listening') {
+    return `${targetLabel} • Listening`;
+  }
+
+  return `${targetLabel} • Idle`;
+}
 
 /**
  * Reusable single-value dropdown rendered with a modal menu.
@@ -113,6 +188,7 @@ function Dropdown<T extends string | number>(props: {
   value: T;
   options: DropdownOption<T>[];
   onChange: (value: T) => void;
+  compact?: boolean;
 }) {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
@@ -128,15 +204,24 @@ function Dropdown<T extends string | number>(props: {
   }
 
   return (
-    <View style={styles.dropdown}>
-      <Text style={styles.dropdownLabel}>{props.label}</Text>
+    <View style={[styles.dropdown, props.compact && styles.dropdownCompact]}>
+      <Text style={[styles.dropdownLabel, props.compact && styles.dropdownLabelCompact]}>{props.label}</Text>
       <Pressable
         ref={triggerRef}
         onPress={() => (open ? setOpen(false) : openMenu())}
-        style={[styles.dropdownTrigger, open && styles.dropdownTriggerOpen]}
+        style={[
+          styles.dropdownTrigger,
+          props.compact && styles.dropdownTriggerCompact,
+          open && styles.dropdownTriggerOpen,
+        ]}
       >
-        <Text style={styles.dropdownTriggerText}>{active?.label ?? 'Select'}</Text>
-        <Text style={styles.dropdownCaret}>{open ? '▲' : '▼'}</Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.dropdownTriggerText, props.compact && styles.dropdownTriggerTextCompact]}
+        >
+          {active?.label ?? 'Select'}
+        </Text>
+        <Text style={[styles.dropdownCaret, props.compact && styles.dropdownCaretCompact]}>{open ? '▲' : '▼'}</Text>
       </Pressable>
       <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
         <View style={styles.dropdownOverlay}>
@@ -237,11 +322,22 @@ export default function App() {
   const [transposerPadSign, setTransposerPadSign] = useState<TransposerTokenSign>('');
   const [transposerPadSuffix, setTransposerPadSuffix] = useState<TransposerTokenSuffix>('');
   const [transposerPasteStatus, setTransposerPasteStatus] = useState<string | null>(null);
-  const [transposerKeyboardPreference, setTransposerKeyboardPreference] = useState<'custom' | 'native' | null>(null);
+  const [transposerKeyboardPreference, setTransposerKeyboardPreference] = useState<'custom' | 'native' | null>('native');
+  const [toneToleranceInput, setToneToleranceInput] = useState('10');
+  const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
+  const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
   const [stripInvalidTransposerContent, setStripInvalidTransposerContent] = useState(true);
   const [removeExcessTransposerWhitespace, setRemoveExcessTransposerWhitespace] = useState(true);
   const [listenError, setListenError] = useState<string | null>(null);
   const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
+  const [transposerFollowState, setTransposerFollowState] = useState<TransposerFollowState>(
+    createTransposerFollowState(null),
+  );
+  const [toneFollowTick, setToneFollowTick] = useState(0);
+  const [transposerOutputViewportHeight, setTransposerOutputViewportHeight] = useState(0);
+  const [transposerOutputTokenLayouts, setTransposerOutputTokenLayouts] = useState<
+    Record<number, { y: number; height: number }>
+  >({});
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
   const [arpeggioLayouts, setArpeggioLayouts] = useState<
     Record<string, Array<{ x: number; y: number; width: number; height: number }>>
@@ -249,11 +345,11 @@ export default function App() {
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
   const pagerRef = useRef<ScrollView>(null);
+  const transposerOutputScrollRef = useRef<ScrollView>(null);
+  const transposerOutputScrollYRef = useRef(0);
   const transposerInputRef = useRef<TextInput>(null);
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
   const transposerPadDismissInProgressRef = useRef(false);
-  const holdMs = 400;
-  const toneToleranceCents = 10;
 
   useEffect(() => {
     detectorRef.current = createWebAudioPitchDetector();
@@ -389,10 +485,37 @@ export default function App() {
     }),
     [stripInvalidTransposerContent, removeExcessTransposerWhitespace],
   );
+  const toneToleranceCents = useMemo(
+    () => parseBoundedNumber(toneToleranceInput, 10, 1, 100),
+    [toneToleranceInput],
+  );
+  const toneFollowMinConfidence = useMemo(
+    () => parseBoundedNumber(toneFollowMinConfidenceInput, 0.35, 0, 1),
+    [toneFollowMinConfidenceInput],
+  );
+  const toneFollowHoldDurationMs = useMemo(
+    () => parseBoundedInteger(toneFollowHoldDurationInput, 400, 1, 5000),
+    [toneFollowHoldDurationInput],
+  );
+
+  useEffect(() => {
+    const nextActiveIndex = transposerResult.playableTokens.length > 0 ? 0 : null;
+    setTransposerFollowState(createTransposerFollowState(nextActiveIndex));
+    setTransposerOutputTokenLayouts({});
+  }, [transposerResult.playableTokens]);
 
   useEffect(() => {
     setTransposerDirection(defaultDirection);
   }, [defaultDirection]);
+
+  useEffect(() => {
+    if (!isListening || transposerResult.playableTokens.length === 0) return;
+    const intervalId = setInterval(() => {
+      setToneFollowTick((prev) => prev + 1);
+    }, 50);
+
+    return () => clearInterval(intervalId);
+  }, [isListening, transposerResult.playableTokens.length]);
 
   /**
    * Keeps the pager's visible page aligned with the saved page index.
@@ -473,6 +596,38 @@ export default function App() {
       start: Math.min(prev.start, cleaned.length),
       end: Math.min(prev.end, cleaned.length),
     }));
+  }
+
+  function moveTransposerCursor(tokenIndex: number) {
+    setTransposerFollowState(createTransposerFollowState(tokenIndex));
+  }
+
+  function ensureActiveTransposerTokenVisible(params: {
+    activeTokenIndex: number | null;
+    layouts: Record<number, { y: number; height: number }>;
+    scrollY: number;
+    viewportHeight: number;
+  }) {
+    const { activeTokenIndex, layouts, scrollY, viewportHeight } = params;
+    if (activeTokenIndex === null || viewportHeight <= 0) return null;
+
+    const layout = layouts[activeTokenIndex];
+    if (!layout) return null;
+
+    const visibleTop = scrollY + TRANSPOSER_OUTPUT_SCROLL_PADDING;
+    const visibleBottom = scrollY + viewportHeight - TRANSPOSER_OUTPUT_SCROLL_PADDING;
+    const tokenTop = layout.y;
+    const tokenBottom = layout.y + layout.height;
+
+    if (tokenTop < visibleTop) {
+      return Math.max(0, tokenTop - TRANSPOSER_OUTPUT_SCROLL_PADDING);
+    }
+
+    if (tokenBottom > visibleBottom) {
+      return Math.max(0, tokenBottom - viewportHeight + TRANSPOSER_OUTPUT_SCROLL_PADDING);
+    }
+
+    return null;
   }
 
   function insertQuickSymbol(symbol: string) {
@@ -651,28 +806,87 @@ export default function App() {
   const parsedFrequency = Number.parseFloat(simFrequency);
   const simHz = Number.isFinite(parsedFrequency) ? parsedFrequency : null;
   const now = Date.now();
-  const hasHold = lastDetectedAt !== null && now - lastDetectedAt < holdMs;
+  const hasHold = lastDetectedAt !== null && now - lastDetectedAt < AUDIO_SIGNAL_HOLD_MS;
   const effectiveWebFrequency =
-    detectedConfidence >= 0.2 && detectedFrequency
+    detectedConfidence >= AUDIO_CONFIDENCE_GATE && detectedFrequency
       ? detectedFrequency
       : hasHold
         ? detectedFrequency
         : null;
-  const frequency = isListening ? (listenSource === 'web' ? effectiveWebFrequency : simHz) : null;
+  const audioSnapshot = useMemo<DetectorSnapshot>(
+    () => ({
+      frequency: !isListening ? null : listenSource === 'web' ? effectiveWebFrequency : simHz,
+      confidence: !isListening ? 0 : listenSource === 'web' ? detectedConfidence : simHz ? 1 : 0,
+      rms: detectedRms,
+      source: isListening ? listenSource : null,
+      lastDetectedAt,
+    }),
+    [detectedConfidence, detectedRms, effectiveWebFrequency, isListening, lastDetectedAt, listenSource, simHz],
+  );
+  const frequency = audioSnapshot.frequency;
   const midis = groups.map((group) => group.midi);
   const pitchMatch = isListening && frequency ? matchFrequencyToTabs(midis, frequency, 25) : null;
   const caretPos = mainSelected ? getCaretPosition(pitchMatch, tabLayouts) : null;
-  const mainInTune =
-    pitchMatch !== null && Math.abs(pitchMatch.centsOffset) <= toneToleranceCents;
+  const mainInTune = pitchMatch !== null && Math.abs(pitchMatch.centsOffset) <= toneToleranceCents;
   const activeTab = pitchMatch ? selectedTabs[pitchMatch.activeIndex] : null;
-  const effectiveConfidence = listenSource === 'web' ? detectedConfidence : frequency ? 1 : 0;
+  const effectiveConfidence = audioSnapshot.confidence;
+  const transposerFollowEvaluation = evaluateTransposerFollow({
+    enabled: isListening,
+    tokens: transposerResult.playableTokens,
+    state: transposerFollowState,
+    detector: audioSnapshot,
+    toneToleranceCents,
+    minConfidence: toneFollowMinConfidence,
+    holdDurationMs: toneFollowHoldDurationMs,
+    now: toneFollowTick > 0 ? Date.now() : now,
+  });
+  const activeTransposerToken =
+    transposerFollowState.activeTokenIndex === null
+      ? null
+      : transposerResult.playableTokens[transposerFollowState.activeTokenIndex] ?? null;
+  const toneFollowStatusText = formatToneFollowStatus({
+    isListening,
+    currentTokenText: activeTransposerToken?.text ?? null,
+    status: transposerFollowEvaluation.status,
+    centsOffset: transposerFollowEvaluation.centsOffset,
+  });
   const statusText = isListening
     ? listenError
       ? listenError
-      : activeTab && effectiveConfidence >= 0.2
+      : activeTab && effectiveConfidence >= AUDIO_CONFIDENCE_GATE
         ? `${activeTab.tab} • ${frequency?.toFixed(1)} Hz ${pitchMatch ? formatCents(pitchMatch.centsOffset) : ''}`
         : 'No signal'
     : 'Off';
+
+  useEffect(() => {
+    const nextState = transposerFollowEvaluation.state;
+    if (
+      nextState.activeTokenIndex === transposerFollowState.activeTokenIndex &&
+      nextState.matchedSince === transposerFollowState.matchedSince &&
+      nextState.waitingForRelease === transposerFollowState.waitingForRelease
+    ) {
+      return;
+    }
+
+    setTransposerFollowState(nextState);
+  }, [transposerFollowEvaluation.state, transposerFollowState]);
+
+  useEffect(() => {
+    const nextScrollY = ensureActiveTransposerTokenVisible({
+      activeTokenIndex: transposerFollowState.activeTokenIndex,
+      layouts: transposerOutputTokenLayouts,
+      scrollY: transposerOutputScrollYRef.current,
+      viewportHeight: transposerOutputViewportHeight,
+    });
+    if (nextScrollY === null || nextScrollY === transposerOutputScrollYRef.current) return;
+
+    transposerOutputScrollRef.current?.scrollTo({ y: nextScrollY, animated: true });
+    transposerOutputScrollYRef.current = nextScrollY;
+  }, [
+    transposerFollowState.activeTokenIndex,
+    transposerOutputTokenLayouts,
+    transposerOutputViewportHeight,
+  ]);
 
   /**
    * Starts microphone/sim listening and wires detector updates into state.
@@ -688,7 +902,7 @@ export default function App() {
           setDetectedFrequency(update.frequency);
           setDetectedConfidence(update.confidence);
           setDetectedRms(update.rms);
-          if (update.frequency && update.confidence >= 0.2) {
+          if (update.frequency && update.confidence >= AUDIO_CONFIDENCE_GATE) {
             setLastDetectedAt(Date.now());
           }
         });
@@ -741,39 +955,44 @@ export default function App() {
         {screen === 'properties' ? (
           <View style={styles.propertiesCard}>
             <Text style={styles.propertiesTitle}>Display</Text>
-            <View style={styles.propertiesField}>
-              <Dropdown
-                label="Overbend Symbol"
-                value={notation}
-                options={[
-                  { label: "'", value: 'apostrophe' },
-                  { label: '°', value: 'degree' },
-                ]}
-                onChange={(value) => setNotation(value as OverbendNotation)}
-              />
-            </View>
-            <View style={styles.propertiesField}>
-              <Dropdown
-                label="Position/Key Set"
-                value={positionKeyFilter}
-                options={[
-                  { label: '1, 2, 3', value: '1-2-3' },
-                  { label: '1, 2, 3, 5', value: '1-2-3-5' },
-                  { label: 'all', value: 'all' },
-                ]}
-                onChange={(value) => setPositionKeyFilter(value as PositionKeyFilter)}
-              />
-            </View>
-            <View style={styles.propertiesField}>
-              <Dropdown
-                label="2 Draw / 3 Blow Preference"
-                value={gAltPreference}
-                options={[
-                  { label: '-2', value: '-2' },
-                  { label: '3', value: '3' },
-                ]}
-                onChange={(value) => setGAltPreference(value as '-2' | '3')}
-              />
+            <View style={styles.propertiesCompactDropdownRow}>
+              <View style={styles.propertiesCompactDropdownField}>
+                <Dropdown
+                  compact
+                  label="Overbend"
+                  value={notation}
+                  options={[
+                    { label: "'", value: 'apostrophe' },
+                    { label: '°', value: 'degree' },
+                  ]}
+                  onChange={(value) => setNotation(value as OverbendNotation)}
+                />
+              </View>
+              <View style={styles.propertiesCompactDropdownField}>
+                <Dropdown
+                  compact
+                  label="Key Set"
+                  value={positionKeyFilter}
+                  options={[
+                    { label: '1, 2, 3', value: '1-2-3' },
+                    { label: '1, 2, 3, 5', value: '1-2-3-5' },
+                    { label: 'all', value: 'all' },
+                  ]}
+                  onChange={(value) => setPositionKeyFilter(value as PositionKeyFilter)}
+                />
+              </View>
+              <View style={styles.propertiesCompactDropdownField}>
+                <Dropdown
+                  compact
+                  label="-2 / 3"
+                  value={gAltPreference}
+                  options={[
+                    { label: '-2', value: '-2' },
+                    { label: '3', value: '3' },
+                  ]}
+                  onChange={(value) => setGAltPreference(value as '-2' | '3')}
+                />
+              </View>
             </View>
             <View style={styles.propertiesRow}>
               <Pressable
@@ -843,6 +1062,54 @@ export default function App() {
                 {removeExcessTransposerWhitespace ? '☑' : '☐'} Remove excess white space in transposer input
               </Text>
             </Pressable>
+            <Text style={styles.propertiesTitle}>Tone Follow</Text>
+            <View style={styles.propertiesInlineFields}>
+              <View style={styles.propertiesInlineField}>
+                <Text style={styles.dropdownLabel}>Tolerance</Text>
+                <TextInput
+                  value={toneToleranceInput}
+                  onChangeText={(value) => setToneToleranceInput(sanitizeDecimalInput(value))}
+                  keyboardType="decimal-pad"
+                  inputMode="decimal"
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="10"
+                  placeholderTextColor="#64748b"
+                  style={styles.propertiesNumberInput}
+                />
+              </View>
+              <View style={styles.propertiesInlineField}>
+                <Text style={styles.dropdownLabel}>Confidence</Text>
+                <TextInput
+                  value={toneFollowMinConfidenceInput}
+                  onChangeText={(value) => setToneFollowMinConfidenceInput(sanitizeDecimalInput(value))}
+                  keyboardType="decimal-pad"
+                  inputMode="decimal"
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="0.35"
+                  placeholderTextColor="#64748b"
+                  style={styles.propertiesNumberInput}
+                />
+              </View>
+              <View style={styles.propertiesInlineField}>
+                <Text style={styles.dropdownLabel}>Hold ms</Text>
+                <TextInput
+                  value={toneFollowHoldDurationInput}
+                  onChangeText={(value) => setToneFollowHoldDurationInput(value.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="400"
+                  placeholderTextColor="#64748b"
+                  style={styles.propertiesNumberInput}
+                />
+              </View>
+            </View>
             <View style={styles.propertiesRow}>
               <Pressable onPress={() => setScreen('tab-symbols')} style={styles.debugToggle}>
                 <Text style={styles.debugToggleText}>Tab symbols help</Text>
@@ -1187,6 +1454,24 @@ export default function App() {
                     <Text style={styles.transposerMeta}>
                       Target: position {targetPosition} ({pcToNote(scale.rootPc, harmonicaKey.preferFlats)})
                     </Text>
+                    <View style={styles.transposerFollowControls}>
+                      <Pressable
+                        testID="transposer-listen-button"
+                        onPress={() => {
+                          if (isListening) {
+                            stopListening();
+                          } else {
+                            startListening();
+                          }
+                        }}
+                        style={[styles.listenButton, isListening && styles.listenButtonActive]}
+                      >
+                        <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
+                          {isListening ? 'Stop' : 'Listen'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.transposerFollowStatus}>{toneFollowStatusText}</Text>
                     {Platform.OS === 'web' && useCustomTransposerPad ? (
                       <Pressable
                         testID="transposer-input-shell"
@@ -1343,10 +1628,18 @@ export default function App() {
                     </View>
                     <Text style={styles.transposerSectionLabel}>Transposed Output</Text>
                     <ScrollView
+                      ref={transposerOutputScrollRef}
                       testID="transposer-output-scroll"
                       style={[styles.transposerOutputBox, { maxHeight: transposerOutputMaxHeight }]}
                       contentContainerStyle={styles.transposerOutputContent}
                       nestedScrollEnabled
+                      onLayout={(event) => {
+                        setTransposerOutputViewportHeight(event.nativeEvent.layout.height);
+                      }}
+                      onScroll={(event) => {
+                        transposerOutputScrollYRef.current = event.nativeEvent.contentOffset.y;
+                      }}
+                      scrollEventThrottle={16}
                     >
                       <Text style={styles.transposerOutputText}>
                         {transposerInput.trim().length === 0
@@ -1354,7 +1647,40 @@ export default function App() {
                           : transposerResult.outputSegments.map((segment, index) => (
                               <Text
                                 key={`out:${index}`}
-                                style={segment.kind === 'error' ? styles.transposerOutputError : undefined}
+                                testID={segment.kind === 'token' ? `transposer-output-token:${segment.tokenIndex}` : undefined}
+                                onPress={
+                                  segment.kind === 'token' && segment.tokenIndex !== undefined
+                                    ? () => moveTransposerCursor(segment.tokenIndex as number)
+                                    : undefined
+                                }
+                                onLayout={
+                                  segment.kind === 'token' && segment.tokenIndex !== undefined
+                                    ? (event) => {
+                                        const { y, height } = event.nativeEvent.layout;
+                                        setTransposerOutputTokenLayouts((prev) => {
+                                          const current = prev[segment.tokenIndex as number];
+                                          if (current && current.y === y && current.height === height) {
+                                            return prev;
+                                          }
+                                          return {
+                                            ...prev,
+                                            [segment.tokenIndex as number]: { y, height },
+                                          };
+                                        });
+                                      }
+                                    : undefined
+                                }
+                                style={[
+                                  segment.kind === 'error' && styles.transposerOutputError,
+                                  segment.kind === 'token' && styles.transposerOutputToken,
+                                  segment.kind === 'token' &&
+                                    segment.tokenIndex === transposerFollowState.activeTokenIndex &&
+                                    styles.transposerOutputTokenActive,
+                                  segment.kind === 'token' &&
+                                    segment.tokenIndex === transposerFollowState.activeTokenIndex &&
+                                    transposerFollowEvaluation.matchingTarget &&
+                                    styles.transposerOutputTokenMatched,
+                                ]}
                               >
                                 {segment.text}
                               </Text>
@@ -1576,6 +1902,25 @@ const styles = StyleSheet.create({
   propertiesField: {
     gap: 6,
   },
+  propertiesCompactDropdownRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  propertiesCompactDropdownField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  propertiesInlineFields: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  propertiesInlineField: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
   propertiesRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1596,11 +1941,29 @@ const styles = StyleSheet.create({
   dropdown: {
     gap: 6,
   },
+  dropdownCompact: {
+    gap: 4,
+  },
   dropdownLabel: {
     color: '#94a3b8',
     fontSize: 12,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  dropdownLabelCompact: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
+  propertiesNumberInput: {
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: '#0f172a',
+    color: '#e2e8f0',
+    fontFamily: 'Courier',
+    fontSize: 13,
   },
   dropdownTrigger: {
     flexDirection: 'row',
@@ -1613,16 +1976,30 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#0f172a',
   },
+  dropdownTriggerCompact: {
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
   dropdownTriggerOpen: {
     borderColor: '#38bdf8',
   },
   dropdownTriggerText: {
     color: '#e2e8f0',
     fontWeight: '600',
+    flexShrink: 1,
+  },
+  dropdownTriggerTextCompact: {
+    fontSize: 12,
   },
   dropdownCaret: {
     color: '#94a3b8',
     fontWeight: '700',
+    marginLeft: 6,
+  },
+  dropdownCaretCompact: {
+    marginLeft: 4,
+    fontSize: 11,
   },
   dropdownMenu: {
     borderWidth: 1,
@@ -2151,6 +2528,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     flexShrink: 0,
   },
+  transposerFollowControls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  transposerFollowStatus: {
+    color: '#cbd5e1',
+    fontSize: 12,
+  },
   transposerActionButton: {
     borderWidth: 1,
     borderColor: '#38bdf8',
@@ -2236,6 +2623,19 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     fontSize: 13,
     lineHeight: 20,
+  },
+  transposerOutputToken: {
+    color: '#f8fafc',
+    borderRadius: 4,
+  },
+  transposerOutputTokenActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+  },
+  transposerOutputTokenMatched: {
+    borderColor: '#16e05d',
+    backgroundColor: 'rgba(22, 224, 93, 0.22)',
   },
   transposerOutputError: {
     color: '#ef4444',
