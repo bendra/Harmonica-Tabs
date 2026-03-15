@@ -59,6 +59,10 @@ function findAllTransposerInputShells(root: any) {
   return root.findAll((node: any) => node.type === 'Pressable' && node.props.testID === 'transposer-input-shell');
 }
 
+function findTransposerOutputScroll(root: any) {
+  return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'transposer-output-scroll');
+}
+
 function findVisibleModal(root: any) {
   return root.findAll((node: any) => node.type === 'Modal')[0] ?? null;
 }
@@ -213,6 +217,25 @@ describe('App navigation', () => {
     ).toHaveLength(0);
     expect(findAllText(root, 'Paste')).toHaveLength(0);
     expect(findAllTransposerInputShells(root)).toHaveLength(0);
+  });
+
+  it('renders transposed output inside a capped inner scroll area', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+    const outputScroll = findTransposerOutputScroll(root);
+    const maxHeightStyle = (outputScroll.props.style as Array<Record<string, unknown>>).find(
+      (entry) => typeof entry?.maxHeight === 'number',
+    );
+
+    expect(outputScroll.props.nestedScrollEnabled).toBe(true);
+    expect(maxHeightStyle?.maxHeight).toBe(256);
   });
 
   it('lets desktop-style web switch to the custom tab pad from properties', () => {

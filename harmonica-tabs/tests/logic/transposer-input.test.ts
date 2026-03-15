@@ -145,6 +145,14 @@ Now Playing`;
   it('returns an empty string when no tab content is found', () => {
     expect(cleanupTransposerInput('lyrics only', cleanupDefaults)).toBe('');
   });
+
+  it('drops free-floating symbols and out-of-range hole numbers', () => {
+    expect(cleanupTransposerInput("- ' 0 11", cleanupDefaults)).toBe('');
+  });
+
+  it('keeps valid tokens while stripping invalid trailing symbols', () => {
+    expect(cleanupTransposerInput("-1 10 1- 4'' '", cleanupDefaults)).toBe("-1 10 1 4''");
+  });
 });
 
 describe('insertAtSelection', () => {

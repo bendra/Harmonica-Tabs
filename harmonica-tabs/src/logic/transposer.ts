@@ -110,7 +110,6 @@ function parseTokenAt(input: string, start: number): TokenMatch | null {
 export function parseTabText(input: string): ParseResult {
   const segments: ParsedSegment[] = [];
   const textBuffer: string[] = [];
-  const unknownFragments = new Set<string>();
   let cursor = 0;
 
   function flushText() {
@@ -140,9 +139,6 @@ export function parseTabText(input: string): ParseResult {
       const fragment = input.slice(cursor, fragmentEnd);
       flushText();
       segments.push({ kind: 'invalid', raw: fragment });
-      if (/\S/.test(fragment)) {
-        unknownFragments.add(fragment);
-      }
       cursor = fragmentEnd;
       continue;
     }
@@ -158,7 +154,6 @@ export function parseTabText(input: string): ParseResult {
       const fragment = input.slice(cursor, fragmentEnd);
       flushText();
       segments.push({ kind: 'invalid', raw: fragment });
-      unknownFragments.add(fragment);
       cursor = fragmentEnd;
       continue;
     }
@@ -171,7 +166,7 @@ export function parseTabText(input: string): ParseResult {
 
   return {
     segments,
-    warnings: Array.from(unknownFragments).slice(0, 5).map((fragment) => `Unrecognized token: ${fragment}`),
+    warnings: [],
   };
 }
 

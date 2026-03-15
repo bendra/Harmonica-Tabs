@@ -314,6 +314,7 @@ export default function App() {
     [],
   );
   const pageWidth = Math.max(width - 40, 280);
+  const transposerOutputMaxHeight = Math.max(160, Math.min(Math.floor(height * 0.32), 280));
   const targetPosition = scaleKeyOptions.find((option) => option.note === scaleRoot)?.position ?? 1;
 
   const transposerDownResult = useMemo(
@@ -1341,7 +1342,12 @@ export default function App() {
                       </Pressable>
                     </View>
                     <Text style={styles.transposerSectionLabel}>Transposed Output</Text>
-                    <View style={styles.transposerOutputBox}>
+                    <ScrollView
+                      testID="transposer-output-scroll"
+                      style={[styles.transposerOutputBox, { maxHeight: transposerOutputMaxHeight }]}
+                      contentContainerStyle={styles.transposerOutputContent}
+                      nestedScrollEnabled
+                    >
                       <Text style={styles.transposerOutputText}>
                         {transposerInput.trim().length === 0
                           ? 'Enter tabs above to generate a transposed tab.'
@@ -1354,7 +1360,7 @@ export default function App() {
                               </Text>
                             ))}
                       </Text>
-                    </View>
+                    </ScrollView>
                     {transposerResult.warnings.length > 0 && (
                       <View style={styles.transposerWarnings}>
                         {transposerResult.warnings.map((warning, index) => (
@@ -2219,9 +2225,11 @@ const styles = StyleSheet.create({
     borderColor: '#182233',
     borderRadius: 10,
     backgroundColor: '#0a101b',
+    minHeight: 120,
+  },
+  transposerOutputContent: {
     paddingVertical: 10,
     paddingHorizontal: 10,
-    minHeight: 120,
   },
   transposerOutputText: {
     color: '#f8fafc',

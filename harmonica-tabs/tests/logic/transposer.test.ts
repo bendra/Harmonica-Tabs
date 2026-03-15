@@ -25,14 +25,19 @@ describe('parseTabText', () => {
     expect(result.output).toBe("4   -2\n\n6'");
   });
 
-  it('adds warnings for unrecognized token-like fragments', () => {
+  it('does not add warnings for unrecognized token-like fragments', () => {
     const parsed = parseTabText('4 abc 4x -3?');
-    expect(parsed.warnings.length).toBeGreaterThan(0);
+    expect(parsed.warnings).toEqual([]);
   });
 
-  it('flags unsupported standalone tokens such as letters and symbols', () => {
+  it('flags unsupported standalone tokens such as letters and symbols as invalid segments', () => {
     const parsed = parseTabText('C %');
-    expect(parsed.warnings).toEqual(['Unrecognized token: C', 'Unrecognized token: %']);
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.segments).toEqual([
+      { kind: 'invalid', raw: 'C' },
+      { kind: 'text', text: ' ' },
+      { kind: 'invalid', raw: '%' },
+    ]);
   });
 
   it('accepts curly apostrophes and normalizes them', () => {
@@ -60,7 +65,7 @@ describe('transposeTabText', () => {
     expect(result.transposedTokenCount).toBe(2);
   });
 
-  it('keeps unknown tokens unchanged and warns', () => {
+  it('keeps unknown tokens unchanged and marks them as errors', () => {
     const result = transposeTabText({
       input: '4 4x -2',
       sourceHarmonicaPc: 0,
@@ -71,7 +76,7 @@ describe('transposeTabText', () => {
     });
 
     expect(result.output).toContain('4x');
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings).toEqual([]);
     expect(result.outputSegments.some((segment) => segment.text === '4x' && segment.kind === 'error')).toBe(true);
   });
 
@@ -85,7 +90,7 @@ describe('transposeTabText', () => {
       direction: 'down',
     });
 
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings).toEqual([]);
     expect(result.outputSegments.some((segment) => segment.kind === 'error')).toBe(true);
   });
 

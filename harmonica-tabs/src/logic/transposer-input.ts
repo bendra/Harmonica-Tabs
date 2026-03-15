@@ -138,12 +138,6 @@ function extractTabContent(input: string, removeExcessWhitespace: boolean): stri
 
       extracted += line.slice(previousEnd).replace(/[^\s]/g, '');
       keptLines.push(removeExcessWhitespace ? extracted.trim().replace(SPACE_RUN, ' ') : extracted);
-      return;
-    }
-
-    const containsOnlyTabChars = !/[A-Za-z]/.test(line) && !/[^0-9+\-'\u00B0\s]/.test(line);
-    if (containsOnlyTabChars) {
-      keptLines.push(removeExcessWhitespace ? line.trim().replace(SPACE_RUN, ' ') : line);
     }
   });
 
