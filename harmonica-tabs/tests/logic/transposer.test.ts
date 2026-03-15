@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTabText, transposeTabText } from './transposer';
+import { parseTabText, transposeTabText } from '../../src/logic/transposer';
 
 describe('parseTabText', () => {
   it('parses core tokens and plus-prefix tokens', () => {

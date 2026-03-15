@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Platform,
   SafeAreaView,
   ScrollView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -20,10 +20,21 @@ import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import { transposeTabText } from './src/logic/transposer';
 import {
   cleanupTransposerInput,
+  deleteBackwardAtSelection,
   insertAtSelection,
+  insertTokenAtSelection,
+  normalizeTransposerEditInput,
   TextSelection,
   TransposerCleanupOptions,
+  TransposerTokenSign,
+  TransposerTokenSuffix,
 } from './src/logic/transposer-input';
+import {
+  detectTransposerInputMode,
+  readWebTransposerInputSignals,
+  TransposerInputMode,
+} from './src/logic/transposer-input-mode';
+import { readClipboardText } from './src/logic/transposer-clipboard';
 import { createWebAudioPitchDetector } from './src/logic/web-audio';
 
 /**
@@ -68,7 +79,31 @@ type SingleSelectOption<T extends string> = {
 };
 
 type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
-type QuickSymbol = { label: string; value: string };
+type TabPadSignOption = {
+  label: string;
+  value: TransposerTokenSign;
+};
+
+type TabPadSuffixOption = {
+  label: string;
+  value: TransposerTokenSuffix;
+};
+
+const TAB_PAD_SIGN_OPTIONS: TabPadSignOption[] = [
+  { label: 'Plain', value: '' },
+  { label: 'Draw -', value: '-' },
+  { label: 'Blow +', value: '+' },
+];
+
+const TAB_PAD_SUFFIX_OPTIONS: TabPadSuffixOption[] = [
+  { label: 'Straight', value: '' },
+  { label: "'", value: "'" },
+  { label: "''", value: "''" },
+  { label: "'''", value: "'''" },
+  { label: '°', value: '°' },
+];
+
+const TAB_PAD_HOLES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 
 /**
  * Reusable single-value dropdown rendered with a modal menu.
@@ -176,6 +211,8 @@ function SingleSelectGroup<T extends string>(props: {
 export default function App() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = Math.min(width, height) < 420;
+  const isActEnvironment =
+    typeof globalThis !== 'undefined' && Boolean((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   const [screen, setScreen] = useState<'main' | 'properties' | 'tab-symbols'>('main');
   const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
@@ -195,6 +232,12 @@ export default function App() {
   const [transposerInput, setTransposerInput] = useState('');
   const [transposerSelection, setTransposerSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [transposerDirection, setTransposerDirection] = useState<'up' | 'down'>('down');
+  const [transposerPadVisible, setTransposerPadVisible] = useState(false);
+  const [transposerPadDebugEvents, setTransposerPadDebugEvents] = useState<string[]>([]);
+  const [transposerPadSign, setTransposerPadSign] = useState<TransposerTokenSign>('');
+  const [transposerPadSuffix, setTransposerPadSuffix] = useState<TransposerTokenSuffix>('');
+  const [transposerPasteStatus, setTransposerPasteStatus] = useState<string | null>(null);
+  const [transposerKeyboardPreference, setTransposerKeyboardPreference] = useState<'custom' | 'native' | null>(null);
   const [stripInvalidTransposerContent, setStripInvalidTransposerContent] = useState(true);
   const [removeExcessTransposerWhitespace, setRemoveExcessTransposerWhitespace] = useState(true);
   const [listenError, setListenError] = useState<string | null>(null);
@@ -208,6 +251,7 @@ export default function App() {
   const pagerRef = useRef<ScrollView>(null);
   const transposerInputRef = useRef<TextInput>(null);
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
+  const transposerPadDismissInProgressRef = useRef(false);
   const holdMs = 400;
   const toneToleranceCents = 10;
 
@@ -315,13 +359,28 @@ export default function App() {
     { page: 0 as const, label: 'Visualizer' },
     { page: 1 as const, label: 'Transposer' },
   ];
-  const quickSymbols: QuickSymbol[] = [
-    { label: '-', value: '-' },
-    { label: "'", value: "'" },
-    { label: '°', value: '°' },
-    { label: 'space', value: ' ' },
-    { label: '↵', value: '\n' },
-  ];
+  const transposerInputDetection = useMemo(() => {
+    const runtimeSignals =
+      Platform.OS === 'web'
+        ? readWebTransposerInputSignals()
+        : { coarsePointerMediaMatches: false, maxTouchPoints: 0 };
+
+    return detectTransposerInputMode({
+      platformOs: Platform.OS,
+      viewportWidth: width,
+      viewportHeight: height,
+      coarsePointerMediaMatches: runtimeSignals.coarsePointerMediaMatches,
+      maxTouchPoints: runtimeSignals.maxTouchPoints,
+    });
+  }, [width, height]);
+  const effectiveTransposerInputMode =
+    transposerKeyboardPreference === 'custom'
+      ? 'pad'
+      : transposerKeyboardPreference === 'native'
+        ? 'native'
+        : transposerInputDetection.defaultMode;
+  const useCustomTransposerPad = effectiveTransposerInputMode === 'pad';
+  const shouldConsoleLogTransposerPadDebug = Platform.OS === 'web' && !isActEnvironment;
   const transposerCleanupOptions = useMemo<TransposerCleanupOptions>(
     () => ({
       stripInvalidContent: stripInvalidTransposerContent,
@@ -334,16 +393,48 @@ export default function App() {
     setTransposerDirection(defaultDirection);
   }, [defaultDirection]);
 
-  useEffect(() => {
-    const cleaned = cleanupTransposerInput(transposerInput, transposerCleanupOptions);
-    if (cleaned === transposerInput) return;
+  /**
+   * Keeps the pager's visible page aligned with the saved page index.
+   */
+  function scrollToPagerPage(page: number, animated: boolean) {
+    pagerRef.current?.scrollTo({ x: page * pageWidth, animated });
+  }
 
-    setTransposerInput(cleaned);
-    setTransposerSelection((prev) => ({
-      start: Math.min(prev.start, cleaned.length),
-      end: Math.min(prev.end, cleaned.length),
-    }));
-  }, [transposerCleanupOptions, transposerInput]);
+  useEffect(() => {
+    if (screen !== 'main') return;
+    const frameId = requestAnimationFrame(() => {
+      scrollToPagerPage(pagerIndex, false);
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [screen, pageWidth]);
+
+  useEffect(() => {
+    if (screen === 'main' && pagerIndex === 1) return;
+    setTransposerPadVisibleWithDebug(false, 'leave-transposer-page');
+  }, [pagerIndex, screen]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (useCustomTransposerPad) return;
+    setTransposerPadVisibleWithDebug(false, 'custom-pad-disabled');
+  }, [useCustomTransposerPad]);
+
+  function recordTransposerPadDebug(event: string, detail?: string) {
+    const summary = `mode=${effectiveTransposerInputMode} custom=${useCustomTransposerPad} visible=${transposerPadVisible} dismissing=${transposerPadDismissInProgressRef.current}`;
+    const message = detail ? `${event} | ${detail} | ${summary}` : `${event} | ${summary}`;
+    const prefixedMessage = `TRANSPOSE_PAD_DEBUG ${message}`;
+
+    if (shouldConsoleLogTransposerPadDebug) {
+      console.log(prefixedMessage);
+    }
+
+    setTransposerPadDebugEvents((prev) => [...prev.slice(-5), message]);
+  }
+
+  function setTransposerPadVisibleWithDebug(nextVisible: boolean, reason: string) {
+    recordTransposerPadDebug(nextVisible ? 'pad-visible:true' : 'pad-visible:false', reason);
+    setTransposerPadVisible(nextVisible);
+  }
 
   /**
    * Applies the global -2/3 preference when both choices exist for a tab group.
@@ -369,20 +460,159 @@ export default function App() {
   }
 
   function handleTransposerInputChange(value: string) {
-    setTransposerInput(cleanupTransposerInput(value, transposerCleanupOptions));
+    setTransposerPasteStatus(null);
+    setTransposerInput(normalizeTransposerEditInput(value));
+  }
+
+  function handleCleanTransposerInput() {
+    const cleaned = cleanupTransposerInput(transposerInput, transposerCleanupOptions);
+    setTransposerInput(cleaned);
+    setTransposerPasteStatus(null);
+    setTransposerSelection((prev) => ({
+      start: Math.min(prev.start, cleaned.length),
+      end: Math.min(prev.end, cleaned.length),
+    }));
   }
 
   function insertQuickSymbol(symbol: string) {
-    const { nextValue, nextSelection } = insertAtSelection(
-      transposerInput,
-      transposerSelection,
-      symbol,
-      transposerCleanupOptions,
-    );
+    const { nextValue, nextSelection } = insertAtSelection(transposerInput, transposerSelection, symbol);
     setTransposerInput(nextValue);
     setTransposerSelection(nextSelection);
+    setTransposerPasteStatus(null);
     transposerInputRef.current?.focus();
   }
+
+  function handleTransposerInputFocus() {
+    recordTransposerPadDebug('input-focus');
+  }
+
+  function describeTransposerBlurTarget(event: any) {
+    const relatedTarget = event?.nativeEvent?.relatedTarget ?? event?.relatedTarget ?? null;
+    if (relatedTarget == null) {
+      return 'relatedTarget=null';
+    }
+    if (typeof relatedTarget === 'number') {
+      return `relatedTarget=${relatedTarget}`;
+    }
+    if (typeof relatedTarget === 'object') {
+      const maybeElement = relatedTarget as {
+        tagName?: string;
+        id?: string;
+        dataset?: Record<string, string | undefined>;
+      };
+      const tagName = maybeElement.tagName ?? 'object';
+      const idPart = maybeElement.id ? `#${maybeElement.id}` : '';
+      const testIdPart = maybeElement.dataset?.testid ? `[data-testid=${maybeElement.dataset.testid}]` : '';
+      return `relatedTarget=${tagName}${idPart}${testIdPart}`;
+    }
+    return `relatedTarget=${String(relatedTarget)}`;
+  }
+
+  function openTransposerPad(source: string) {
+    recordTransposerPadDebug(source);
+    if (!useCustomTransposerPad) return;
+    if (transposerPadDismissInProgressRef.current) return;
+    setTransposerPadVisibleWithDebug(true, source);
+    transposerInputRef.current?.focus();
+  }
+
+  function handleTransposerInputPress() {
+    openTransposerPad('input-press-in');
+  }
+
+  function handleTransposerInputBlur(event: any) {
+    const blurTarget = describeTransposerBlurTarget(event);
+    recordTransposerPadDebug('input-blur', blurTarget);
+    if (!useCustomTransposerPad) return;
+    if (Platform.OS === 'web' && !transposerPadDismissInProgressRef.current) {
+      recordTransposerPadDebug('input-blur-ignored', blurTarget);
+      return;
+    }
+    setTransposerPadVisibleWithDebug(false, 'input-blur');
+  }
+
+  function dismissTransposerPad() {
+    recordTransposerPadDebug('dismiss-start');
+    transposerPadDismissInProgressRef.current = true;
+    transposerInputRef.current?.blur();
+    setTransposerPadVisibleWithDebug(false, 'dismiss');
+    requestAnimationFrame(() => {
+      transposerPadDismissInProgressRef.current = false;
+      recordTransposerPadDebug('dismiss-finished');
+    });
+  }
+
+  function handleDoneWithTransposerPad() {
+    dismissTransposerPad();
+  }
+
+  function handleTransposerKeyboardPreferenceChange(mode: TransposerInputMode) {
+    recordTransposerPadDebug('keyboard-preference-change', `next=${mode}`);
+    setTransposerKeyboardPreference(mode === 'pad' ? 'custom' : 'native');
+    if (mode === 'native') {
+      setTransposerPadVisibleWithDebug(false, 'keyboard-preference-native');
+      transposerInputRef.current?.focus();
+      return;
+    }
+    setTransposerPadVisibleWithDebug(true, 'keyboard-preference-pad');
+    transposerInputRef.current?.focus();
+  }
+
+  function handleTabPadHolePress(hole: string) {
+    const { nextValue, nextSelection } = insertTokenAtSelection(transposerInput, transposerSelection, {
+      sign: transposerPadSign,
+      hole,
+      suffix: transposerPadSuffix,
+    });
+    setTransposerInput(nextValue);
+    setTransposerSelection(nextSelection);
+    setTransposerPadSuffix('');
+    setTransposerPasteStatus(null);
+    transposerInputRef.current?.focus();
+  }
+
+  function handleTabPadBackspace() {
+    const { nextValue, nextSelection } = deleteBackwardAtSelection(transposerInput, transposerSelection);
+    setTransposerInput(nextValue);
+    setTransposerSelection(nextSelection);
+    setTransposerPasteStatus(null);
+    transposerInputRef.current?.focus();
+  }
+
+  async function handleTabPadPaste() {
+    recordTransposerPadDebug('paste-start');
+
+    try {
+      const clipboardText = await readClipboardText();
+
+      if (clipboardText.length === 0) {
+        setTransposerPasteStatus('Clipboard is empty.');
+        recordTransposerPadDebug('paste-empty');
+        return;
+      }
+
+      const { nextValue, nextSelection } = insertAtSelection(
+        transposerInput,
+        transposerSelection,
+        clipboardText,
+      );
+
+      setTransposerInput(nextValue);
+      setTransposerSelection(nextSelection);
+      setTransposerPasteStatus(null);
+      recordTransposerPadDebug('paste-success', `length=${clipboardText.length}`);
+      transposerInputRef.current?.focus();
+    } catch (error) {
+      const nextMessage =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Clipboard paste failed. Try again or switch to Native Keyboard in Settings.';
+      setTransposerPasteStatus(nextMessage);
+      recordTransposerPadDebug('paste-failed', nextMessage);
+    }
+  }
+
+  const nextTokenPreview = `${transposerPadSign}4${transposerPadSuffix}`;
 
   const caretSize = 18;
 
@@ -553,6 +783,43 @@ export default function App() {
               </Pressable>
             </View>
             <Text style={styles.propertiesTitle}>Transposer Input</Text>
+            <View style={styles.propertiesField}>
+              <Text style={styles.dropdownLabel}>Keyboard</Text>
+              <View style={styles.propertiesChoiceRow}>
+                <Pressable
+                  onPress={() => handleTransposerKeyboardPreferenceChange('pad')}
+                  style={[
+                    styles.propertiesChoiceButton,
+                    useCustomTransposerPad && styles.propertiesChoiceButtonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.propertiesChoiceText,
+                      useCustomTransposerPad && styles.propertiesChoiceTextActive,
+                    ]}
+                  >
+                    {useCustomTransposerPad ? '◉' : '○'} Custom Tab Pad
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => handleTransposerKeyboardPreferenceChange('native')}
+                  style={[
+                    styles.propertiesChoiceButton,
+                    !useCustomTransposerPad && styles.propertiesChoiceButtonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.propertiesChoiceText,
+                      !useCustomTransposerPad && styles.propertiesChoiceTextActive,
+                    ]}
+                  >
+                    {!useCustomTransposerPad ? '◉' : '○'} Native Keyboard
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
             <Pressable
               onPress={() => setStripInvalidTransposerContent((prev) => !prev)}
               style={[
@@ -919,44 +1186,125 @@ export default function App() {
                     <Text style={styles.transposerMeta}>
                       Target: position {targetPosition} ({pcToNote(scale.rootPc, harmonicaKey.preferFlats)})
                     </Text>
-                    <TextInput
-                      ref={transposerInputRef}
-                      style={styles.transposerInput}
-                      multiline
-                      value={transposerInput}
-                      onChangeText={handleTransposerInputChange}
-                      onSelectionChange={(event) => setTransposerSelection(event.nativeEvent.selection)}
-                      selection={transposerSelection}
-                      keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
-                      autoCorrect={false}
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
-                      placeholderTextColor="#64748b"
-                      textAlignVertical="top"
-                    />
-                    <View style={styles.transposerQuickRow}>
-                      {quickSymbols.map((symbol) => (
-                        <Pressable
-                          key={`symbol:${symbol.label}`}
-                          onPress={() => insertQuickSymbol(symbol.value)}
-                          style={styles.transposerQuickButton}
-                        >
-                          <Text style={styles.transposerQuickButtonText}>{symbol.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                    <View style={styles.transposerDirectionRow}>
-                      <Text style={styles.transposerSectionLabel}>Direction</Text>
-                      <View style={styles.transposerDirectionOptions}>
+                    {Platform.OS === 'web' && useCustomTransposerPad ? (
+                      <Pressable
+                        testID="transposer-input-shell"
+                        onPress={() => openTransposerPad('input-shell-press')}
+                        style={styles.transposerInputShell}
+                      >
+                        <TextInput
+                          ref={transposerInputRef}
+                          style={[styles.transposerInput, styles.transposerInputTouchWeb]}
+                          multiline
+                          value={transposerInput}
+                          onChangeText={handleTransposerInputChange}
+                          onFocus={handleTransposerInputFocus}
+                          onBlur={handleTransposerInputBlur}
+                          onSelectionChange={(event) => {
+                            const selection = event.nativeEvent.selection;
+                            recordTransposerPadDebug(
+                              'selection-change',
+                              `start=${selection.start} end=${selection.end}`,
+                            );
+                            setTransposerSelection(selection);
+                          }}
+                          selection={transposerSelection}
+                          keyboardType="default"
+                          inputMode="none"
+                          showSoftInputOnFocus={false}
+                          autoCorrect={false}
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
+                          placeholderTextColor="#64748b"
+                          textAlignVertical="top"
+                          pointerEvents="none"
+                        />
+                      </Pressable>
+                    ) : (
+                      <TextInput
+                        ref={transposerInputRef}
+                        style={[
+                          styles.transposerInput,
+                          Platform.OS === 'web' && useCustomTransposerPad && styles.transposerInputTouchWeb,
+                        ]}
+                        multiline
+                        value={transposerInput}
+                        onChangeText={handleTransposerInputChange}
+                        onFocus={handleTransposerInputFocus}
+                        onPressIn={handleTransposerInputPress}
+                        onBlur={handleTransposerInputBlur}
+                        onSelectionChange={(event) => {
+                          const selection = event.nativeEvent.selection;
+                          recordTransposerPadDebug(
+                            'selection-change',
+                            `start=${selection.start} end=${selection.end}`,
+                          );
+                          setTransposerSelection(selection);
+                        }}
+                        selection={transposerSelection}
+                        keyboardType="default"
+                        inputMode={useCustomTransposerPad ? 'none' : 'text'}
+                        showSoftInputOnFocus={!useCustomTransposerPad}
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
+                        placeholderTextColor="#64748b"
+                        textAlignVertical="top"
+                      />
+                    )}
+                    {useCustomTransposerPad && (
+                      <Text style={styles.transposerPadHint}>
+                        {Platform.OS === 'web'
+                          ? 'Custom tab pad is active. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings for the browser edit menu.'
+                          : 'Tap the field to use the tab pad. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings.'}
+                      </Text>
+                    )}
+                    {transposerPasteStatus && <Text style={styles.transposerPadStatus}>{transposerPasteStatus}</Text>}
+                    {showDebug && pagerIndex === 1 && (
+                      <View style={styles.debugPanel}>
+                        <Text style={styles.debugPanelLabel}>Transposer Pad Debug</Text>
+                        {transposerPadDebugEvents.length === 0 ? (
+                          <Text style={styles.debugText}>No pad events yet.</Text>
+                        ) : (
+                          transposerPadDebugEvents.map((entry, index) => (
+                            <Text key={`transposer-pad-debug:${index}`} style={styles.debugText}>
+                              {entry}
+                            </Text>
+                          ))
+                        )}
+                      </View>
+                    )}
+                    <View
+                      style={[
+                        styles.transposerDirectionRow,
+                        isSmallScreen && styles.transposerDirectionRowCompact,
+                      ]}
+                    >
+                      <Text style={[styles.transposerSectionLabel, isSmallScreen && styles.transposerSectionLabelCompact]}>
+                        Direction
+                      </Text>
+                      <View
+                        style={[
+                          styles.transposerDirectionOptions,
+                          isSmallScreen && styles.transposerDirectionOptionsCompact,
+                        ]}
+                      >
                         <Pressable
                           onPress={() => setTransposerDirection('down')}
                           style={[
                             styles.transposerDirectionOption,
+                            isSmallScreen && styles.transposerDirectionOptionCompact,
                             transposerDirection === 'down' && styles.transposerDirectionOptionActive,
                           ]}
                         >
-                          <Text style={styles.transposerDirectionText}>
+                          <Text
+                            style={[
+                              styles.transposerDirectionText,
+                              isSmallScreen && styles.transposerDirectionTextCompact,
+                            ]}
+                          >
                             {transposerDirection === 'down' ? '◉' : '○'} Down
                           </Text>
                         </Pressable>
@@ -964,14 +1312,33 @@ export default function App() {
                           onPress={() => setTransposerDirection('up')}
                           style={[
                             styles.transposerDirectionOption,
+                            isSmallScreen && styles.transposerDirectionOptionCompact,
                             transposerDirection === 'up' && styles.transposerDirectionOptionActive,
                           ]}
                         >
-                          <Text style={styles.transposerDirectionText}>
+                          <Text
+                            style={[
+                              styles.transposerDirectionText,
+                              isSmallScreen && styles.transposerDirectionTextCompact,
+                            ]}
+                          >
                             {transposerDirection === 'up' ? '◉' : '○'} Up
                           </Text>
                         </Pressable>
                       </View>
+                      <Pressable
+                        onPress={handleCleanTransposerInput}
+                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerActionButtonText,
+                            isSmallScreen && styles.transposerActionButtonTextCompact,
+                          ]}
+                        >
+                          Clean Input
+                        </Text>
+                      </Pressable>
                     </View>
                     <Text style={styles.transposerSectionLabel}>Transposed Output</Text>
                     <View style={styles.transposerOutputBox}>
@@ -1009,7 +1376,7 @@ export default function App() {
                       key={`dot:${tab.page}`}
                       onPress={() => {
                         setPagerIndex(tab.page);
-                        pagerRef.current?.scrollTo({ x: tab.page * pageWidth, animated: true });
+                        scrollToPagerPage(tab.page, true);
                       }}
                       style={[styles.pagerDot, selected && styles.pagerDotActive]}
                     >
@@ -1019,6 +1386,125 @@ export default function App() {
                 })}
               </View>
             </View>
+            {useCustomTransposerPad && (
+              <Modal
+                transparent
+                visible={transposerPadVisible}
+                animationType="slide"
+                onRequestClose={dismissTransposerPad}
+              >
+                <View style={styles.transposerPadOverlay}>
+                  <Pressable style={StyleSheet.absoluteFill} onPress={dismissTransposerPad} />
+                  <View style={styles.transposerPadSheet}>
+                    <View style={styles.transposerPadHandle} />
+                    <Text style={styles.transposerPadTitle}>Tab Pad</Text>
+                    <Text style={styles.transposerPadPreview}>
+                      Next token preview: {nextTokenPreview}
+                    </Text>
+                    <View style={styles.transposerPadSection}>
+                      <Text style={styles.transposerPadSectionLabel}>Airflow</Text>
+                      <View style={styles.transposerPadOptionRow}>
+                        {TAB_PAD_SIGN_OPTIONS.map((option) => {
+                          const selected = transposerPadSign === option.value;
+                          return (
+                            <Pressable
+                              key={`sign:${option.label}`}
+                              onPress={() => setTransposerPadSign(option.value)}
+                              style={[
+                                styles.transposerPadOptionButton,
+                                selected && styles.transposerPadOptionButtonActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.transposerPadOptionText,
+                                  selected && styles.transposerPadOptionTextActive,
+                                ]}
+                              >
+                                {option.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                    <View style={styles.transposerPadSection}>
+                      <Text style={styles.transposerPadSectionLabel}>Suffix</Text>
+                      <View style={styles.transposerPadOptionRow}>
+                        {TAB_PAD_SUFFIX_OPTIONS.map((option) => {
+                          const selected = transposerPadSuffix === option.value;
+                          return (
+                            <Pressable
+                              key={`suffix:${option.label}`}
+                              onPress={() => setTransposerPadSuffix(option.value)}
+                              style={[
+                                styles.transposerPadOptionButton,
+                                selected && styles.transposerPadOptionButtonActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.transposerPadOptionText,
+                                  selected && styles.transposerPadOptionTextActive,
+                                ]}
+                              >
+                                {option.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                    <View style={styles.transposerPadSection}>
+                      <Text style={styles.transposerPadSectionLabel}>Hole</Text>
+                      <View style={styles.transposerPadHoleGrid}>
+                        {TAB_PAD_HOLES.map((hole) => (
+                          <Pressable
+                            key={`hole:${hole}`}
+                            onPress={() => handleTabPadHolePress(hole)}
+                            style={styles.transposerPadHoleButton}
+                          >
+                            <Text style={styles.transposerPadHoleText}>{hole}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                    <View style={styles.transposerPadActionRow}>
+                      <Pressable
+                        onPress={handleTabPadPaste}
+                        style={styles.transposerPadActionButton}
+                      >
+                        <Text style={styles.transposerPadActionText}>Paste</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => insertQuickSymbol(' ')}
+                        style={styles.transposerPadActionButton}
+                      >
+                        <Text style={styles.transposerPadActionText}>Space</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => insertQuickSymbol('\n')}
+                        style={styles.transposerPadActionButton}
+                      >
+                        <Text style={styles.transposerPadActionText}>New line</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={handleTabPadBackspace}
+                        style={styles.transposerPadActionButton}
+                      >
+                        <Text style={styles.transposerPadActionText}>Backspace</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={handleDoneWithTransposerPad}
+                        style={[styles.transposerPadActionButton, styles.transposerPadDoneButton]}
+                      >
+                        <Text style={[styles.transposerPadActionText, styles.transposerPadDoneText]}>Done</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </Modal>
+            )}
           </>
         )}
       </ScrollView>
@@ -1392,6 +1878,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  propertiesChoiceRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  propertiesChoiceButton: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  propertiesChoiceButtonActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  propertiesChoiceText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  propertiesChoiceTextActive: {
+    color: '#e0f2fe',
+  },
   symbolRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1610,6 +2121,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     fontSize: 13,
   },
+  transposerInputShell: {
+    borderRadius: 10,
+  },
+  transposerInputTouchWeb: {
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  transposerPadHint: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 18,
+  },
   transposerSectionLabel: {
     color: '#94a3b8',
     fontSize: 11,
@@ -1617,31 +2140,56 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     fontWeight: '700',
   },
-  transposerQuickRow: {
+  transposerSectionLabelCompact: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    flexShrink: 0,
+  },
+  transposerActionButton: {
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  transposerActionButtonText: {
+    color: '#e0f2fe',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  transposerActionButtonCompact: {
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    flexShrink: 0,
+  },
+  transposerActionButtonTextCompact: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
+  transposerDirectionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  transposerDirectionRowCompact: {
+    flexWrap: 'nowrap',
+    gap: 6,
+    justifyContent: 'space-between',
+  },
+  transposerDirectionOptions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  transposerQuickButton: {
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  transposerQuickButtonText: {
-    color: '#e2e8f0',
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'lowercase',
-  },
-  transposerDirectionRow: {
+  transposerDirectionOptionsCompact: {
+    flexWrap: 'nowrap',
+    flexShrink: 1,
     gap: 6,
-  },
-  transposerDirectionOptions: {
-    flexDirection: 'row',
-    gap: 8,
   },
   transposerDirectionOption: {
     borderWidth: 1,
@@ -1651,6 +2199,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
   },
+  transposerDirectionOptionCompact: {
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
   transposerDirectionOptionActive: {
     borderColor: '#38bdf8',
   },
@@ -1658,6 +2210,9 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontSize: 12,
     fontWeight: '600',
+  },
+  transposerDirectionTextCompact: {
+    fontSize: 11,
   },
   transposerOutputBox: {
     borderWidth: 1,
@@ -1684,5 +2239,129 @@ const styles = StyleSheet.create({
   transposerWarningText: {
     color: '#fda4af',
     fontSize: 12,
+  },
+  transposerPadOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(5, 8, 14, 0.55)',
+    justifyContent: 'flex-end',
+  },
+  transposerPadSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    backgroundColor: '#0b1220',
+    borderTopWidth: 1,
+    borderColor: '#1f2937',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  transposerPadHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#334155',
+    alignSelf: 'center',
+  },
+  transposerPadTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  transposerPadPreview: {
+    color: '#94a3b8',
+    fontFamily: 'Courier',
+    fontSize: 12,
+  },
+  transposerPadSection: {
+    gap: 8,
+  },
+  transposerPadSectionLabel: {
+    color: '#94a3b8',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
+  },
+  transposerPadOptionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  transposerPadOptionButton: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  transposerPadOptionButtonActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  transposerPadOptionText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  transposerPadOptionTextActive: {
+    color: '#e0f2fe',
+  },
+  transposerPadHoleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  transposerPadHoleButton: {
+    width: '18%',
+    minWidth: 56,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transposerPadHoleText: {
+    color: '#f8fafc',
+    fontFamily: 'Courier',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  transposerPadActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  transposerPadStatus: {
+    marginTop: 8,
+    color: '#b45309',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  transposerPadActionButton: {
+    flexGrow: 1,
+    minWidth: 72,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  transposerPadActionText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  transposerPadDoneButton: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  transposerPadDoneText: {
+    color: '#e0f2fe',
   },
 });

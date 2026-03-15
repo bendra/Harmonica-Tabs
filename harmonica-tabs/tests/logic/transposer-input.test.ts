@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanupTransposerInput,
+  deleteBackwardAtSelection,
   insertAtSelection,
+  insertTokenAtSelection,
+  normalizeTransposerEditInput,
   sanitizeTransposerInput,
   TransposerCleanupOptions,
-} from './transposer-input';
+} from '../../src/logic/transposer-input';
 
 const cleanupDefaults: TransposerCleanupOptions = {
   stripInvalidContent: true,
@@ -18,6 +21,12 @@ describe('sanitizeTransposerInput', () => {
 
   it('normalizes curly apostrophes to straight apostrophes', () => {
     expect(sanitizeTransposerInput('-3’ -3’’')).toBe("-3' -3''");
+  });
+});
+
+describe('normalizeTransposerEditInput', () => {
+  it('normalizes curly apostrophes without stripping ordinary text', () => {
+    expect(normalizeTransposerEditInput("Song: -3’ and lyrics")).toBe("Song: -3' and lyrics");
   });
 });
 
@@ -115,11 +124,6 @@ Now Playing`;
     expect(cleanupTransposerInput("GO 'WAY FROM MY WIN-DOW", cleanupDefaults)).toBe('');
   });
 
-  it('supports partial manual typing when stripping is enabled', () => {
-    expect(cleanupTransposerInput('-', cleanupDefaults)).toBe('-');
-    expect(cleanupTransposerInput('5 ', cleanupDefaults)).toBe('5 ');
-  });
-
   it('can normalize whitespace without stripping invalid content', () => {
     expect(
       cleanupTransposerInput("  4   -4  \n\n  5   -5  ", {
@@ -156,8 +160,67 @@ describe('insertAtSelection', () => {
     expect(result.nextSelection).toEqual({ start: 3, end: 3 });
   });
 
-  it('applies cleanup options to inserted text when provided', () => {
-    const result = insertAtSelection('Song: 5 5', { start: 0, end: 0 }, '', cleanupDefaults);
-    expect(result.nextValue).toBe('5 5');
+  it('keeps surrounding raw text when inserting quick symbols', () => {
+    const result = insertAtSelection('Song: 5 5', { start: 0, end: 0 }, '-');
+    expect(result.nextValue).toBe('-Song: 5 5');
+    expect(result.nextSelection).toEqual({ start: 1, end: 1 });
+  });
+
+  it('normalizes pasted smart quotes and strips invalid characters at the caret', () => {
+    const result = insertAtSelection('', { start: 0, end: 0 }, "4 -3’ +5°\nabc_%");
+    expect(result.nextValue).toBe("4 -3' +5°\n");
+    expect(result.nextSelection).toEqual({ start: 10, end: 10 });
+  });
+
+  it('sanitizes pasted content when replacing a selected range', () => {
+    const result = insertAtSelection('4 xxx 5', { start: 2, end: 5 }, "-6’ lyrics");
+    expect(result.nextValue).toBe("4 -6'  5");
+    expect(result.nextSelection).toEqual({ start: 6, end: 6 });
+  });
+});
+
+describe('insertTokenAtSelection', () => {
+  it('inserts a full tab token at the current cursor', () => {
+    const result = insertTokenAtSelection('4 5', { start: 1, end: 1 }, { sign: '-', hole: '4', suffix: '' });
+    expect(result.nextValue).toBe('4-4 5');
+    expect(result.nextSelection).toEqual({ start: 3, end: 3 });
+  });
+
+  it('replaces the selected range with a full token', () => {
+    const result = insertTokenAtSelection('4 x 5', { start: 2, end: 3 }, { sign: '', hole: '6', suffix: "'" });
+    expect(result.nextValue).toBe("4 6' 5");
+    expect(result.nextSelection).toEqual({ start: 4, end: 4 });
+  });
+
+  it('supports hole 10 and degree suffix', () => {
+    const result = insertTokenAtSelection('', { start: 0, end: 0 }, { sign: '+', hole: '10', suffix: '°' });
+    expect(result.nextValue).toBe('+10°');
+    expect(result.nextSelection).toEqual({ start: 4, end: 4 });
+  });
+
+  it('supports repeated apostrophe suffixes', () => {
+    const result = insertTokenAtSelection('', { start: 0, end: 0 }, { sign: '-', hole: '3', suffix: "'''" });
+    expect(result.nextValue).toBe("-3'''");
+    expect(result.nextSelection).toEqual({ start: 5, end: 5 });
+  });
+});
+
+describe('deleteBackwardAtSelection', () => {
+  it('deletes the selected range when text is selected', () => {
+    const result = deleteBackwardAtSelection('4 -4 5', { start: 2, end: 4 });
+    expect(result.nextValue).toBe('4  5');
+    expect(result.nextSelection).toEqual({ start: 2, end: 2 });
+  });
+
+  it('deletes the previous character when the selection is collapsed', () => {
+    const result = deleteBackwardAtSelection('4 -4 5', { start: 4, end: 4 });
+    expect(result.nextValue).toBe('4 - 5');
+    expect(result.nextSelection).toEqual({ start: 3, end: 3 });
+  });
+
+  it('keeps the value unchanged at the beginning of the input', () => {
+    const result = deleteBackwardAtSelection('4 -4 5', { start: 0, end: 0 });
+    expect(result.nextValue).toBe('4 -4 5');
+    expect(result.nextSelection).toEqual({ start: 0, end: 0 });
   });
 });

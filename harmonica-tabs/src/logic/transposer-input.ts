@@ -8,6 +8,9 @@ export type TransposerCleanupOptions = {
   removeExcessWhitespace: boolean;
 };
 
+export type TransposerTokenSign = '' | '-' | '+';
+export type TransposerTokenSuffix = '' | "'" | "''" | "'''" | '°';
+
 const DISALLOWED_INPUT = /[^0-9+\-'\u00B0\s]/g;
 const SPACE_RUN = /[ \t]+/g;
 
@@ -20,6 +23,10 @@ type TrailingSeparator = 'none' | 'space' | 'newline';
 
 function normalizeRawInput(value: string): string {
   return (value ?? '').replaceAll('’', "'");
+}
+
+export function normalizeTransposerEditInput(value: string): string {
+  return normalizeRawInput(value);
 }
 
 function isAlphanumeric(value: string | undefined): boolean {
@@ -170,7 +177,6 @@ export function insertAtSelection(
   value: string,
   selection: TextSelection,
   text: string,
-  options?: TransposerCleanupOptions,
 ): {
   nextValue: string;
   nextSelection: TextSelection;
@@ -180,12 +186,59 @@ export function insertAtSelection(
   const start = Math.max(0, Math.min(selection.start, maxIndex));
   const end = Math.max(start, Math.min(selection.end, maxIndex));
   const insertion = sanitizeTransposerInput(text);
-  const merged = `${source.slice(0, start)}${insertion}${source.slice(end)}`;
-  const nextValue = options ? cleanupTransposerInput(merged, options) : merged;
-  const cursor = Math.min(nextValue.length, start + insertion.length);
+  const nextValue = `${source.slice(0, start)}${insertion}${source.slice(end)}`;
+  const cursor = start + insertion.length;
 
   return {
     nextValue,
+    nextSelection: { start: cursor, end: cursor },
+  };
+}
+
+export function insertTokenAtSelection(
+  value: string,
+  selection: TextSelection,
+  token: {
+    sign: TransposerTokenSign;
+    hole: string;
+    suffix: TransposerTokenSuffix;
+  },
+): {
+  nextValue: string;
+  nextSelection: TextSelection;
+} {
+  return insertAtSelection(value, selection, `${token.sign}${token.hole}${token.suffix}`);
+}
+
+export function deleteBackwardAtSelection(
+  value: string,
+  selection: TextSelection,
+): {
+  nextValue: string;
+  nextSelection: TextSelection;
+} {
+  const source = value ?? '';
+  const maxIndex = source.length;
+  const start = Math.max(0, Math.min(selection.start, maxIndex));
+  const end = Math.max(start, Math.min(selection.end, maxIndex));
+
+  if (start !== end) {
+    return {
+      nextValue: `${source.slice(0, start)}${source.slice(end)}`,
+      nextSelection: { start, end: start },
+    };
+  }
+
+  if (start === 0) {
+    return {
+      nextValue: source,
+      nextSelection: { start: 0, end: 0 },
+    };
+  }
+
+  const cursor = start - 1;
+  return {
+    nextValue: `${source.slice(0, cursor)}${source.slice(end)}`,
     nextSelection: { start: cursor, end: cursor },
   };
 }

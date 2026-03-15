@@ -32,16 +32,28 @@ SafeAreaView (styles.safeArea)
       │  │  │  └─ Page 2: Tab Transposer (styles.pagerPage)
       │  │  │     └─ Transposer Card (styles.transposerCard)
       │  │  │        ├─ Input (styles.transposerInput)
-      │  │  │        ├─ Direction Radio (styles.transposerDirectionRow + styles.transposerDirectionOption)
+      │  │  │        ├─ Mobile Pad Hint (styles.transposerPadHint, conditional)
+      │  │  │        ├─ Paste Status (styles.transposerPadStatus, conditional)
+      │  │  │        ├─ Direction Radio + Clean Input (styles.transposerDirectionRow + styles.transposerDirectionOption + styles.transposerActionButton)
       │  │  │        ├─ Output Box (styles.transposerOutputBox + styles.transposerOutputText)
       │  │  │        └─ Warnings (styles.transposerWarnings + styles.transposerWarningText)
       │  │  └─ Pager Dots (styles.pagerDotsRow + styles.pagerDot)
+      │  └─ Tab Pad Modal (native + touch-first web, conditional)
+      │     └─ Bottom Sheet (styles.transposerPadSheet)
+      │        ├─ Handle (styles.transposerPadHandle)
+      │        ├─ Title + Preview (styles.transposerPadTitle + styles.transposerPadPreview)
+      │        ├─ Airflow Options (styles.transposerPadOptionRow + styles.transposerPadOptionButton)
+      │        ├─ Suffix Options (styles.transposerPadOptionRow + styles.transposerPadOptionButton)
+      │        ├─ Hole Grid (styles.transposerPadHoleGrid + styles.transposerPadHoleButton)
+      │        └─ Action Row (styles.transposerPadActionRow + styles.transposerPadActionButton)
+      │           └─ Includes `Paste`, `Space`, `New line`, `Backspace`, `Done`
       └─ Properties Screen (`screen === 'properties'`)
          └─ Properties Card (styles.propertiesCard)
             ├─ Section Title (styles.propertiesTitle)
             ├─ Overbend Symbol Select (styles.propertiesField + styles.dropdown*)
             ├─ Position/Key Set Select (styles.propertiesField + styles.dropdown*)
             ├─ 2 Draw / 3 Blow Preference Select (styles.propertiesField + styles.dropdown*)
+            ├─ Transposer Keyboard Buttons (styles.propertiesChoiceRow + styles.propertiesChoiceButton)
             ├─ Strip Invalid Content Toggle (styles.propertiesToggleButton + styles.propertiesToggleText)
             ├─ Remove Excess White Space Toggle (styles.propertiesToggleButton + styles.propertiesToggleText)
             ├─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle)
@@ -62,9 +74,11 @@ SafeAreaView (styles.safeArea)
 - **Toggle Group**: `toggleGroup`, `toggleRow`, `toggleItem`
 - **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`
 - **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
+- **Properties Choices**: `propertiesChoiceRow`, `propertiesChoiceButton`, `propertiesChoiceText`
 - **Tab Symbols**: `symbolRow`, `symbolKey`, `symbolMeaning`
 - **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue`, `debugPanel`, `debugPanelLabel`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
-- **Tab Transposer**: `transposerCard`, `transposerTitle`, `transposerMeta`, `transposerInput`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerWarnings`
+- **Tab Transposer**: `transposerCard`, `transposerTitle`, `transposerMeta`, `transposerInput`, `transposerPadHint`, `transposerPadStatus`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerWarnings`
+- **Tab Pad**: `transposerPadOverlay`, `transposerPadSheet`, `transposerPadHandle`, `transposerPadTitle`, `transposerPadPreview`, `transposerPadSection`, `transposerPadOptionRow`, `transposerPadOptionButton`, `transposerPadHoleGrid`, `transposerPadHoleButton`, `transposerPadActionRow`
