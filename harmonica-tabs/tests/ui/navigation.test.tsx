@@ -289,7 +289,11 @@ describe('App navigation', () => {
     const firstToken = findByTestId(root, 'transposer-output-token:0');
     const secondToken = findByTestId(root, 'transposer-output-token:1');
 
-    expect((firstToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8')).toBe(
+    expect(
+      (firstToken.props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
+    ).toBe(
       true,
     );
 
@@ -301,10 +305,14 @@ describe('App navigation', () => {
     const updatedSecondToken = findByTestId(root, 'transposer-output-token:1');
 
     expect(
-      (updatedFirstToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8'),
+      (updatedFirstToken.props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
     ).toBe(false);
     expect(
-      (updatedSecondToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8'),
+      (updatedSecondToken.props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
     ).toBe(true);
   });
 
@@ -390,10 +398,18 @@ describe('App navigation', () => {
     const firstToken = findByTestId(root, 'transposer-output-token:0');
     const secondToken = findByTestId(root, 'transposer-output-token:1');
 
-    expect((firstToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8')).toBe(
+    expect(
+      (firstToken.props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
+    ).toBe(
       true,
     );
-    expect((secondToken.props.style as Array<Record<string, unknown>>).some((entry) => entry?.borderColor === '#38bdf8')).toBe(
+    expect(
+      (secondToken.props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
+    ).toBe(
       false,
     );
   });

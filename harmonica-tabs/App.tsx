@@ -323,7 +323,7 @@ export default function App() {
   const [transposerPadSuffix, setTransposerPadSuffix] = useState<TransposerTokenSuffix>('');
   const [transposerPasteStatus, setTransposerPasteStatus] = useState<string | null>(null);
   const [transposerKeyboardPreference, setTransposerKeyboardPreference] = useState<'custom' | 'native' | null>('native');
-  const [toneToleranceInput, setToneToleranceInput] = useState('10');
+  const [toneToleranceInput, setToneToleranceInput] = useState('60');
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
   const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
   const [stripInvalidTransposerContent, setStripInvalidTransposerContent] = useState(true);
@@ -486,7 +486,9 @@ export default function App() {
     [stripInvalidTransposerContent, removeExcessTransposerWhitespace],
   );
   const toneToleranceCents = useMemo(
-    () => parseBoundedNumber(toneToleranceInput, 10, 1, 100),
+    () => parseBoundedNumber(toneToleranceInput, 60, 1, 
+      
+    ),
     [toneToleranceInput],
   );
   const toneFollowMinConfidence = useMemo(
@@ -2626,16 +2628,22 @@ const styles = StyleSheet.create({
   },
   transposerOutputToken: {
     color: '#f8fafc',
-    borderRadius: 4,
+    borderRadius: 999,
+    paddingVertical: 1,
+    paddingHorizontal: 5,
   },
   transposerOutputTokenActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    borderWidth: 1,
-    borderColor: '#38bdf8',
+    borderWidth: 2,
+    borderColor: 'rgba(56, 189, 248, 0.45)',
+    backgroundColor: 'rgba(56, 189, 248, 0.06)',
   },
   transposerOutputTokenMatched: {
     borderColor: '#16e05d',
-    backgroundColor: 'rgba(22, 224, 93, 0.22)',
+    backgroundColor: 'rgba(22, 224, 93, 0.4)',
+    shadowColor: '#16e05d',
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
   },
   transposerOutputError: {
     color: '#ef4444',
