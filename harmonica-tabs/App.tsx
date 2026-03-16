@@ -318,7 +318,6 @@ export default function App() {
   const [transposerSelection, setTransposerSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [transposerDirection, setTransposerDirection] = useState<'up' | 'down'>('down');
   const [transposerPadVisible, setTransposerPadVisible] = useState(false);
-  const [transposerPadDebugEvents, setTransposerPadDebugEvents] = useState<string[]>([]);
   const [transposerPadSign, setTransposerPadSign] = useState<TransposerTokenSign>('');
   const [transposerPadSuffix, setTransposerPadSuffix] = useState<TransposerTokenSuffix>('');
   const [transposerPasteStatus, setTransposerPasteStatus] = useState<string | null>(null);
@@ -486,9 +485,7 @@ export default function App() {
     [stripInvalidTransposerContent, removeExcessTransposerWhitespace],
   );
   const toneToleranceCents = useMemo(
-    () => parseBoundedNumber(toneToleranceInput, 60, 1, 
-      
-    ),
+    () => parseBoundedNumber(toneToleranceInput, 60, 1, 120),
     [toneToleranceInput],
   );
   const toneFollowMinConfidence = useMemo(
@@ -553,8 +550,42 @@ export default function App() {
     if (shouldConsoleLogTransposerPadDebug) {
       console.log(prefixedMessage);
     }
+  }
 
-    setTransposerPadDebugEvents((prev) => [...prev.slice(-5), message]);
+  function renderToneFollowDebugPanel() {
+    return (
+      <View style={styles.debugPanel}>
+        <Text style={styles.debugPanelLabel}>Debug Panel</Text>
+        <Text style={styles.debugText}>
+          RMS: {detectedRms.toFixed(4)} · Conf: {detectedConfidence.toFixed(2)} · Hz:{' '}
+          {detectedFrequency ? detectedFrequency.toFixed(1) : '—'}
+        </Text>
+        <Text style={styles.debugText}>
+          Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Hold: {toneFollowHoldDurationMs}ms
+        </Text>
+        <View style={styles.debugRow}>
+          <Text style={styles.debugLabel}>Source</Text>
+          <Text style={styles.debugTextInline}>
+            {listenSource === 'web'
+              ? 'Mic input (web)'
+              : listenSource === 'sim'
+                ? 'Simulated Hz (fallback)'
+                : '—'}
+          </Text>
+        </View>
+        <View style={styles.debugRow}>
+          <Text style={styles.debugLabel}>Sim Hz</Text>
+          <TextInput
+            value={simFrequency}
+            onChangeText={setSimFrequency}
+            keyboardType="numeric"
+            style={styles.debugInput}
+            placeholder="440"
+            placeholderTextColor="#64748b"
+          />
+        </View>
+      </View>
+    );
   }
 
   function setTransposerPadVisibleWithDebug(nextVisible: boolean, reason: string) {
@@ -1230,39 +1261,7 @@ export default function App() {
                       </Pressable>
                       <Text style={styles.listenValue}>{statusText}</Text>
                     </View>
-                    {showDebug && (
-                      <View style={styles.debugPanel}>
-                        <Text style={styles.debugPanelLabel}>Debug Panel</Text>
-                        <Text style={styles.debugText}>
-                          RMS: {detectedRms.toFixed(4)} · Conf: {detectedConfidence.toFixed(2)} · Hz:{' '}
-                          {detectedFrequency ? detectedFrequency.toFixed(1) : '—'}
-                        </Text>
-                        <Text style={styles.debugText}>
-                          Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Hold: {holdMs}ms
-                        </Text>
-                        <View style={styles.debugRow}>
-                          <Text style={styles.debugLabel}>Source</Text>
-                          <Text style={styles.debugTextInline}>
-                            {listenSource === 'web'
-                              ? 'Mic input (web)'
-                              : listenSource === 'sim'
-                                ? 'Simulated Hz (fallback)'
-                                : '—'}
-                          </Text>
-                        </View>
-                        <View style={styles.debugRow}>
-                          <Text style={styles.debugLabel}>Sim Hz</Text>
-                          <TextInput
-                            value={simFrequency}
-                            onChangeText={setSimFrequency}
-                            keyboardType="numeric"
-                            style={styles.debugInput}
-                            placeholder="440"
-                            placeholderTextColor="#64748b"
-                          />
-                        </View>
-                      </View>
-                    )}
+                    {showDebug && renderToneFollowDebugPanel()}
                   </View>
 
                   <View style={styles.resultsList}>
@@ -1550,20 +1549,7 @@ export default function App() {
                       </Text>
                     )}
                     {transposerPasteStatus && <Text style={styles.transposerPadStatus}>{transposerPasteStatus}</Text>}
-                    {showDebug && pagerIndex === 1 && (
-                      <View style={styles.debugPanel}>
-                        <Text style={styles.debugPanelLabel}>Transposer Pad Debug</Text>
-                        {transposerPadDebugEvents.length === 0 ? (
-                          <Text style={styles.debugText}>No pad events yet.</Text>
-                        ) : (
-                          transposerPadDebugEvents.map((entry, index) => (
-                            <Text key={`transposer-pad-debug:${index}`} style={styles.debugText}>
-                              {entry}
-                            </Text>
-                          ))
-                        )}
-                      </View>
-                    )}
+                    {showDebug && renderToneFollowDebugPanel()}
                     <View
                       style={[
                         styles.transposerDirectionRow,

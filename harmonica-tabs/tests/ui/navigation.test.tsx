@@ -189,6 +189,86 @@ describe('App navigation', () => {
     expect(scrollToSpy).toHaveBeenLastCalledWith({ x: 360, animated: false });
   });
 
+  it('does not crash when debug is enabled in properties before returning to the transposer screen', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+    const transposerTab = findPressableByText(root, 'Transposer');
+
+    act(() => {
+      transposerTab.props.onPress();
+    });
+
+    const gearButton = findPressableByText(root, '⚙');
+
+    act(() => {
+      gearButton.props.onPress();
+    });
+
+    const showDebugButton = findPressableByText(root, 'Show debug');
+
+    act(() => {
+      showDebugButton.props.onPress();
+    });
+
+    const backButton = findPressableByText(root, '←');
+
+    expect(() => {
+      act(() => {
+        backButton.props.onPress();
+      });
+    }).not.toThrow();
+
+    expect(() =>
+      root.find((node: any) => node.type === 'Text' && flattenTextChildren(node.children) === 'Tab Transposer'),
+    ).not.toThrow();
+  });
+
+  it('shows the shared debug panel on the transposer instead of the temporary pad-event log', () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
+
+    let renderer: any;
+
+    act(() => {
+      renderer = TestRenderer.create(<App />);
+    });
+
+    const root = renderer!.root;
+    const transposerTab = findPressableByText(root, 'Transposer');
+
+    act(() => {
+      transposerTab.props.onPress();
+    });
+
+    const gearButton = findPressableByText(root, '⚙');
+
+    act(() => {
+      gearButton.props.onPress();
+    });
+
+    const showDebugButton = findPressableByText(root, 'Show debug');
+
+    act(() => {
+      showDebugButton.props.onPress();
+    });
+
+    const backButton = findPressableByText(root, '←');
+
+    act(() => {
+      backButton.props.onPress();
+    });
+
+    expect(findAllText(root, 'Debug Panel').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Transposer Pad Debug')).toHaveLength(0);
+    expect(findAllText(root, 'RMS: 0.0000 · Conf: 0.00 · Hz: —').length).toBeGreaterThan(0);
+  });
+
   it('defaults touch-first web to the native keyboard and exposes the keyboard setting in properties', () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
 
