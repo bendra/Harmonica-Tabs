@@ -6,7 +6,6 @@
 - Revisit `-2` vs `3` toggle behavior for chord visualization.
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.
-- Add some way to save tabs, with the exact storage/UX still to be decided.
 - Consider whether the transposer's explicit `Paste` action should grow into a fuller clipboard/edit menu.
 - Add native (iOS/Android) detector producers that feed the same shared detector snapshot used by tone follow.
 - Consolidate repeated UI/runtime default values into shared default-setting constants so input defaults and fallback values stay in sync.
@@ -14,6 +13,10 @@
 - Persist tone-follow settings across sessions if they prove useful.
 - Consider persisting the transposer keyboard choice across sessions if users ask for it.
 - Consider a helper hint for the transposer `Clean Input` flow beyond the current mobile pad guidance.
-- data persistence (web and native)
+- Expand the saved-tab library viewer with search/filter, sort options, larger previews, and future multi-select actions.
+- Consider whether the library screen should grow rename/duplicate entry points in addition to the editor-level `Save As` flow.
+- Add library import/export so users can share or back up their saved tabs, likely starting with whole-library JSON export/import.
+- Consider single-tab sharing/export flows after whole-library import/export exists.
+- Consider cross-device sync only after local import/export proves useful.
 - accessability
 - localization

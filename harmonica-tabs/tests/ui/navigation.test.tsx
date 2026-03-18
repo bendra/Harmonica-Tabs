@@ -2,11 +2,31 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestRenderer, { act } from 'react-test-renderer';
 import { resetReactNativeMocks, scrollToSpy } from './react-native.mock';
+import { parseSavedTabLibrary, SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
 
 const readClipboardTextMock = vi.fn();
+const { asyncStorageMock, asyncStorageValues } = vi.hoisted(() => {
+  const values = new Map<string, string>();
+  return {
+    asyncStorageValues: values,
+    asyncStorageMock: {
+      getItem: vi.fn(async (key: string) => values.get(key) ?? null),
+      setItem: vi.fn(async (key: string, value: string) => {
+        values.set(key, value);
+      }),
+      removeItem: vi.fn(async (key: string) => {
+        values.delete(key);
+      }),
+    },
+  };
+});
 
 vi.mock('../../src/logic/transposer-clipboard', () => ({
   readClipboardText: readClipboardTextMock,
+}));
+
+vi.mock('@react-native-async-storage/async-storage', () => ({
+  default: asyncStorageMock,
 }));
 
 const { default: App } = await import('../../App');
@@ -136,11 +156,26 @@ function switchToCustomTabPad(root: any) {
   });
 }
 
+async function renderApp() {
+  let renderer: any;
+
+  await act(async () => {
+    renderer = TestRenderer.create(<App />);
+    await Promise.resolve();
+  });
+
+  return renderer;
+}
+
 describe('App navigation', () => {
   beforeEach(() => {
     resetReactNativeMocks();
     readClipboardTextMock.mockReset();
     readClipboardTextMock.mockResolvedValue('');
+    asyncStorageValues.clear();
+    asyncStorageMock.getItem.mockClear();
+    asyncStorageMock.setItem.mockClear();
+    asyncStorageMock.removeItem.mockClear();
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
@@ -183,9 +218,7 @@ describe('App navigation', () => {
       backButton.props.onPress();
     });
 
-    expect(() =>
-      root.find((node: any) => node.type === 'Text' && flattenTextChildren(node.children) === 'Tab Transposer'),
-    ).not.toThrow();
+    expect(() => findByTestId(root, 'transposer-listen-button')).not.toThrow();
     expect(scrollToSpy).toHaveBeenLastCalledWith({ x: 360, animated: false });
   });
 
@@ -225,9 +258,7 @@ describe('App navigation', () => {
       });
     }).not.toThrow();
 
-    expect(() =>
-      root.find((node: any) => node.type === 'Text' && flattenTextChildren(node.children) === 'Tab Transposer'),
-    ).not.toThrow();
+    expect(() => findByTestId(root, 'transposer-listen-button')).not.toThrow();
   });
 
   it('shows the shared debug panel on the transposer instead of the temporary pad-event log', () => {
@@ -811,5 +842,362 @@ describe('App navigation', () => {
     expect(findAllText(root, 'Clipboard access is unavailable in this browser.')).toHaveLength(1);
     expect(findVisibleModal(root)).not.toBeNull();
     expect(findTextInput(root).props.value).toBe('');
+  });
+
+  it('saves a transposer input tab and loads it without changing direction', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    act(() => {
+      findPressableByText(root, '○ Up').props.onPress();
+    });
+
+    await act(async () => {
+      findPressableByText(root, 'Save').props.onPress();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Saved melody');
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    act(() => {
+      findPressableByText(root, 'Library').props.onPress();
+    });
+
+    await act(async () => {
+      findPressableByText(root, 'Load').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(findTextInput(root).props.value).toBe('4 -4 5');
+    expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
+  });
+
+  it('edits a loaded saved tab and re-saves it', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    await act(async () => {
+      findPressableByText(root, 'Save').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    await act(async () => {
+      findPressableByText(root, 'Re-save').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
+    expect(storedLibrary.tabs).toHaveLength(1);
+    expect(storedLibrary.tabs[0]?.title).toBe('Warmup');
+    expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4 5');
+  });
+
+  it('lets a loaded saved tab branch into a new record with Save As', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    asyncStorageValues.set(
+      SAVED_TAB_LIBRARY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        tabs: [
+          {
+            id: 'original',
+            title: 'Original',
+            inputText: '4 -4',
+            createdAt: '2026-03-17T00:00:00.000Z',
+            updatedAt: '2026-03-17T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findPressableByText(root, 'Library').props.onPress();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'saved-tab-load:original').props.onPress();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    await act(async () => {
+      findByTestId(root, 'transposer-save-as-button').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(findAllText(root, 'Save As New Tab').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Original copy');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
+    expect(storedLibrary.tabs).toHaveLength(2);
+    expect(storedLibrary.tabs.map((tab) => tab.title).sort()).toEqual(['Original', 'Original copy']);
+    expect(storedLibrary.tabs.find((tab) => tab.title === 'Original')?.inputText).toBe('4 -4');
+    expect(storedLibrary.tabs.find((tab) => tab.title === 'Original copy')?.inputText).toBe('4 -4 5');
+  });
+
+  it('starts a blank draft from a loaded saved tab and shows Save instead of Re-save', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    asyncStorageValues.set(
+      SAVED_TAB_LIBRARY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        tabs: [
+          {
+            id: 'loaded',
+            title: 'Loaded tab',
+            inputText: '4 -4',
+            createdAt: '2026-03-17T00:00:00.000Z',
+            updatedAt: '2026-03-17T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findPressableByText(root, 'Library').props.onPress();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'saved-tab-load:loaded').props.onPress();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      findByTestId(root, 'transposer-new-button').props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('');
+    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
+  });
+
+  it('prompts before starting a new draft when there are unsaved changes and can discard them', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    act(() => {
+      findByTestId(root, 'transposer-new-button').props.onPress();
+    });
+
+    expect(findAllText(root, 'Unsaved changes').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Cancel').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Discard and New').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Save Then New').length).toBeGreaterThan(0);
+
+    act(() => {
+      findPressableByText(root, 'Cancel').props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('4 -4');
+
+    act(() => {
+      findByTestId(root, 'transposer-new-button').props.onPress();
+    });
+
+    act(() => {
+      findByTestId(root, 'discard-and-new-button').props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('');
+  });
+
+  it('can save the current work and then start a new blank draft', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('6 -6');
+    });
+
+    act(() => {
+      findByTestId(root, 'transposer-new-button').props.onPress();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'save-then-new-button').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(findAllText(root, 'Save Then New').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('New draft source');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('');
+    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
+
+    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
+    expect(storedLibrary.tabs).toHaveLength(1);
+    expect(storedLibrary.tabs[0]?.title).toBe('New draft source');
+    expect(storedLibrary.tabs[0]?.inputText).toBe('6 -6');
+  });
+
+  it('prompts before loading over unsaved changes and can save then load', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    asyncStorageValues.set(
+      SAVED_TAB_LIBRARY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        tabs: [
+          {
+            id: 'first',
+            title: 'First',
+            inputText: '4 -4',
+            createdAt: '2026-03-17T00:00:00.000Z',
+            updatedAt: '2026-03-17T00:00:00.000Z',
+          },
+          {
+            id: 'second',
+            title: 'Second',
+            inputText: '5 -5',
+            createdAt: '2026-03-17T01:00:00.000Z',
+            updatedAt: '2026-03-17T01:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('6 -6');
+    });
+
+    act(() => {
+      findPressableByText(root, 'Library').props.onPress();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'saved-tab-load:first').props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(findVisibleModal(root)).not.toBeNull();
+    expect(findAllText(root, 'Unsaved changes').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      findPressableByText(root, 'Save Then Load').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Draft before load');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('4 -4');
+
+    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
+    expect(storedLibrary.tabs.map((tab) => tab.title).sort()).toEqual(['Draft before load', 'First', 'Second']);
+  });
+
+  it('keeps the editor text when deleting the active saved tab', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    await act(async () => {
+      findPressableByText(root, 'Save').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Delete me');
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    act(() => {
+      findPressableByText(root, 'Library').props.onPress();
+    });
+
+    await act(async () => {
+      findPressableByText(root, 'Delete').props.onPress();
+      await Promise.resolve();
+    });
+
+    const backButton = findPressableByText(root, '←');
+
+    act(() => {
+      backButton.props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('4 -4 5');
+    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
+    expect(parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null).tabs).toHaveLength(0);
   });
 });

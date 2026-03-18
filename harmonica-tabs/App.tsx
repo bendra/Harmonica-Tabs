@@ -41,6 +41,12 @@ import {
   TransposerInputMode,
 } from './src/logic/transposer-input-mode';
 import { readClipboardText } from './src/logic/transposer-clipboard';
+import {
+  buildSavedTabTitleCandidate,
+  createSavedTabLibraryService,
+  formatSavedTabPreview,
+  SavedTabRecord,
+} from './src/logic/saved-tab-library';
 import { createWebAudioPitchDetector } from './src/logic/web-audio';
 
 /**
@@ -94,6 +100,8 @@ type TabPadSuffixOption = {
   label: string;
   value: TransposerTokenSuffix;
 };
+type AppScreen = 'main' | 'properties' | 'tab-symbols' | 'library';
+type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_load' | 'save_then_new';
 
 const TAB_PAD_SIGN_OPTIONS: TabPadSignOption[] = [
   { label: 'Plain', value: '' },
@@ -113,6 +121,7 @@ const TAB_PAD_HOLES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
 const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
+const savedTabLibraryService = createSavedTabLibraryService();
 
 function sanitizeDecimalInput(value: string): string {
   let sawDot = false;
@@ -144,40 +153,30 @@ function parseBoundedInteger(value: string, fallback: number, min: number, max: 
   return Math.max(min, Math.min(max, parsed));
 }
 
-function formatToneFollowStatus(params: {
-  isListening: boolean;
-  currentTokenText: string | null;
-  status: 'idle' | 'listening' | 'holding' | 'advanced' | 'waiting-for-release' | 'no-match';
-  centsOffset: number | null;
-}): string {
-  const { centsOffset, currentTokenText, isListening, status } = params;
-  const targetLabel = currentTokenText ? `Target ${currentTokenText}` : 'No target';
+function formatSavedTabTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString();
+}
 
-  if (!isListening) {
-    return `${targetLabel} • Listening off`;
-  }
+function getSaveDialogTitle(mode: SaveTabMode, hasLinkedRecord: boolean) {
+  if (mode === 'create_new') return 'Save As New Tab';
+  if (mode === 'save_then_load') return 'Save Then Load';
+  if (mode === 'save_then_new') return 'Save Then New';
+  return hasLinkedRecord ? 'Update Saved Tab' : 'Save Tab';
+}
 
-  if (status === 'holding') {
-    return `${targetLabel} • Holding${centsOffset === null ? '' : ` ${formatCents(centsOffset)}`}`;
-  }
+function getSaveDialogConfirmLabel(mode: SaveTabMode) {
+  if (mode === 'create_new') return 'Save As';
+  if (mode === 'save_then_load') return 'Save Then Load';
+  if (mode === 'save_then_new') return 'Save Then New';
+  return 'Save';
+}
 
-  if (status === 'advanced') {
-    return `${targetLabel} • Advanced`;
-  }
-
-  if (status === 'waiting-for-release') {
-    return `${targetLabel} • Release note before the next match`;
-  }
-
-  if (status === 'no-match') {
-    return `${targetLabel} • Waiting for match${centsOffset === null ? '' : ` ${formatCents(centsOffset)}`}`;
-  }
-
-  if (status === 'listening') {
-    return `${targetLabel} • Listening`;
-  }
-
-  return `${targetLabel} • Idle`;
+function isSavedTabsErrorStatus(value: string | null) {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return normalized.includes('could not') || normalized.includes('enter some tab text');
 }
 
 /**
@@ -298,7 +297,7 @@ export default function App() {
   const isSmallScreen = Math.min(width, height) < 420;
   const isActEnvironment =
     typeof globalThis !== 'undefined' && Boolean((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
-  const [screen, setScreen] = useState<'main' | 'properties' | 'tab-symbols'>('main');
+  const [screen, setScreen] = useState<AppScreen>('main');
   const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
   const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
@@ -322,6 +321,16 @@ export default function App() {
   const [transposerPadSuffix, setTransposerPadSuffix] = useState<TransposerTokenSuffix>('');
   const [transposerPasteStatus, setTransposerPasteStatus] = useState<string | null>(null);
   const [transposerKeyboardPreference, setTransposerKeyboardPreference] = useState<'custom' | 'native' | null>('native');
+  const [savedTabs, setSavedTabs] = useState<SavedTabRecord[]>([]);
+  const [savedTabsStatus, setSavedTabsStatus] = useState<string | null>(null);
+  const [activeSavedTabId, setActiveSavedTabId] = useState<string | null>(null);
+  const [saveTabModalVisible, setSaveTabModalVisible] = useState(false);
+  const [saveTabMode, setSaveTabMode] = useState<SaveTabMode>('overwrite');
+  const [saveTabTitleInput, setSaveTabTitleInput] = useState('');
+  const [saveTabTitleError, setSaveTabTitleError] = useState<string | null>(null);
+  const [pendingLoadRecord, setPendingLoadRecord] = useState<SavedTabRecord | null>(null);
+  const [loadAfterSaveRecordId, setLoadAfterSaveRecordId] = useState<string | null>(null);
+  const [newDraftModalVisible, setNewDraftModalVisible] = useState(false);
   const [toneToleranceInput, setToneToleranceInput] = useState('60');
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
   const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
@@ -354,6 +363,25 @@ export default function App() {
     detectorRef.current = createWebAudioPitchDetector();
     return () => {
       detectorRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    savedTabLibraryService
+      .listTabs()
+      .then((tabs) => {
+        if (cancelled) return;
+        setSavedTabs(tabs);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSavedTabsStatus('Saved tabs could not be loaded.');
+      });
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -410,7 +438,6 @@ export default function App() {
   );
   const pageWidth = Math.max(width - 40, 280);
   const transposerOutputMaxHeight = Math.max(160, Math.min(Math.floor(height * 0.32), 280));
-  const targetPosition = scaleKeyOptions.find((option) => option.note === scaleRoot)?.position ?? 1;
 
   const transposerDownResult = useMemo(
     () =>
@@ -484,6 +511,14 @@ export default function App() {
     }),
     [stripInvalidTransposerContent, removeExcessTransposerWhitespace],
   );
+  const activeSavedTab = useMemo(
+    () => savedTabs.find((tab) => tab.id === activeSavedTabId) ?? null,
+    [activeSavedTabId, savedTabs],
+  );
+  const savedTabsStatusIsError = isSavedTabsErrorStatus(savedTabsStatus);
+  const hasUnsavedTransposerChanges = activeSavedTab
+    ? transposerInput !== activeSavedTab.inputText
+    : transposerInput.trim().length > 0;
   const toneToleranceCents = useMemo(
     () => parseBoundedNumber(toneToleranceInput, 60, 1, 120),
     [toneToleranceInput],
@@ -629,6 +664,140 @@ export default function App() {
       start: Math.min(prev.start, cleaned.length),
       end: Math.min(prev.end, cleaned.length),
     }));
+  }
+
+  function closeSaveTabModal() {
+    setSaveTabModalVisible(false);
+    setSaveTabMode('overwrite');
+    setSaveTabTitleError(null);
+    setLoadAfterSaveRecordId(null);
+  }
+
+  function openSaveTabModal(mode: SaveTabMode = 'overwrite', nextLoadRecordId: string | null = null) {
+    if (transposerInput.trim().length === 0) {
+      setSavedTabsStatus('Enter some tab text before saving.');
+      return;
+    }
+
+    const defaultTitle =
+      mode === 'create_new'
+        ? activeSavedTab?.title ?? buildSavedTabTitleCandidate(transposerInput)
+        : activeSavedTab?.title ?? buildSavedTabTitleCandidate(transposerInput);
+
+    setSaveTabMode(mode);
+    setSaveTabTitleInput(defaultTitle);
+    setSaveTabTitleError(null);
+    setLoadAfterSaveRecordId(nextLoadRecordId);
+    setSaveTabModalVisible(true);
+    setSavedTabsStatus(null);
+  }
+
+  function startNewDraft() {
+    setTransposerInput('');
+    setTransposerSelection({ start: 0, end: 0 });
+    setTransposerPasteStatus(null);
+    setActiveSavedTabId(null);
+    setPendingLoadRecord(null);
+    setNewDraftModalVisible(false);
+    setSavedTabsStatus('Started a new tab.');
+    transposerInputRef.current?.focus();
+  }
+
+  function handleNewDraftPress() {
+    if (!hasUnsavedTransposerChanges && activeSavedTabId === null && transposerInput.length === 0) {
+      setSavedTabsStatus(null);
+      return;
+    }
+
+    if (hasUnsavedTransposerChanges) {
+      setNewDraftModalVisible(true);
+      return;
+    }
+
+    startNewDraft();
+  }
+
+  function loadSavedTabIntoEditor(record: SavedTabRecord) {
+    setTransposerInput(record.inputText);
+    setTransposerSelection({ start: 0, end: 0 });
+    setTransposerPasteStatus(null);
+    setActiveSavedTabId(record.id);
+    setPendingLoadRecord(null);
+    setScreen('main');
+    setPagerIndex(1);
+    requestAnimationFrame(() => {
+      scrollToPagerPage(1, false);
+    });
+    setSavedTabsStatus(`Loaded "${record.title}".`);
+  }
+
+  async function handleSaveTabConfirm() {
+    const nextTitle = saveTabTitleInput.trim();
+    if (nextTitle.length === 0) {
+      setSaveTabTitleError('Title is required.');
+      return;
+    }
+
+    try {
+      const nextSaveMode = saveTabMode;
+      const nextLoadRecordId = loadAfterSaveRecordId;
+      const saveTargetId = nextSaveMode === 'create_new' ? null : activeSavedTabId;
+      const result = await savedTabLibraryService.saveTab({
+        id: saveTargetId,
+        title: nextTitle,
+        inputText: transposerInput,
+      });
+      setSavedTabs(result.tabs);
+      setActiveSavedTabId(result.savedTab.id);
+      setSavedTabsStatus(`Saved "${result.savedTab.title}".`);
+      closeSaveTabModal();
+
+      if (nextSaveMode === 'save_then_new') {
+        startNewDraft();
+        return;
+      }
+
+      if (nextLoadRecordId) {
+        const nextRecord = result.tabs.find((tab) => tab.id === nextLoadRecordId) ?? null;
+        if (nextRecord) {
+          loadSavedTabIntoEditor(nextRecord);
+        }
+      }
+    } catch (error) {
+      const nextMessage = error instanceof Error && error.message ? error.message : 'Could not save this tab.';
+      setSaveTabTitleError(nextMessage);
+    }
+  }
+
+  function handleSavedTabLoadPress(record: SavedTabRecord) {
+    if (!hasUnsavedTransposerChanges) {
+      loadSavedTabIntoEditor(record);
+      return;
+    }
+
+    const wouldReplaceCurrentInput =
+      activeSavedTabId !== record.id || transposerInput !== record.inputText;
+
+    if (!wouldReplaceCurrentInput) {
+      loadSavedTabIntoEditor(record);
+      return;
+    }
+
+    setPendingLoadRecord(record);
+  }
+
+  async function handleDeleteSavedTab(record: SavedTabRecord) {
+    try {
+      const nextTabs = await savedTabLibraryService.deleteTab(record.id);
+      setSavedTabs(nextTabs);
+      setPendingLoadRecord((prev) => (prev?.id === record.id ? null : prev));
+      if (activeSavedTabId === record.id) {
+        setActiveSavedTabId(null);
+      }
+      setSavedTabsStatus(`Deleted "${record.title}".`);
+    } catch {
+      setSavedTabsStatus('Could not delete that saved tab.');
+    }
   }
 
   function moveTransposerCursor(tokenIndex: number) {
@@ -873,16 +1042,6 @@ export default function App() {
     holdDurationMs: toneFollowHoldDurationMs,
     now: toneFollowTick > 0 ? Date.now() : now,
   });
-  const activeTransposerToken =
-    transposerFollowState.activeTokenIndex === null
-      ? null
-      : transposerResult.playableTokens[transposerFollowState.activeTokenIndex] ?? null;
-  const toneFollowStatusText = formatToneFollowStatus({
-    isListening,
-    currentTokenText: activeTransposerToken?.text ?? null,
-    status: transposerFollowEvaluation.status,
-    centsOffset: transposerFollowEvaluation.centsOffset,
-  });
   const statusText = isListening
     ? listenError
       ? listenError
@@ -965,12 +1124,19 @@ export default function App() {
   }
 
   const headerTitle =
-    screen === 'main' ? 'Harmonica Scale Visualizer' : screen === 'properties' ? 'Properties' : 'Tab Symbols';
+    screen === 'main'
+      ? 'HarpPilot'
+      : screen === 'properties'
+        ? 'Properties'
+        : screen === 'tab-symbols'
+          ? 'Tab Symbols'
+          : 'Saved Tab Library';
 
   function handleHeaderButtonPress() {
     setScreen((prev) => {
       if (prev === 'main') return 'properties';
       if (prev === 'tab-symbols') return 'properties';
+      if (prev === 'library') return 'main';
       return 'main';
     });
   }
@@ -1177,6 +1343,48 @@ export default function App() {
               <Text style={styles.symbolKey}>4' / -7'</Text>
               <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to '.</Text>
             </View>
+          </View>
+        ) : screen === 'library' ? (
+          <View style={styles.propertiesCard}>
+            <Text style={styles.propertiesTitle}>Saved Tabs</Text>
+            <Text style={styles.helperText}>Saved tabs keep only the input tab text and title.</Text>
+            {savedTabsStatus && (
+              <Text style={[styles.savedTabsStatus, savedTabsStatusIsError && styles.savedTabsStatusError]}>
+                {savedTabsStatus}
+              </Text>
+            )}
+            {savedTabs.length === 0 ? (
+              <Text style={styles.helperText}>No saved tabs yet. Use Save from the transposer to add one.</Text>
+            ) : (
+              <View style={styles.savedTabsList}>
+                {savedTabs.map((tab) => (
+                  <View key={tab.id} style={styles.savedTabRow}>
+                    <View style={styles.savedTabRowHeader}>
+                      <Text style={styles.savedTabTitle}>{tab.title}</Text>
+                      {activeSavedTabId === tab.id && <Text style={styles.savedTabActiveBadge}>Loaded</Text>}
+                    </View>
+                    <Text style={styles.savedTabPreview}>{formatSavedTabPreview(tab.inputText)}</Text>
+                    <Text style={styles.savedTabMeta}>Updated {formatSavedTabTimestamp(tab.updatedAt)}</Text>
+                    <View style={styles.savedTabActions}>
+                      <Pressable
+                        testID={`saved-tab-load:${tab.id}`}
+                        onPress={() => handleSavedTabLoadPress(tab)}
+                        style={styles.savedTabActionButton}
+                      >
+                        <Text style={styles.savedTabActionText}>Load</Text>
+                      </Pressable>
+                      <Pressable
+                        testID={`saved-tab-delete:${tab.id}`}
+                        onPress={() => handleDeleteSavedTab(tab)}
+                        style={[styles.savedTabActionButton, styles.savedTabDeleteButton]}
+                      >
+                        <Text style={[styles.savedTabActionText, styles.savedTabDeleteText]}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         ) : (
           <>
@@ -1448,13 +1656,6 @@ export default function App() {
 
                 <View style={[styles.pagerPage, { width: pageWidth }]}>
                   <View style={styles.transposerCard}>
-                    <Text style={styles.transposerTitle}>Tab Transposer</Text>
-                    <Text style={styles.transposerMeta}>
-                      Assumes pasted tabs are first position on a {harmonicaKey.label} harmonica.
-                    </Text>
-                    <Text style={styles.transposerMeta}>
-                      Target: position {targetPosition} ({pcToNote(scale.rootPc, harmonicaKey.preferFlats)})
-                    </Text>
                     <View style={styles.transposerFollowControls}>
                       <Pressable
                         testID="transposer-listen-button"
@@ -1471,8 +1672,17 @@ export default function App() {
                           {isListening ? 'Stop' : 'Listen'}
                         </Text>
                       </Pressable>
+                      {savedTabsStatus && (
+                        <Text
+                          style={[
+                            styles.transposerSavedTabsStatus,
+                            savedTabsStatusIsError && styles.transposerSavedTabsStatusError,
+                          ]}
+                        >
+                          {savedTabsStatus}
+                        </Text>
+                      )}
                     </View>
-                    <Text style={styles.transposerFollowStatus}>{toneFollowStatusText}</Text>
                     {Platform.OS === 'web' && useCustomTransposerPad ? (
                       <Pressable
                         testID="transposer-input-shell"
@@ -1502,7 +1712,7 @@ export default function App() {
                           autoCorrect={false}
                           autoCapitalize="none"
                           spellCheck={false}
-                          placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
+                          placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
                           placeholderTextColor="#64748b"
                           textAlignVertical="top"
                           pointerEvents="none"
@@ -1536,7 +1746,7 @@ export default function App() {
                         autoCorrect={false}
                         autoCapitalize="none"
                         spellCheck={false}
-                        placeholder="Paste first-position tabs here, for example: 4 -4 5 -5 6"
+                        placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
                         placeholderTextColor="#64748b"
                         textAlignVertical="top"
                       />
@@ -1550,6 +1760,72 @@ export default function App() {
                     )}
                     {transposerPasteStatus && <Text style={styles.transposerPadStatus}>{transposerPasteStatus}</Text>}
                     {showDebug && renderToneFollowDebugPanel()}
+                    <View
+                      style={[
+                        styles.transposerLibraryRow,
+                        isSmallScreen && styles.transposerDirectionRowCompact,
+                      ]}
+                    >
+                      <Pressable
+                        testID="transposer-new-button"
+                        onPress={handleNewDraftPress}
+                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerActionButtonText,
+                            isSmallScreen && styles.transposerActionButtonTextCompact,
+                          ]}
+                        >
+                          New
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        testID="transposer-save-button"
+                        onPress={() => openSaveTabModal('overwrite')}
+                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerActionButtonText,
+                            isSmallScreen && styles.transposerActionButtonTextCompact,
+                          ]}
+                        >
+                          {activeSavedTabId ? 'Re-save' : 'Save'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        testID="transposer-save-as-button"
+                        onPress={() => openSaveTabModal('create_new')}
+                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerActionButtonText,
+                            isSmallScreen && styles.transposerActionButtonTextCompact,
+                          ]}
+                        >
+                          Save As
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        testID="transposer-library-button"
+                        onPress={() => {
+                          setSavedTabsStatus(null);
+                          setScreen('library');
+                        }}
+                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerActionButtonText,
+                            isSmallScreen && styles.transposerActionButtonTextCompact,
+                          ]}
+                        >
+                          Library
+                        </Text>
+                      </Pressable>
+                    </View>
                     <View
                       style={[
                         styles.transposerDirectionRow,
@@ -1827,6 +2103,123 @@ export default function App() {
             )}
           </>
         )}
+        <Modal transparent visible={saveTabModalVisible} animationType="fade" onRequestClose={closeSaveTabModal}>
+          <View style={styles.dialogOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeSaveTabModal} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, activeSavedTab !== null)}</Text>
+              <Text style={styles.helperText}>Titles help users find a saved tab later.</Text>
+              <TextInput
+                testID="save-tab-title-input"
+                value={saveTabTitleInput}
+                onChangeText={(value) => {
+                  setSaveTabTitleInput(value);
+                  if (saveTabTitleError) {
+                    setSaveTabTitleError(null);
+                  }
+                }}
+                style={styles.dialogInput}
+                placeholder="Saved tab title"
+                placeholderTextColor="#64748b"
+                autoCorrect={false}
+                autoCapitalize="sentences"
+                spellCheck={false}
+              />
+              {saveTabTitleError && <Text style={styles.dialogErrorText}>{saveTabTitleError}</Text>}
+              <View style={styles.dialogActionRow}>
+                <Pressable onPress={closeSaveTabModal} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  testID="save-tab-confirm-button"
+                  onPress={handleSaveTabConfirm}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>
+                    {getSaveDialogConfirmLabel(saveTabMode)}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        <Modal
+          transparent
+          visible={newDraftModalVisible}
+          animationType="fade"
+          onRequestClose={() => setNewDraftModalVisible(false)}
+        >
+          <View style={styles.dialogOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setNewDraftModalVisible(false)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>Unsaved changes</Text>
+              <Text style={styles.helperText}>Starting a new tab will clear the current editor text.</Text>
+              <View style={styles.dialogActionColumn}>
+                <Pressable onPress={() => setNewDraftModalVisible(false)} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  testID="discard-and-new-button"
+                  onPress={startNewDraft}
+                  style={styles.dialogButton}
+                >
+                  <Text style={styles.dialogButtonText}>Discard and New</Text>
+                </Pressable>
+                <Pressable
+                  testID="save-then-new-button"
+                  onPress={() => {
+                    openSaveTabModal('save_then_new');
+                    setNewDraftModalVisible(false);
+                  }}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then New</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        <Modal
+          transparent
+          visible={pendingLoadRecord !== null}
+          animationType="fade"
+          onRequestClose={() => setPendingLoadRecord(null)}
+        >
+          <View style={styles.dialogOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingLoadRecord(null)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>Unsaved changes</Text>
+              <Text style={styles.helperText}>
+                Loading "{pendingLoadRecord?.title ?? 'this tab'}" will replace the current editor text.
+              </Text>
+              <View style={styles.dialogActionColumn}>
+                <Pressable onPress={() => setPendingLoadRecord(null)} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (pendingLoadRecord) {
+                      loadSavedTabIntoEditor(pendingLoadRecord);
+                    }
+                  }}
+                  style={styles.dialogButton}
+                >
+                  <Text style={styles.dialogButtonText}>Load Anyway</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (!pendingLoadRecord) return;
+                    openSaveTabModal('save_then_load', pendingLoadRecord.id);
+                    setPendingLoadRecord(null);
+                  }}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Load</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -2504,6 +2897,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  savedTabsStatus: {
+    color: '#93c5fd',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  savedTabsStatusError: {
+    color: '#f87171',
+  },
   transposerSectionLabel: {
     color: '#94a3b8',
     fontSize: 11,
@@ -2518,13 +2919,18 @@ const styles = StyleSheet.create({
   },
   transposerFollowControls: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
   },
-  transposerFollowStatus: {
-    color: '#cbd5e1',
+  transposerSavedTabsStatus: {
+    color: '#93c5fd',
     fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
+    flexShrink: 1,
+  },
+  transposerSavedTabsStatusError: {
+    color: '#f87171',
   },
   transposerActionButton: {
     borderWidth: 1,
@@ -2550,6 +2956,11 @@ const styles = StyleSheet.create({
   transposerActionButtonTextCompact: {
     fontSize: 10,
     letterSpacing: 0.6,
+  },
+  transposerLibraryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   transposerDirectionRow: {
     flexDirection: 'row',
@@ -2641,6 +3052,143 @@ const styles = StyleSheet.create({
   transposerWarningText: {
     color: '#fda4af',
     fontSize: 12,
+  },
+  savedTabsList: {
+    gap: 10,
+  },
+  savedTabRow: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#182233',
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  savedTabRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  savedTabTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+  },
+  savedTabActiveBadge: {
+    color: '#e0f2fe',
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  savedTabPreview: {
+    color: '#cbd5e1',
+    fontFamily: 'Courier',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  savedTabMeta: {
+    color: '#94a3b8',
+    fontSize: 11,
+  },
+  savedTabActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  savedTabActionButton: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  savedTabActionText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  savedTabDeleteButton: {
+    borderColor: '#7f1d1d',
+    backgroundColor: '#2a1117',
+  },
+  savedTabDeleteText: {
+    color: '#fecdd3',
+  },
+  dialogOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: 'rgba(5, 8, 14, 0.55)',
+  },
+  dialogCard: {
+    borderRadius: 16,
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    padding: 16,
+    gap: 12,
+  },
+  dialogTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  dialogInput: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#0f172a',
+    color: '#e2e8f0',
+    fontSize: 14,
+  },
+  dialogErrorText: {
+    color: '#fda4af',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  dialogActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  dialogActionColumn: {
+    gap: 8,
+  },
+  dialogButton: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  dialogPrimaryButton: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  dialogButtonText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  dialogPrimaryButtonText: {
+    color: '#e0f2fe',
   },
   transposerPadOverlay: {
     flex: 1,

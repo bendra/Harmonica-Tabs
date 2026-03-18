@@ -32,12 +32,15 @@ SafeAreaView (styles.safeArea)
       │  │  │  └─ Page 2: Tab Transposer (styles.pagerPage)
       │  │  │     └─ Transposer Card (styles.transposerCard)
       │  │  │        ├─ Tone Follow Controls (styles.transposerFollowControls)
-      │  │  │        │  └─ Shared Listen Button (styles.listenButton)
-      │  │  │        ├─ Tone Follow Status (styles.transposerFollowStatus)
+      │  │  │        │  ├─ Shared Listen Button (styles.listenButton)
+      │  │  │        │  └─ Inline Save Status/Error (styles.transposerSavedTabsStatus, conditional)
       │  │  │        ├─ Shared Debug Panel (styles.debugPanel, conditional)
       │  │  │        ├─ Input (styles.transposerInput)
+      │  │  │        │  └─ Placeholder includes first-position guidance + example
       │  │  │        ├─ Mobile Pad Hint (styles.transposerPadHint, conditional)
       │  │  │        ├─ Paste Status (styles.transposerPadStatus, conditional)
+      │  │  │        ├─ Draft/Library Actions (styles.transposerLibraryRow + styles.transposerActionButton)
+      │  │  │        │  └─ Includes `New`, `Save`/`Re-save`, `Save As`, and `Library`
       │  │  │        ├─ Direction Radio + Clean Input (styles.transposerDirectionRow + styles.transposerDirectionOption + styles.transposerActionButton)
       │  │  │        ├─ Output Box (styles.transposerOutputBox + styles.transposerOutputText)
       │  │  │        │  └─ Clickable Output Tokens (styles.transposerOutputToken + active/matched variants)
@@ -71,6 +74,19 @@ SafeAreaView (styles.safeArea)
          └─ Symbols Card (styles.propertiesCard)
             ├─ Section Title (styles.propertiesTitle)
             └─ Symbol Rows (styles.symbolRow + styles.symbolKey + styles.symbolMeaning)
+      └─ Library Screen (`screen === 'library'`)
+         └─ Library Card (styles.propertiesCard)
+            ├─ Section Title (styles.propertiesTitle)
+            ├─ Status Text (styles.savedTabsStatus, conditional)
+            └─ Saved Tab Rows (styles.savedTabsList + styles.savedTabRow)
+               ├─ Row Header (styles.savedTabRowHeader)
+               ├─ Preview (styles.savedTabPreview)
+               ├─ Updated Meta (styles.savedTabMeta)
+               └─ Row Actions (styles.savedTabActions + styles.savedTabActionButton)
+   └─ Dialog Modals (global)
+      ├─ Save Tab Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogInput)
+      ├─ New Draft Confirmation Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
+      └─ Unsaved Changes Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
 ```
 
 ## Naming Reference
@@ -89,5 +105,7 @@ SafeAreaView (styles.safeArea)
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
-- **Tab Transposer**: `transposerCard`, `transposerTitle`, `transposerMeta`, `transposerFollowControls`, `transposerFollowStatus`, `transposerInput`, `transposerPadHint`, `transposerPadStatus`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
+- **Tab Transposer**: `transposerCard`, `transposerFollowControls`, `transposerSavedTabsStatus`, `transposerInput`, `transposerPadHint`, `transposerPadStatus`, `transposerLibraryRow`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
+- **Saved Tab Library**: `savedTabsStatus`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`
+- **Dialogs**: `dialogOverlay`, `dialogCard`, `dialogTitle`, `dialogInput`, `dialogActionRow`, `dialogActionColumn`, `dialogButton`
 - **Tab Pad**: `transposerPadOverlay`, `transposerPadSheet`, `transposerPadHandle`, `transposerPadTitle`, `transposerPadPreview`, `transposerPadSection`, `transposerPadOptionRow`, `transposerPadOptionButton`, `transposerPadHoleGrid`, `transposerPadHoleButton`, `transposerPadActionRow`

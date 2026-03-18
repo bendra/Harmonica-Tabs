@@ -1,6 +1,6 @@
 # Architecture Snapshot
 
-Date: 2026-03-15  
+Date: 2026-03-17  
 Status: Rapid exploration (structure and behavior are still changing quickly)
 
 This document describes the app as it exists today. It is intentionally practical: enough context for a typically-skilled React/TypeScript developer to contribute safely without reverse-engineering the whole codebase.
@@ -33,6 +33,8 @@ Out of scope today:
 - `tabs.ts`: core mapping from pitch classes to playable tab groups. Includes bend/overbend formatting and ordering.
 - `arpeggios.ts`: generates triad/7th/blues arpeggio sections from selected scale root/definition.
 - `pitch.ts`: MIDI/frequency/cents conversions + nearest tab matching + interpolation factor `t`.
+- `app-storage.ts`: app-owned async string-storage wrapper around device persistence.
+- `saved-tab-library.ts`: versioned saved-tab parsing, sorting, title helpers, and persistence service.
 - `transposer.ts`: parses transposer input and produces both render segments and playable output-token metadata.
 - `transposer-follow.ts`: pure cursor-advance state machine for tone-follow behavior.
 - `web-audio.ts`: web microphone pitch detector (autocorrelation-like approach + EMA smoothing).
@@ -48,6 +50,7 @@ In `App.tsx`, state is split by concern:
 - Pitch listening: start/stop status, detector snapshot (`frequency`, `confidence`, `rms`, `source`, `lastDetectedAt`), hold timer, debug controls.
 - Visual tracking: measured layouts for main tabs and each arpeggio row, selection checkboxes controlling which row receives caret.
 - Transposer follow: tone-follow enabled state, active output token index, hold/re-arm state, and tone-follow settings.
+- Saved-tab library: persisted records, currently loaded saved-tab id, explicit save mode (`overwrite`, `create_new`, `save_then_load`, `save_then_new`), save-dialog title/edit state, pending load confirmation state, and new-draft confirmation state.
 
 Derived values (`useMemo`) drive most rendering:
 - `groups` from `buildTabsForScale(...)`.
@@ -85,6 +88,16 @@ Derived values (`useMemo`) drive most rendering:
 5. Clicking a playable output token moves the cursor manually, and any transposer-output change resets the cursor to the first playable token.
 6. The transposer output scroll view measures token positions and auto-scrolls minimally when the active token falls outside the visible viewport.
 
+### E) Saved-tab library
+1. User saves the current transposer input with a title.
+2. `saved-tab-library.ts` persists only the raw `inputText` plus library metadata (`id`, `title`, timestamps) under one versioned storage key.
+3. Opening the Library screen lists saved items sorted by `updatedAt` descending.
+4. Loading a saved tab replaces only `transposerInput`; other musical/transposition settings stay untouched.
+5. If the current editor has unsaved changes, a confirmation dialog offers `Cancel`, `Load Anyway`, or `Save Then Load`.
+6. `Save As` branches the current editor text into a new saved record without overwriting the original loaded tab.
+7. `New` clears the editor into a blank draft; if there are unsaved changes, a confirmation dialog offers `Cancel`, `Discard and New`, or `Save Then New`.
+8. Deleting the active saved item removes it from storage but leaves the current editor text in place as an unsaved draft.
+
 ## 6. Important Behavioral Rules
 
 - Standard 10-hole Richter only.
@@ -92,18 +105,22 @@ Derived values (`useMemo`) drive most rendering:
 - Overbend notation is user-selectable (`'` vs `°`).
 - Enharmonic spelling follows harmonica key flat/sharp preference.
 - Alternate selection is currently most visible for G (`-2` vs `3`) where both exist at same MIDI pitch.
+- Saved tabs intentionally exclude harmonica key, position/key, transposition direction, tone-follow state, and derived output.
+- `Save` overwrites the linked saved record when one exists; `Save As` always creates a new saved record.
 - If mic is unavailable/blocked/unsupported, app runs with simulated frequency input.
 - Detector-specific code remains isolated so a future native audio pipeline can feed the same detector snapshot and transposer-follow logic.
 
 ## 7. Testing and Quality Gates
 
 - Test runner: Vitest (`npm test` in `harmonica-tabs`).
-- Current coverage focus: `src/logic/tabs.test.ts`.
+- Current coverage focus: transposer behavior and UI interactions, plus core tab logic.
 - Verified today by tests:
   - known C major output on C harp,
   - `-2` vs `3` alternate behavior,
   - overbend notation rendering,
-  - overbend hole exclusions.
+  - overbend hole exclusions,
+  - saved-tab persistence/update/sort behavior,
+  - transposer save/load/re-save/save-as/new-draft/delete flows and dirty-state confirmations.
 
 Current gap:
 - No automated tests yet for `arpeggios.ts`, `pitch.ts`, or web audio detector behavior.
