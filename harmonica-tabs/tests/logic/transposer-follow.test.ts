@@ -242,4 +242,31 @@ describe('evaluateTransposerFollow', () => {
       waitingForRelease: false,
     });
   });
+
+  it('wraps back to the first token after the last token advances', () => {
+    const result = evaluateTransposerFollow({
+      enabled: true,
+      tokens: TOKENS,
+      state: {
+        activeTokenIndex: 2,
+        matchedSince: 1_000,
+        waitingForRelease: false,
+      },
+      detector: createDetectorSnapshot({
+        frequency: midiToFrequency(73),
+        confidence: 0.8,
+      }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
+      holdDurationMs: 300,
+      now: 1_350,
+    });
+
+    expect(result.status).toBe('advanced');
+    expect(result.state).toEqual({
+      activeTokenIndex: 0,
+      matchedSince: null,
+      waitingForRelease: true,
+    });
+  });
 });

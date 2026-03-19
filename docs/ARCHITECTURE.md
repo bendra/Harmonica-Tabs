@@ -82,11 +82,13 @@ Derived values (`useMemo`) drive most rendering:
 
 ### D) Tone-followed transposer output
 1. User enters/pastes tabs and the transposer produces render segments plus playable output tokens.
-2. User starts shared listening from the transposer page; tone follow is implied while listening is active.
-3. `evaluateTransposerFollow(...)` checks the current output token against the shared detector snapshot using tolerance, confidence, and hold-duration settings.
-4. Matching tokens advance the cursor; repeated identical notes require a release before the next advance.
-5. Clicking a playable output token moves the cursor manually, and any transposer-output change resets the cursor to the first playable token.
-6. The transposer output scroll view measures token positions and auto-scrolls minimally when the active token falls outside the visible viewport.
+2. If the selected target is first position (same key as the harmonica), the transposer treats that as an octave move instead of a no-op. `Down` attempts one octave down, and `Up` attempts one octave up.
+3. The screen still auto-picks a default first-position direction by playability: prefer down when it keeps the whole passage playable, otherwise prefer up, otherwise default back to down and leave invalid notes flagged inline.
+4. User starts shared listening from the transposer page; tone follow is implied while listening is active.
+5. `evaluateTransposerFollow(...)` checks the current output token against the shared detector snapshot using tolerance, confidence, and hold-duration settings.
+6. Matching tokens advance the cursor; repeated identical notes require a release before the next advance, and the last playable token wraps back to the first.
+7. Clicking a playable output token moves the cursor manually, and any transposer-output change resets the cursor to the first playable token.
+8. The transposer output scroll view measures token positions and auto-scrolls minimally when the active token falls outside the visible viewport.
 
 ### E) Saved-tab library
 1. User saves the current transposer input with a title.

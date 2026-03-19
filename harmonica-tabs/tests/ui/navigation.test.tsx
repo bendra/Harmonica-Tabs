@@ -851,11 +851,7 @@ describe('App navigation', () => {
     const root = renderer.root;
 
     act(() => {
-      findTextInput(root).props.onChangeText('4 -4 5');
-    });
-
-    act(() => {
-      findPressableByText(root, '○ Up').props.onPress();
+      findTextInput(root).props.onChangeText('1');
     });
 
     await act(async () => {
@@ -876,8 +872,39 @@ describe('App navigation', () => {
       await Promise.resolve();
     });
 
-    expect(findTextInput(root).props.value).toBe('4 -4 5');
+    expect(findTextInput(root).props.value).toBe('1');
     expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
+  });
+
+  it('auto-selects up in first position when only the upper octave is fully playable', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('1');
+    });
+
+    expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
+  });
+
+  it('lets first position switch to an up-octave attempt manually', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    act(() => {
+      findPressableByText(root, '○ Up').props.onPress();
+    });
+
+    expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
+    expect(findAllText(root, '◉ Down')).toHaveLength(0);
   });
 
   it('edits a loaded saved tab and re-saves it', async () => {

@@ -21,6 +21,7 @@
 - Tone follow reuses the shared listen session; web microphone input is still the only real detector today.
 - Tone follow is automatically on while listening is on, and off while listening is off.
 - Repeated identical output notes require a release before the cursor can advance again.
+- When tone follow matches the last playable transposer note, the cursor wraps back to the first playable note.
 - Saved tabs persist only `inputText` plus library metadata (`id`, `title`, `createdAt`, `updatedAt`).
 - Loading a saved tab updates only the transposer input; it does not change direction, harmonica key, target position/key, or derived output.
 - Editing a loaded saved tab keeps it linked to that saved record until the user deletes it; saving again overwrites that same record.
@@ -34,7 +35,9 @@
 - Pager page 1 (Visualizer): Scale Name + Arpeggios + listen/debug + generated tabs/arpeggios.
 - Pager page 2 (Tab Transposer): multiline input, shared listen control, clickable transposed output, and parser/transpose warnings.
 - The transposer now includes `New`, `Save` / `Re-save`, `Save As`, and `Library` actions for a local saved-tab library.
-- Tab transposer uses exact up/down transposition only; no automatic octave fallback.
+- Tab transposer still uses exact up/down transposition for non-first-position targets.
+- First-position transposition now means a full-octave shift in the selected direction: `Down` attempts one octave down and `Up` attempts one octave up.
+- The transposer still auto-picks a default direction for first position: prefer down an octave when every parsed tab stays playable, otherwise default up if that octave is cleaner, otherwise default down and leave invalid notes flagged inline.
 - Transposer output now preserves render segments while also tracking playable output tokens with MIDI metadata for tone follow.
 - The transposer output auto-scrolls just enough to keep the active token visible during tone follow and manual cursor moves.
 - Saved tabs open in a dedicated Library screen with load/delete actions and dirty-state protection before replacing unsaved editor text.
@@ -57,11 +60,12 @@
   - Overbend notation and exclusion rules.
 - `harmonica-tabs/tests/logic/transposer.test.ts`
   - Token parsing (including `+` blow format) and whitespace preservation.
-  - First-position transposition behavior for selected target key.
+  - First-position octave selection plus invalid-note warning behavior.
   - Warning behavior for unrecognized token fragments.
 - `harmonica-tabs/tests/logic/transposer-follow.test.ts`
   - Hold/confidence/tolerance advancement rules.
   - Re-arm behavior for repeated identical notes.
+  - End-of-tab wrap back to the first playable token.
   - Manual cursor resets via state replacement.
 - `harmonica-tabs/tests/logic/transposer-input.test.ts`
   - Cleanup helpers for pasted mixed content.

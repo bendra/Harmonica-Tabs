@@ -22,7 +22,7 @@ describe('parseTabText', () => {
       direction: 'down',
     });
 
-    expect(result.output).toBe("4   -2\n\n6'");
+    expect(result.output).toBe("1   -2\n\n-3'");
   });
 
   it('does not add warnings for unrecognized token-like fragments', () => {
@@ -62,6 +62,7 @@ describe('transposeTabText', () => {
     });
 
     expect(result.output).toBe('6 -6');
+    expect(result.appliedDirection).toBe('up');
     expect(result.transposedTokenCount).toBe(2);
     expect(result.playableTokens).toEqual([
       { tokenIndex: 0, text: '6', canonical: '6', midi: 79 },
@@ -76,7 +77,7 @@ describe('transposeTabText', () => {
 
   it('keeps unknown tokens unchanged and marks them as errors', () => {
     const result = transposeTabText({
-      input: '4 4x -2',
+      input: '4 4x 5',
       sourceHarmonicaPc: 0,
       targetRootPc: 0,
       notation: 'apostrophe',
@@ -127,6 +128,7 @@ describe('transposeTabText', () => {
     });
 
     expect(result.output).toBe('-4 5');
+    expect(result.appliedDirection).toBe('down');
   });
 
   it('accepts alternate input tabs like 3 and transposes them', () => {
@@ -143,7 +145,85 @@ describe('transposeTabText', () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it('does not octave-fallback when exact target is unavailable', () => {
+  it('transposes one octave down in first position when down is selected', () => {
+    const result = transposeTabText({
+      input: '4 -4',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'down',
+    });
+
+    expect(result.output).toBe('1 -1');
+    expect(result.appliedDirection).toBe('down');
+    expect(result.warnings).toEqual([]);
+    expect(result.unavailableCount).toBe(0);
+  });
+
+  it('transposes one octave up in first position when up is selected', () => {
+    const result = transposeTabText({
+      input: '4 -4',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'up',
+    });
+
+    expect(result.output).toBe('7 -8');
+    expect(result.appliedDirection).toBe('up');
+    expect(result.warnings).toEqual([]);
+    expect(result.unavailableCount).toBe(0);
+  });
+
+  it('marks invalid notes when a selected first-position down octave is unavailable', () => {
+    const result = transposeTabText({
+      input: '1 10',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'down',
+    });
+
+    expect(result.output).toBe('1 7');
+    expect(result.appliedDirection).toBe('down');
+    expect(result.outputSegments).toEqual([
+      { text: '1', kind: 'error' },
+      { text: ' ', kind: 'normal' },
+      { text: '7', kind: 'token', tokenIndex: 0 },
+    ]);
+    expect(result.warnings.some((warning) => warning.includes('No playable down-octave transposition available'))).toBe(
+      true,
+    );
+    expect(result.unavailableCount).toBe(1);
+  });
+
+  it('marks invalid notes when a selected first-position up octave is unavailable', () => {
+    const result = transposeTabText({
+      input: '1 10',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'up',
+    });
+
+    expect(result.output).toBe('4 10');
+    expect(result.appliedDirection).toBe('up');
+    expect(result.outputSegments).toEqual([
+      { text: '4', kind: 'token', tokenIndex: 0 },
+      { text: ' ', kind: 'normal' },
+      { text: '10', kind: 'error' },
+    ]);
+    expect(result.warnings.some((warning) => warning.includes('No playable up-octave transposition available'))).toBe(
+      true,
+    );
+    expect(result.unavailableCount).toBe(1);
+  });
+
+  it('does not octave-fallback when an exact non-first-position target is unavailable', () => {
     const result = transposeTabText({
       input: '2',
       sourceHarmonicaPc: 0,
@@ -154,6 +234,7 @@ describe('transposeTabText', () => {
     });
 
     expect(result.output).toBe('2');
+    expect(result.appliedDirection).toBe('down');
     expect(result.outputSegments).toEqual([{ text: '2', kind: 'error' }]);
     expect(result.warnings.some((warning) => warning.includes('No exact down transposition available'))).toBe(true);
     expect(result.unavailableCount).toBe(1);

@@ -21,4 +21,5 @@ Use this document to capture implementation decisions and rationale.
    - Answer: Floating caret
 
 ## Notes
+- Transposer first-position behavior: selecting first position should no longer be a no-op. It now means "shift by one octave" in the selected direction, while the screen still defaults to the cleaner of down-octave or up-octave output when it can.
 - Web-first is acceptable because caret placement is coarse-grained, but stability matters more than latency. We should smooth pitch estimates to avoid jitter even if latency is higher.

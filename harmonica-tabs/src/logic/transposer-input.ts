@@ -42,12 +42,25 @@ function isTokenStartChar(value: string | undefined): boolean {
   return value !== undefined && (value === '+' || value === '-' || /[0-9]/.test(value));
 }
 
+function isTokenEndChar(value: string | undefined): boolean {
+  return value !== undefined && (/[0-9]/.test(value) || value === "'" || value === '°');
+}
+
+function isTokenStartBoundary(input: string, index: number): boolean {
+  if (isBoundary(input, index - 1)) return true;
+
+  const current = input[index];
+  if ((current !== '+' && current !== '-') || index === 0) return false;
+
+  return isTokenEndChar(input[index - 1]);
+}
+
 function isApostropheChar(value: string | undefined): boolean {
   return value === "'";
 }
 
 function parseTokenAt(input: string, start: number): TokenMatch | null {
-  if (!isBoundary(input, start - 1)) return null;
+  if (!isTokenStartBoundary(input, start)) return null;
 
   let cursor = start;
   const first = input[cursor];
@@ -114,10 +127,15 @@ function extractTabContent(input: string, removeExcessWhitespace: boolean): stri
     let tokenCount = 0;
 
     while (cursor < line.length) {
-      if (isTokenStartChar(line[cursor]) && isBoundary(line, cursor - 1)) {
+      if (isTokenStartChar(line[cursor])) {
         const token = parseTokenAt(line, cursor);
         if (token) {
-          extracted += line.slice(previousEnd, cursor).replace(/[^\s]/g, '');
+          const separator = line.slice(previousEnd, cursor).replace(/[^\s]/g, '');
+          if (hasToken && previousEnd === cursor && separator.length === 0) {
+            extracted += ' ';
+          } else {
+            extracted += separator;
+          }
           extracted += token.raw;
           previousEnd = token.end;
           cursor = token.end;

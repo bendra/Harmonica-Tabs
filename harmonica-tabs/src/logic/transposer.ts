@@ -43,6 +43,13 @@ export type TransposeTabTextResult = {
   parsedTokenCount: number;
   transposedTokenCount: number;
   unavailableCount: number;
+  appliedDirection: 'up' | 'down';
+};
+
+type TranspositionResolution = {
+  semitoneShift: number;
+  appliedDirection: 'up' | 'down';
+  isFirstPositionOctaveShift: boolean;
 };
 
 type TokenMatch = {
@@ -228,11 +235,29 @@ function buildShift(sourcePc: number, targetPc: number, direction: 'up' | 'down'
   return upShift - 12;
 }
 
+function resolveTransposition(
+  params: TransposeTabTextInput,
+): TranspositionResolution {
+  if (normalizePc(params.targetRootPc - params.sourceHarmonicaPc) === 0) {
+    return {
+      semitoneShift: params.direction === 'down' ? -12 : 12,
+      appliedDirection: params.direction,
+      isFirstPositionOctaveShift: true,
+    };
+  }
+
+  return {
+    semitoneShift: buildShift(params.sourceHarmonicaPc, params.targetRootPc, params.direction),
+    appliedDirection: params.direction,
+    isFirstPositionOctaveShift: false,
+  };
+}
+
 export function transposeTabText(params: TransposeTabTextInput): TransposeTabTextResult {
   const parsed = parseTabText(params.input);
   const sourceTokenToMidi = buildSourceTokenMidiMap(params.sourceHarmonicaPc);
   const targetMidiToToken = buildTargetMidiTokenMap(params.sourceHarmonicaPc, params.notation, params.altPreference);
-  const semitoneShift = buildShift(params.sourceHarmonicaPc, params.targetRootPc, params.direction);
+  const resolution = resolveTransposition(params);
 
   let parsedTokenCount = 0;
   let transposedTokenCount = 0;
@@ -242,40 +267,40 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
   const playableTokens: PlayableOutputToken[] = [];
 
   parsed.segments.forEach((segment) => {
-      if (segment.kind === 'text') {
-        outputSegments.push({ text: segment.text, kind: 'normal' });
-        return;
-      }
-      if (segment.kind === 'invalid') {
-        outputSegments.push({ text: segment.raw, kind: 'error' });
-        return;
-      }
-      parsedTokenCount += 1;
-
-      const sourceMidi = sourceTokenToMidi.get(segment.canonical);
-      if (sourceMidi === undefined) {
-        unknownSourceTokens.push(segment.raw);
-        outputSegments.push({ text: segment.raw, kind: 'error' });
-        return;
-      }
-
-      const targetMidi = sourceMidi + semitoneShift;
-      const targetToken = targetMidiToToken.get(targetMidi);
-      if (targetToken) {
-        const tokenIndex = playableTokens.length;
-        transposedTokenCount += 1;
-        playableTokens.push({
-          tokenIndex,
-          text: targetToken,
-          canonical: targetToken,
-          midi: targetMidi,
-        });
-        outputSegments.push({ text: targetToken, kind: 'token', tokenIndex });
-        return;
-      }
-
-      unresolvedTokens.push(segment.raw);
+    if (segment.kind === 'text') {
+      outputSegments.push({ text: segment.text, kind: 'normal' });
+      return;
+    }
+    if (segment.kind === 'invalid') {
       outputSegments.push({ text: segment.raw, kind: 'error' });
+      return;
+    }
+    parsedTokenCount += 1;
+
+    const sourceMidi = sourceTokenToMidi.get(segment.canonical);
+    if (sourceMidi === undefined) {
+      unknownSourceTokens.push(segment.raw);
+      outputSegments.push({ text: segment.raw, kind: 'error' });
+      return;
+    }
+
+    const targetMidi = sourceMidi + resolution.semitoneShift;
+    const targetToken = targetMidiToToken.get(targetMidi);
+    if (targetToken) {
+      const tokenIndex = playableTokens.length;
+      transposedTokenCount += 1;
+      playableTokens.push({
+        tokenIndex,
+        text: targetToken,
+        canonical: targetToken,
+        midi: targetMidi,
+      });
+      outputSegments.push({ text: targetToken, kind: 'token', tokenIndex });
+      return;
+    }
+
+    unresolvedTokens.push(segment.raw);
+    outputSegments.push({ text: segment.raw, kind: 'error' });
   });
 
   const output = outputSegments.map((segment) => segment.text).join('');
@@ -287,7 +312,11 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
   }
   if (unresolvedTokens.length > 0) {
     const unique = Array.from(new Set(unresolvedTokens));
-    warnings.push(`No exact ${params.direction} transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`);
+    warnings.push(
+      resolution.isFirstPositionOctaveShift
+        ? `No playable ${resolution.appliedDirection}-octave transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`
+        : `No exact ${resolution.appliedDirection} transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`,
+    );
   }
 
   return {
@@ -298,5 +327,6 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
     parsedTokenCount,
     transposedTokenCount,
     unavailableCount: unresolvedTokens.length,
+    appliedDirection: resolution.appliedDirection,
   };
 }

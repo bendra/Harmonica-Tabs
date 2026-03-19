@@ -152,9 +152,9 @@ export function evaluateTransposerFollow(
 
   return {
     state: {
-      activeTokenIndex: Math.min(safeIndex + 1, tokens.length - 1),
+      activeTokenIndex: (safeIndex + 1) % tokens.length,
       matchedSince: null,
-      waitingForRelease: safeIndex < tokens.length - 1,
+      waitingForRelease: true,
     },
     status: 'advanced',
     centsOffset,

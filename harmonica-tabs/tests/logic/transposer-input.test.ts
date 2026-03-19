@@ -153,6 +153,21 @@ Now Playing`;
   it('keeps valid tokens while stripping invalid trailing symbols', () => {
     expect(cleanupTransposerInput("-1 10 1- 4'' '", cleanupDefaults)).toBe("-1 10 1 4''");
   });
+
+  it('splits adjacent signed tokens without collapsing the hole numbers together', () => {
+    expect(cleanupTransposerInput('-6 6   -5  -4-5   -4   4 -4', cleanupDefaults)).toBe(
+      '-6 6 -5 -4 -5 -4 4 -4',
+    );
+  });
+
+  it('preserves existing spacing while still separating adjacent signed tokens', () => {
+    expect(
+      cleanupTransposerInput('-6 6   -5  -4-5   -4   4 -4', {
+        stripInvalidContent: true,
+        removeExcessWhitespace: false,
+      }),
+    ).toBe('-6 6   -5  -4 -5   -4   4 -4');
+  });
 });
 
 describe('insertAtSelection', () => {
