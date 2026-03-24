@@ -14,7 +14,7 @@ export type TransposerTokenSuffix = '' | "'" | "''" | "'''" | '°';
 const DISALLOWED_INPUT = /[^0-9+\-'\u00B0\s]/g;
 const SPACE_RUN = /[ \t]+/g;
 
-type TokenMatch = {
+export type TransposerTokenMatch = {
   raw: string;
   end: number;
 };
@@ -38,7 +38,7 @@ function isBoundary(input: string, index: number): boolean {
   return !isAlphanumeric(input[index]);
 }
 
-function isTokenStartChar(value: string | undefined): boolean {
+export function isTransposerTokenStartChar(value: string | undefined): boolean {
   return value !== undefined && (value === '+' || value === '-' || /[0-9]/.test(value));
 }
 
@@ -46,10 +46,25 @@ function isTokenEndChar(value: string | undefined): boolean {
   return value !== undefined && (/[0-9]/.test(value) || value === "'" || value === '°');
 }
 
+function isAdjacentUnsignedTokenStart(input: string, index: number): boolean {
+  if (index <= 0) return false;
+
+  const current = input[index];
+  if (current === undefined || !/[1-9]/.test(current)) return false;
+
+  const previous = input[index - 1];
+  if (previous === "'" || previous === '°') return true;
+  return previous !== undefined && /[1-9]/.test(previous) && previous !== current;
+}
+
 function isTokenStartBoundary(input: string, index: number): boolean {
   if (isBoundary(input, index - 1)) return true;
 
   const current = input[index];
+  if (current !== '+' && current !== '-' && isAdjacentUnsignedTokenStart(input, index)) {
+    return true;
+  }
+
   if ((current !== '+' && current !== '-') || index === 0) return false;
 
   return isTokenEndChar(input[index - 1]);
@@ -59,7 +74,7 @@ function isApostropheChar(value: string | undefined): boolean {
   return value === "'";
 }
 
-function parseTokenAt(input: string, start: number): TokenMatch | null {
+export function parseTransposerTokenAt(input: string, start: number): TransposerTokenMatch | null {
   if (!isTokenStartBoundary(input, start)) return null;
 
   let cursor = start;
@@ -87,7 +102,7 @@ function parseTokenAt(input: string, start: number): TokenMatch | null {
     }
   }
 
-  if (!isBoundary(input, cursor)) return null;
+  if (!isBoundary(input, cursor) && !isAdjacentUnsignedTokenStart(input, cursor)) return null;
 
   return {
     raw: input.slice(start, cursor),
@@ -127,8 +142,8 @@ function extractTabContent(input: string, removeExcessWhitespace: boolean): stri
     let tokenCount = 0;
 
     while (cursor < line.length) {
-      if (isTokenStartChar(line[cursor])) {
-        const token = parseTokenAt(line, cursor);
+      if (isTransposerTokenStartChar(line[cursor])) {
+        const token = parseTransposerTokenAt(line, cursor);
         if (token) {
           const separator = line.slice(previousEnd, cursor).replace(/[^\s]/g, '');
           if (hasToken && previousEnd === cursor && separator.length === 0) {

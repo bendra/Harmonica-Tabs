@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseTabText, transposeTabText } from '../../src/logic/transposer';
+import {
+  parseTabText,
+  resolveTransposerBaseShift,
+  transposeTabText,
+  transposeTabTextAtShift,
+} from '../../src/logic/transposer';
 
 describe('parseTabText', () => {
   it('parses core tokens and plus-prefix tokens', () => {
@@ -47,6 +52,24 @@ describe('parseTabText', () => {
       .map((segment) => segment.canonical);
 
     expect(tokens).toEqual(['4', "-3'", "-3''"]);
+  });
+
+  it('splits adjacent signed tokens the same way clean input does', () => {
+    const parsed = parseTabText('4 -4-5 6');
+    const tokens = parsed.segments
+      .filter((segment): segment is { kind: 'token'; raw: string; canonical: string } => segment.kind === 'token')
+      .map((segment) => segment.canonical);
+
+    expect(tokens).toEqual(['4', '-4', '-5', '6']);
+  });
+
+  it('splits adjacent unsigned single-digit tokens in mixed tab text', () => {
+    const parsed = parseTabText('5 -5 6 56 5 -4 4');
+    const tokens = parsed.segments
+      .filter((segment): segment is { kind: 'token'; raw: string; canonical: string } => segment.kind === 'token')
+      .map((segment) => segment.canonical);
+
+    expect(tokens).toEqual(['5', '-5', '6', '5', '6', '5', '-4', '4']);
   });
 });
 
@@ -264,5 +287,156 @@ describe('transposeTabText', () => {
       { text: ' ', kind: 'normal' },
       { text: '-1', kind: 'token', tokenIndex: 1 },
     ]);
+  });
+
+  it('transposes adjacent signed tokens inside mixed text without requiring inserted spaces', () => {
+    const result = transposeTabText({
+      input: 'go 4-4-5 now',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 7,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'down',
+    });
+
+    expect(result.output).toBe("go -2-3''4 now");
+    expect(result.transposedTokenCount).toBe(3);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('preserves compact adjacent token spacing in the output while keeping tokens separate logically', () => {
+    const result = transposeTabText({
+      input: '5-6',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'up',
+    });
+
+    expect(result.output).toBe("8-10");
+    expect(result.outputSegments).toEqual([
+      { text: '8', kind: 'token', tokenIndex: 0 },
+      { text: '-10', kind: 'token', tokenIndex: 1 },
+    ]);
+  });
+
+  it('transposes compact unsigned tab pairs from lyric-style source text', () => {
+    const result = transposeTabText({
+      input: '5   -5 6   56 5 -4 4',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'up',
+    });
+
+    expect(result.output).toBe('8   -9 9   89 8 -8 7');
+    expect(result.transposedTokenCount).toBe(8);
+    expect(result.warnings).toEqual([]);
+  });
+});
+
+describe('resolveTransposerBaseShift', () => {
+  it('uses the previous default exact transposition as the base shift for non-first positions', () => {
+    const previousDefault = transposeTabText({
+      input: '4 -4',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 7,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      direction: 'down',
+    });
+    const baseShift = resolveTransposerBaseShift({
+      input: '4 -4',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 7,
+      notation: 'apostrophe',
+      altPreference: '-2',
+    });
+
+    const baseResult = transposeTabTextAtShift({
+      input: '4 -4',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 7,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      semitoneShift: baseShift.semitoneShift,
+      baseSemitoneShift: baseShift.semitoneShift,
+      baseAppliedDirection: baseShift.appliedDirection,
+    });
+
+    expect(baseResult.output).toBe(previousDefault.output);
+    expect(baseResult.appliedDirection).toBe(previousDefault.appliedDirection);
+  });
+
+  it('resolves first position base to the saved tab with zero shift', () => {
+    const baseShift = resolveTransposerBaseShift({
+      input: '7 -8',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+    });
+
+    const baseResult = transposeTabTextAtShift({
+      input: '7 -8',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      semitoneShift: baseShift.semitoneShift,
+      baseSemitoneShift: baseShift.semitoneShift,
+      baseAppliedDirection: baseShift.appliedDirection,
+    });
+
+    expect(baseShift.semitoneShift).toBe(0);
+    expect(baseShift.isFirstPosition).toBe(true);
+    expect(baseResult.output).toBe('7 -8');
+  });
+
+  it('supports stepping down multiple octaves from a high saved first-position tab', () => {
+    const baseShift = resolveTransposerBaseShift({
+      input: '7 -8',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+    });
+    const oneDown = transposeTabTextAtShift({
+      input: '7 -8',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      semitoneShift: baseShift.semitoneShift - 12,
+      baseSemitoneShift: baseShift.semitoneShift,
+      baseAppliedDirection: baseShift.appliedDirection,
+    });
+    const twoDown = transposeTabTextAtShift({
+      input: '7 -8',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      semitoneShift: baseShift.semitoneShift - 24,
+      baseSemitoneShift: baseShift.semitoneShift,
+      baseAppliedDirection: baseShift.appliedDirection,
+    });
+    const threeDown = transposeTabTextAtShift({
+      input: '7 -8',
+      sourceHarmonicaPc: 0,
+      targetRootPc: 0,
+      notation: 'apostrophe',
+      altPreference: '-2',
+      semitoneShift: baseShift.semitoneShift - 36,
+      baseSemitoneShift: baseShift.semitoneShift,
+      baseAppliedDirection: baseShift.appliedDirection,
+    });
+
+    expect(oneDown.output).toBe('4 -4');
+    expect(twoDown.output).toBe('1 -1');
+    expect(twoDown.unavailableCount).toBe(0);
+    expect(threeDown.unavailableCount).toBeGreaterThan(0);
   });
 });

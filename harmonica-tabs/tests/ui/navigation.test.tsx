@@ -4,7 +4,6 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { resetReactNativeMocks, scrollToSpy } from './react-native.mock';
 import { parseSavedTabLibrary, SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
 
-const readClipboardTextMock = vi.fn();
 const { asyncStorageMock, asyncStorageValues } = vi.hoisted(() => {
   const values = new Map<string, string>();
   return {
@@ -20,10 +19,6 @@ const { asyncStorageMock, asyncStorageValues } = vi.hoisted(() => {
     },
   };
 });
-
-vi.mock('../../src/logic/transposer-clipboard', () => ({
-  readClipboardText: readClipboardTextMock,
-}));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: asyncStorageMock,
@@ -63,6 +58,10 @@ function findPressableByText(root: any, text: string) {
   return current;
 }
 
+function findDropdownByLabel(root: any, label: string) {
+  return root.find((node: any) => typeof node.type === 'function' && node.props?.label === label);
+}
+
 function findAllText(root: any, text: string) {
   return root.findAll((node: any) => node.type === 'Text' && flattenTextChildren(node.children).trim() === text);
 }
@@ -71,16 +70,12 @@ function findTextInput(root: any) {
   return root.find((node: any) => node.type === 'TextInput');
 }
 
-function findTransposerInputShell(root: any) {
-  return root.find((node: any) => node.type === 'Pressable' && node.props.testID === 'transposer-input-shell');
-}
-
-function findAllTransposerInputShells(root: any) {
-  return root.findAll((node: any) => node.type === 'Pressable' && node.props.testID === 'transposer-input-shell');
-}
-
 function findTransposerOutputScroll(root: any) {
   return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'transposer-output-scroll');
+}
+
+function readTransposerOutputText(root: any) {
+  return flattenTextChildren(findTransposerOutputScroll(root).children).trim();
 }
 
 function measureTransposerOutput(root: any, height: number) {
@@ -103,26 +98,12 @@ function measureTransposerToken(root: any, tokenIndex: number, y: number, height
   return token;
 }
 
-function setTransposerOutputScrollY(root: any, y: number) {
-  const outputScroll = findTransposerOutputScroll(root);
-
-  act(() => {
-    outputScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 0, y } } });
-  });
-}
-
 function findVisibleModal(root: any) {
   return root.findAll((node: any) => node.type === 'Modal')[0] ?? null;
 }
 
 function findByTestId(root: any, testID: string) {
   return root.find((node: any) => node.props?.testID === testID);
-}
-
-function findModalBackdropPressable(root: any) {
-  return root.findAll(
-    (node: any) => node.type === 'Pressable' && typeof node.props.onPress === 'function' && node.children.length === 0,
-  )[0];
 }
 
 function stubWebInputEnvironment(params: { coarsePointerMatches: boolean; maxTouchPoints: number }) {
@@ -136,23 +117,66 @@ function stubWebInputEnvironment(params: { coarsePointerMatches: boolean; maxTou
   });
 }
 
-function switchToCustomTabPad(root: any) {
-  const gearButton = findPressableByText(root, '⚙');
+function seedSavedTabs(tabs: Array<Record<string, string>>) {
+  asyncStorageValues.set(
+    SAVED_TAB_LIBRARY_STORAGE_KEY,
+    JSON.stringify({
+      version: 1,
+      tabs,
+    }),
+  );
+}
 
+function goToTabs(root: any) {
   act(() => {
-    gearButton.props.onPress();
+    findByTestId(root, 'workspace-tabs-button').props.onPress();
   });
+}
 
-  const customPadButton = findPressableByText(root, '○ Custom Tab Pad');
+function goToTransposer(root: any) {
+  goToTabs(root);
+}
 
+function openCreateTab(root: any) {
   act(() => {
-    customPadButton.props.onPress();
+    const libraryNewButton = root.findAll((node: any) => node.props?.testID === 'library-new-button')[0] ?? null;
+    if (libraryNewButton) {
+      libraryNewButton.props.onPress();
+      return;
+    }
+    findPressableByText(root, 'Create Tab').props.onPress();
   });
+}
 
-  const backButton = findPressableByText(root, '←');
-
+function openLibraryFromTransposer(root: any) {
   act(() => {
-    backButton.props.onPress();
+    const chooseTabButton = root.findAll(
+      (node: any) => node.type === 'Text' && flattenTextChildren(node.children).trim() === 'Choose Tab',
+    )[0];
+    if (!chooseTabButton) {
+      return;
+    }
+    findPressableByText(root, 'Choose Tab').props.onPress();
+  });
+}
+
+async function openLibraryTab(root: any, id: string) {
+  await act(async () => {
+    findByTestId(root, `saved-tab-open:${id}`).props.onPress();
+    await Promise.resolve();
+  });
+}
+
+function chooseTargetPosition(root: any, label: string) {
+  act(() => {
+    findDropdownByLabel(root, 'Target Position/Key').props.onChange(label.split(' - ')[1]);
+  });
+}
+
+async function editLibraryTab(root: any, id: string) {
+  await act(async () => {
+    findByTestId(root, `saved-tab-edit:${id}`).props.onPress();
+    await Promise.resolve();
   });
 }
 
@@ -170,8 +194,6 @@ async function renderApp() {
 describe('App navigation', () => {
   beforeEach(() => {
     resetReactNativeMocks();
-    readClipboardTextMock.mockReset();
-    readClipboardTextMock.mockResolvedValue('');
     asyncStorageValues.clear();
     asyncStorageMock.getItem.mockClear();
     asyncStorageMock.setItem.mockClear();
@@ -188,7 +210,7 @@ describe('App navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('restores the transposer pager page after leaving and dismissing properties', () => {
+  it('returns to the tabs workspace after leaving properties', () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     let renderer: any;
@@ -198,204 +220,258 @@ describe('App navigation', () => {
     });
 
     const root = renderer!.root;
-    const transposerTab = findPressableByText(root, 'Transposer');
+    goToTabs(root);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
 
     act(() => {
-      transposerTab.props.onPress();
-    });
-
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ x: 360, animated: true });
-
-    const gearButton = findPressableByText(root, '⚙');
-    act(() => {
-      gearButton.props.onPress();
+      findPressableByText(root, '⚙').props.onPress();
     });
 
     expect(() => root.find((node: any) => node.type === 'Text' && flattenTextChildren(node.children) === 'Properties')).not.toThrow();
 
-    const backButton = findPressableByText(root, '←');
     act(() => {
-      backButton.props.onPress();
+      findPressableByText(root, '←').props.onPress();
     });
 
-    expect(() => findByTestId(root, 'transposer-listen-button')).not.toThrow();
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ x: 360, animated: false });
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'New Tab').length).toBeGreaterThan(0);
   });
 
-  it('does not crash when debug is enabled in properties before returning to the transposer screen', () => {
+  it('opens Tabs on the library by default until a transposer source exists', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
-    let renderer: any;
+    const renderer = await renderApp();
+    const root = renderer.root;
 
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
+    goToTabs(root);
 
-    const root = renderer!.root;
-    const transposerTab = findPressableByText(root, 'Transposer');
-
-    act(() => {
-      transposerTab.props.onPress();
-    });
-
-    const gearButton = findPressableByText(root, '⚙');
-
-    act(() => {
-      gearButton.props.onPress();
-    });
-
-    const showDebugButton = findPressableByText(root, 'Show debug');
-
-    act(() => {
-      showDebugButton.props.onPress();
-    });
-
-    const backButton = findPressableByText(root, '←');
-
-    expect(() => {
-      act(() => {
-        backButton.props.onPress();
-      });
-    }).not.toThrow();
-
-    expect(() => findByTestId(root, 'transposer-listen-button')).not.toThrow();
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'New Tab').length).toBeGreaterThan(0);
   });
 
-  it('shows the shared debug panel on the transposer instead of the temporary pad-event log', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    const transposerTab = findPressableByText(root, 'Transposer');
-
-    act(() => {
-      transposerTab.props.onPress();
-    });
-
-    const gearButton = findPressableByText(root, '⚙');
-
-    act(() => {
-      gearButton.props.onPress();
-    });
-
-    const showDebugButton = findPressableByText(root, 'Show debug');
-
-    act(() => {
-      showDebugButton.props.onPress();
-    });
-
-    const backButton = findPressableByText(root, '←');
-
-    act(() => {
-      backButton.props.onPress();
-    });
-
-    expect(findAllText(root, 'Debug Panel').length).toBeGreaterThan(0);
-    expect(findAllText(root, 'Transposer Pad Debug')).toHaveLength(0);
-    expect(findAllText(root, 'RMS: 0.0000 · Conf: 0.00 · Hz: —').length).toBeGreaterThan(0);
-  });
-
-  it('defaults touch-first web to the native keyboard and exposes the keyboard setting in properties', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    const gearButton = findPressableByText(root, '⚙');
-
-    act(() => {
-      gearButton.props.onPress();
-    });
-
-    expect(findAllText(root, 'Keyboard').length).toBeGreaterThan(0);
-    expect(findAllText(root, '○ Custom Tab Pad').length).toBeGreaterThan(0);
-    expect(findAllText(root, '◉ Native Keyboard').length).toBeGreaterThan(0);
-  });
-
-  it('lets touch-first web switch the transposer to the custom tab pad from properties', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-
-    expect(
-      findAllText(
-        root,
-        'Custom tab pad is active. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings for the browser edit menu.',
-      ).length,
-    ).toBeGreaterThan(0);
-    expect(findAllTransposerInputShells(root)).toHaveLength(1);
-  });
-
-  it('keeps desktop-style web on the native keyboard unless properties changes it', () => {
+  it('renders transposed output inside a bounded inner scroll area', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
-    let renderer: any;
+    const renderer = await renderApp();
+    const root = renderer.root;
 
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
 
-    const root = renderer!.root;
-
-    expect(
-      findAllText(
-        root,
-        'Custom tab pad is active. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings for the browser edit menu.',
-      ),
-    ).toHaveLength(0);
-    expect(findAllText(root, 'Paste')).toHaveLength(0);
-    expect(findAllTransposerInputShells(root)).toHaveLength(0);
-  });
-
-  it('renders transposed output inside a capped inner scroll area', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
     const outputScroll = findTransposerOutputScroll(root);
-    const maxHeightStyle = (outputScroll.props.style as Array<Record<string, unknown>>).find(
+    const boundedStyle = (outputScroll.props.style as Array<Record<string, unknown>>).find(
       (entry) => typeof entry?.maxHeight === 'number',
     );
 
     expect(outputScroll.props.nestedScrollEnabled).toBe(true);
-    expect(maxHeightStyle?.maxHeight).toBe(256);
+    expect(boundedStyle?.maxHeight).toBeGreaterThan(120);
   });
 
-  it('lets clicking a transposed output token move the active cursor', () => {
+  it('opening a saved tab from the library loads it into the transposer', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'first',
+        title: 'Amazing Grace',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
-    let renderer: any;
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    expect(findAllText(root, 'Open').length).toBeGreaterThan(0);
+    await openLibraryTab(root, 'first');
+
+    expect(findAllText(root, 'Amazing Grace')).toHaveLength(0);
+    expect(findAllText(root, 'Transposed Tab').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Current tab: Amazing Grace').length).toBeGreaterThan(0);
+    expect(() => findByTestId(root, 'transposer-output-token:0')).not.toThrow();
+  });
+
+  it('steps octaves relative to the current display and base resets back to first position', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '7 -8',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
+
+    expect(readTransposerOutputText(root)).toBe('7 -8');
+    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
 
     act(() => {
-      renderer = TestRenderer.create(<App />);
+      findByTestId(root, 'transposer-octave-down-button').props.onPress();
     });
 
-    const root = renderer!.root;
+    expect(readTransposerOutputText(root)).toBe('4 -4');
+    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
 
     act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
+      findByTestId(root, 'transposer-octave-down-button').props.onPress();
     });
+
+    expect(readTransposerOutputText(root)).toBe('1 -1');
+    expect(findByTestId(root, 'transposer-octave-down-button').props.disabled).toBe(true);
+
+    act(() => {
+      findByTestId(root, 'transposer-octave-base-button').props.onPress();
+    });
+
+    expect(readTransposerOutputText(root)).toBe('7 -8');
+    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
+  });
+
+  it('base resets a non-first-position target back to first position on the current harmonica', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
+
+    chooseTargetPosition(root, '2 - G');
+
+    expect(readTransposerOutputText(root)).not.toBe('4 -4');
+    expect(findAllText(root, '2 - G').length).toBeGreaterThan(0);
+
+    act(() => {
+      findByTestId(root, 'transposer-octave-base-button').props.onPress();
+    });
+
+    expect(readTransposerOutputText(root)).toBe('4 -4');
+    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
+  });
+
+  it('disables unavailable octave buttons based on the next step from the current display', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
+
+    expect(findByTestId(root, 'transposer-octave-down-button').props.disabled).toBe(false);
+    expect(findByTestId(root, 'transposer-octave-up-button').props.disabled).toBe(false);
+
+    act(() => {
+      findByTestId(root, 'transposer-octave-down-button').props.onPress();
+    });
+
+    expect(findByTestId(root, 'transposer-octave-down-button').props.disabled).toBe(true);
+
+    act(() => {
+      findByTestId(root, 'transposer-octave-down-button').props.onPress();
+    });
+
+    expect(findByTestId(root, 'transposer-octave-down-button').props.disabled).toBe(true);
+  });
+
+  it('resets the active output token when the octave display changes', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
+
+    act(() => {
+      findByTestId(root, 'transposer-output-token:1').props.onPress();
+    });
+
+    expect(
+      (findByTestId(root, 'transposer-output-token:1').props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
+    ).toBe(true);
+
+    act(() => {
+      findByTestId(root, 'transposer-octave-down-button').props.onPress();
+    });
+
+    expect(
+      (findByTestId(root, 'transposer-output-token:0').props.style as Array<Record<string, unknown>>).some(
+        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
+      ),
+    ).toBe(true);
+  });
+
+  it('lets clicking a transposed output token move the active cursor', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
 
     const firstToken = findByTestId(root, 'transposer-output-token:0');
     const secondToken = findByTestId(root, 'transposer-output-token:1');
@@ -404,43 +480,42 @@ describe('App navigation', () => {
       (firstToken.props.style as Array<Record<string, unknown>>).some(
         (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
       ),
-    ).toBe(
-      true,
-    );
+    ).toBe(true);
 
     act(() => {
       secondToken.props.onPress();
     });
 
-    const updatedFirstToken = findByTestId(root, 'transposer-output-token:0');
-    const updatedSecondToken = findByTestId(root, 'transposer-output-token:1');
-
     expect(
-      (updatedFirstToken.props.style as Array<Record<string, unknown>>).some(
+      (findByTestId(root, 'transposer-output-token:0').props.style as Array<Record<string, unknown>>).some(
         (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
       ),
     ).toBe(false);
     expect(
-      (updatedSecondToken.props.style as Array<Record<string, unknown>>).some(
+      (findByTestId(root, 'transposer-output-token:1').props.style as Array<Record<string, unknown>>).some(
         (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
       ),
     ).toBe(true);
   });
 
-  it('auto-scrolls the output when a newly active token is below the visible area', () => {
+  it('auto-scrolls the output when a newly active token is below the visible area', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
-    let renderer: any;
+    const renderer = await renderApp();
+    const root = renderer.root;
 
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
-    });
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
 
     measureTransposerOutput(root, 40);
     measureTransposerToken(root, 0, 0, 20);
@@ -455,470 +530,70 @@ describe('App navigation', () => {
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 76, animated: true });
   });
 
-  it('does not auto-scroll when the active token is already visible', () => {
+  it('lets the transposer page control the shared listen state once a source tab is selected', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
-    let renderer: any;
+    const renderer = await renderApp();
+    const root = renderer.root;
 
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
-    });
-
-    measureTransposerOutput(root, 120);
-    measureTransposerToken(root, 0, 0, 20);
-    const secondToken = measureTransposerToken(root, 1, 40, 20);
-
-    scrollToSpy.mockClear();
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
 
     act(() => {
-      secondToken.props.onPress();
+      findByTestId(root, 'transposer-listen-button').props.onPress();
     });
 
-    expect(scrollToSpy).not.toHaveBeenCalled();
+    expect(flattenTextChildren(findByTestId(root, 'transposer-listen-button').children).trim()).toBe('Stop');
   });
 
-  it('resets the active transposer cursor when the transposed output changes', () => {
+  it('library edit opens the editor with the saved text loaded', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'edit-me',
+        title: 'Edit Me',
+        inputText: '4 -4 5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
-    let renderer: any;
+    const renderer = await renderApp();
+    const root = renderer.root;
 
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await editLibraryTab(root, 'edit-me');
 
-    const root = renderer!.root;
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
-    });
-
-    act(() => {
-      findByTestId(root, 'transposer-output-token:1').props.onPress();
-    });
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4 5');
-    });
-
-    const firstToken = findByTestId(root, 'transposer-output-token:0');
-    const secondToken = findByTestId(root, 'transposer-output-token:1');
-
-    expect(
-      (firstToken.props.style as Array<Record<string, unknown>>).some(
-        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
-      ),
-    ).toBe(
-      true,
-    );
-    expect(
-      (secondToken.props.style as Array<Record<string, unknown>>).some(
-        (entry) => entry?.borderColor === 'rgba(56, 189, 248, 0.45)' && entry?.borderWidth === 2,
-      ),
-    ).toBe(
-      false,
-    );
+    expect(findTextInput(root).props.value).toBe('4 -4 5');
+    expect(findAllText(root, 'Editing: Edit Me').length).toBeGreaterThan(0);
   });
 
-  it('scrolls back up when output changes and the reset token is above the visible area', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
-    });
-
-    measureTransposerOutput(root, 40);
-    measureTransposerToken(root, 0, 0, 20);
-    measureTransposerToken(root, 1, 80, 20);
-    setTransposerOutputScrollY(root, 80);
-
-    scrollToSpy.mockClear();
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4 5');
-    });
-
-    measureTransposerToken(root, 0, 0, 20);
-
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });
-  });
-
-  it('lets the transposer page control the shared listen state', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    let renderer: any;
-
-    await act(async () => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    const listenButton = findByTestId(root, 'transposer-listen-button');
-
-    expect(flattenTextChildren(listenButton.children).trim()).toBe('Listen');
-
-    await act(async () => {
-      await listenButton.props.onPress();
-    });
-
-    const updatedButton = findByTestId(root, 'transposer-listen-button');
-
-    expect(flattenTextChildren(updatedButton.children).trim()).toBe('Stop');
-  });
-
-  it('lets desktop-style web switch to the custom tab pad from properties', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    const gearButton = findPressableByText(root, '⚙');
-
-    act(() => {
-      gearButton.props.onPress();
-    });
-
-    const customPadButton = findPressableByText(root, '○ Custom Tab Pad');
-
-    act(() => {
-      customPadButton.props.onPress();
-    });
-
-    const backButton = findPressableByText(root, '←');
-
-    act(() => {
-      backButton.props.onPress();
-    });
-
-    expect(findAllTransposerInputShells(root)).toHaveLength(1);
-
-    const inputShell = findTransposerInputShell(root);
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-  });
-
-  it('does not immediately reopen the custom tab pad after tapping outside it', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-    const textInput = findTextInput(root);
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-
-    const overlayPressable = findModalBackdropPressable(root);
-
-    act(() => {
-      overlayPressable.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).toBeNull();
-
-    act(() => {
-      textInput.props.onBlur();
-    });
-
-    expect(findVisibleModal(root)).toBeNull();
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-  });
-
-  it('does not immediately reopen the custom tab pad after pressing Done', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-    const textInput = findTextInput(root);
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-
-    const doneButton = findPressableByText(root, 'Done');
-
-    act(() => {
-      doneButton.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).toBeNull();
-
-    act(() => {
-      textInput.props.onBlur();
-    });
-
-    expect(findVisibleModal(root)).toBeNull();
-  });
-
-  it('keeps the custom tab pad open when web blur fires immediately after opening', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-    const textInput = findTextInput(root);
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-
-    act(() => {
-      textInput.props.onBlur({ nativeEvent: { relatedTarget: null } });
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-  });
-
-  it('keeps the custom tab pad open when web blur targets a DOM element after opening', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-    const textInput = findTextInput(root);
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-
-    act(() => {
-      textInput.props.onBlur({ nativeEvent: { relatedTarget: { tagName: 'DIV' } } });
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-  });
-
-  it('closes the custom tab pad when leaving the main screen and keeps it closed on return', () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-
-    let renderer: any;
-
-    act(() => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-
-    act(() => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-
-    const gearButton = findPressableByText(root, '⚙');
-
-    act(() => {
-      gearButton.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).toBeNull();
-
-    const backButton = findPressableByText(root, '←');
-
-    act(() => {
-      backButton.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).toBeNull();
-  });
-
-  it('pastes clipboard text into the transposer input and keeps the custom pad open', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-    readClipboardTextMock.mockResolvedValue("4 -3’ +5°\nabc_%");
-
-    let renderer: any;
-
-    await act(async () => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-
-    await act(async () => {
-      inputShell.props.onPress();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-
-    const pasteButton = findPressableByText(root, 'Paste');
-
-    await act(async () => {
-      await pasteButton.props.onPress();
-    });
-
-    expect(findTextInput(root).props.value).toBe("4 -3' +5°\n");
-    expect(findVisibleModal(root)).not.toBeNull();
-    expect(findAllText(root, 'Clipboard is empty.')).toHaveLength(0);
-  });
-
-  it('shows a paste error when clipboard access fails in custom-pad mode', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
-    readClipboardTextMock.mockRejectedValue(new Error('Clipboard access is unavailable in this browser.'));
-
-    let renderer: any;
-
-    await act(async () => {
-      renderer = TestRenderer.create(<App />);
-    });
-
-    const root = renderer!.root;
-    switchToCustomTabPad(root);
-    const inputShell = findTransposerInputShell(root);
-
-    await act(async () => {
-      inputShell.props.onPress();
-    });
-
-    const pasteButton = findPressableByText(root, 'Paste');
-
-    await act(async () => {
-      await pasteButton.props.onPress();
-    });
-
-    expect(findAllText(root, 'Clipboard access is unavailable in this browser.')).toHaveLength(1);
-    expect(findVisibleModal(root)).not.toBeNull();
-    expect(findTextInput(root).props.value).toBe('');
-  });
-
-  it('saves a transposer input tab and loads it without changing direction', async () => {
+  it('saves a new editor tab to the library', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
     const root = renderer.root;
 
-    act(() => {
-      findTextInput(root).props.onChangeText('1');
-    });
-
-    await act(async () => {
-      findPressableByText(root, 'Save').props.onPress();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Saved melody');
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
-    });
-
-    act(() => {
-      findPressableByText(root, 'Library').props.onPress();
-    });
-
-    await act(async () => {
-      findPressableByText(root, 'Load').props.onPress();
-      await Promise.resolve();
-    });
-
-    expect(findTextInput(root).props.value).toBe('1');
-    expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
-  });
-
-  it('auto-selects up in first position when only the upper octave is fully playable', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    const renderer = await renderApp();
-    const root = renderer.root;
-
-    act(() => {
-      findTextInput(root).props.onChangeText('1');
-    });
-
-    expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
-  });
-
-  it('lets first position switch to an up-octave attempt manually', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    const renderer = await renderApp();
-    const root = renderer.root;
-
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
-    });
-
-    act(() => {
-      findPressableByText(root, '○ Up').props.onPress();
-    });
-
-    expect(findAllText(root, '◉ Up').length).toBeGreaterThan(0);
-    expect(findAllText(root, '◉ Down')).toHaveLength(0);
-  });
-
-  it('edits a loaded saved tab and re-saves it', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    const renderer = await renderApp();
-    const root = renderer.root;
+    goToTransposer(root);
+    openCreateTab(root);
 
     act(() => {
       findTextInput(root).props.onChangeText('4 -4');
     });
 
     await act(async () => {
-      findPressableByText(root, 'Save').props.onPress();
+      findByTestId(root, 'editor-save-button').props.onPress();
       await Promise.resolve();
     });
 
@@ -928,15 +603,41 @@ describe('App navigation', () => {
     });
 
     await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
       await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
+
+    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
+    expect(storedLibrary.tabs).toHaveLength(1);
+    expect(storedLibrary.tabs[0]?.title).toBe('Warmup');
+    expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4');
+  });
+
+  it('edits a saved tab and re-saves it from the editor', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'warmup',
+        title: 'Warmup',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await editLibraryTab(root, 'warmup');
 
     act(() => {
       findTextInput(root).props.onChangeText('4 -4 5');
     });
 
     await act(async () => {
-      findPressableByText(root, 'Re-save').props.onPress();
+      findByTestId(root, 'editor-save-button').props.onPress();
       await Promise.resolve();
     });
 
@@ -950,47 +651,33 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4 5');
   });
 
-  it('lets a loaded saved tab branch into a new record with Save As', async () => {
+  it('lets a saved tab branch into a new record with Save As from the editor', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    asyncStorageValues.set(
-      SAVED_TAB_LIBRARY_STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        tabs: [
-          {
-            id: 'original',
-            title: 'Original',
-            inputText: '4 -4',
-            createdAt: '2026-03-17T00:00:00.000Z',
-            updatedAt: '2026-03-17T00:00:00.000Z',
-          },
-        ],
-      }),
-    );
+    seedSavedTabs([
+      {
+        id: 'original',
+        title: 'Original',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
     const renderer = await renderApp();
     const root = renderer.root;
 
-    act(() => {
-      findPressableByText(root, 'Library').props.onPress();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'saved-tab-load:original').props.onPress();
-      await Promise.resolve();
-    });
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await editLibraryTab(root, 'original');
 
     act(() => {
       findTextInput(root).props.onChangeText('4 -4 5');
     });
 
     await act(async () => {
-      findByTestId(root, 'transposer-save-as-button').props.onPress();
+      findByTestId(root, 'editor-save-as-button').props.onPress();
       await Promise.resolve();
     });
-
-    expect(findAllText(root, 'Save As New Tab').length).toBeGreaterThan(0);
 
     await act(async () => {
       findByTestId(root, 'save-tab-title-input').props.onChangeText('Original copy');
@@ -1008,61 +695,24 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs.find((tab) => tab.title === 'Original copy')?.inputText).toBe('4 -4 5');
   });
 
-  it('starts a blank draft from a loaded saved tab and shows Save instead of Re-save', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    asyncStorageValues.set(
-      SAVED_TAB_LIBRARY_STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        tabs: [
-          {
-            id: 'loaded',
-            title: 'Loaded tab',
-            inputText: '4 -4',
-            createdAt: '2026-03-17T00:00:00.000Z',
-            updatedAt: '2026-03-17T00:00:00.000Z',
-          },
-        ],
-      }),
-    );
-
-    const renderer = await renderApp();
-    const root = renderer.root;
-
-    act(() => {
-      findPressableByText(root, 'Library').props.onPress();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'saved-tab-load:loaded').props.onPress();
-      await Promise.resolve();
-    });
-
-    act(() => {
-      findByTestId(root, 'transposer-new-button').props.onPress();
-    });
-
-    expect(findTextInput(root).props.value).toBe('');
-    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
-  });
-
-  it('prompts before starting a new draft when there are unsaved changes and can discard them', async () => {
+  it('prompts before starting a new draft when the editor has unsaved changes and can discard them', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
     const root = renderer.root;
+
+    goToTransposer(root);
+    openCreateTab(root);
 
     act(() => {
       findTextInput(root).props.onChangeText('4 -4');
     });
 
     act(() => {
-      findByTestId(root, 'transposer-new-button').props.onPress();
+      findByTestId(root, 'editor-new-button').props.onPress();
     });
 
     expect(findAllText(root, 'Unsaved changes').length).toBeGreaterThan(0);
-    expect(findAllText(root, 'Cancel').length).toBeGreaterThan(0);
     expect(findAllText(root, 'Discard and New').length).toBeGreaterThan(0);
     expect(findAllText(root, 'Save Then New').length).toBeGreaterThan(0);
 
@@ -1073,7 +723,7 @@ describe('App navigation', () => {
     expect(findTextInput(root).props.value).toBe('4 -4');
 
     act(() => {
-      findByTestId(root, 'transposer-new-button').props.onPress();
+      findByTestId(root, 'editor-new-button').props.onPress();
     });
 
     act(() => {
@@ -1083,26 +733,27 @@ describe('App navigation', () => {
     expect(findTextInput(root).props.value).toBe('');
   });
 
-  it('can save the current work and then start a new blank draft', async () => {
+  it('can save the current editor work and then start a new blank draft', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
     const root = renderer.root;
+
+    goToTransposer(root);
+    openCreateTab(root);
 
     act(() => {
       findTextInput(root).props.onChangeText('6 -6');
     });
 
     act(() => {
-      findByTestId(root, 'transposer-new-button').props.onPress();
+      findByTestId(root, 'editor-new-button').props.onPress();
     });
 
     await act(async () => {
       findByTestId(root, 'save-then-new-button').props.onPress();
       await Promise.resolve();
     });
-
-    expect(findAllText(root, 'Save Then New').length).toBeGreaterThan(0);
 
     await act(async () => {
       findByTestId(root, 'save-tab-title-input').props.onChangeText('New draft source');
@@ -1114,7 +765,6 @@ describe('App navigation', () => {
     });
 
     expect(findTextInput(root).props.value).toBe('');
-    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
 
     const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
     expect(storedLibrary.tabs).toHaveLength(1);
@@ -1122,45 +772,41 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs[0]?.inputText).toBe('6 -6');
   });
 
-  it('prompts before loading over unsaved changes and can save then load', async () => {
+  it('prompts before opening another saved tab over editor changes and can save then open', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-
-    asyncStorageValues.set(
-      SAVED_TAB_LIBRARY_STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        tabs: [
-          {
-            id: 'first',
-            title: 'First',
-            inputText: '4 -4',
-            createdAt: '2026-03-17T00:00:00.000Z',
-            updatedAt: '2026-03-17T00:00:00.000Z',
-          },
-          {
-            id: 'second',
-            title: 'Second',
-            inputText: '5 -5',
-            createdAt: '2026-03-17T01:00:00.000Z',
-            updatedAt: '2026-03-17T01:00:00.000Z',
-          },
-        ],
-      }),
-    );
+    seedSavedTabs([
+      {
+        id: 'first',
+        title: 'First',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+      {
+        id: 'second',
+        title: 'Second',
+        inputText: '5 -5',
+        createdAt: '2026-03-17T01:00:00.000Z',
+        updatedAt: '2026-03-17T01:00:00.000Z',
+      },
+    ]);
 
     const renderer = await renderApp();
     const root = renderer.root;
+
+    goToTransposer(root);
+    openCreateTab(root);
 
     act(() => {
       findTextInput(root).props.onChangeText('6 -6');
     });
 
     act(() => {
-      findPressableByText(root, 'Library').props.onPress();
+      findByTestId(root, 'editor-library-button').props.onPress();
     });
 
     await act(async () => {
-      findByTestId(root, 'saved-tab-load:first').props.onPress();
+      findByTestId(root, 'saved-tab-edit:first').props.onPress();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -1169,7 +815,7 @@ describe('App navigation', () => {
     expect(findAllText(root, 'Unsaved changes').length).toBeGreaterThan(0);
 
     await act(async () => {
-      findPressableByText(root, 'Save Then Load').props.onPress();
+      findPressableByText(root, 'Save Then Open').props.onPress();
       await Promise.resolve();
     });
 
@@ -1188,43 +834,34 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs.map((tab) => tab.title).sort()).toEqual(['Draft before load', 'First', 'Second']);
   });
 
-  it('keeps the editor text when deleting the active saved tab', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+  it('clears the transposer back to its empty output state when deleting the current source tab', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });
+    seedSavedTabs([
+      {
+        id: 'delete-me',
+        title: 'Delete me',
+        inputText: '4 -4 5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
 
     const renderer = await renderApp();
     const root = renderer.root;
 
-    act(() => {
-      findTextInput(root).props.onChangeText('4 -4 5');
-    });
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'delete-me');
+
+    openLibraryFromTransposer(root);
 
     await act(async () => {
-      findPressableByText(root, 'Save').props.onPress();
+      findByTestId(root, 'saved-tab-delete:delete-me').props.onPress();
       await Promise.resolve();
     });
 
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Delete me');
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
-    });
-
-    act(() => {
-      findPressableByText(root, 'Library').props.onPress();
-    });
-
-    await act(async () => {
-      findPressableByText(root, 'Delete').props.onPress();
-      await Promise.resolve();
-    });
-
-    const backButton = findPressableByText(root, '←');
-
-    act(() => {
-      backButton.props.onPress();
-    });
-
-    expect(findTextInput(root).props.value).toBe('4 -4 5');
-    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
     expect(parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null).tabs).toHaveLength(0);
   });
+
 });

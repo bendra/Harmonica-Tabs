@@ -160,6 +160,11 @@ Now Playing`;
     );
   });
 
+  it('splits adjacent unsigned single-digit tokens used as compact tab pairs', () => {
+    expect(cleanupTransposerInput('5   -5 6   56 5 -4 4', cleanupDefaults)).toBe('5 -5 6 5 6 5 -4 4');
+    expect(cleanupTransposerInput('-5 -4  4 -3  6   6  65  -6', cleanupDefaults)).toBe('-5 -4 4 -3 6 6 6 5 -6');
+  });
+
   it('preserves existing spacing while still separating adjacent signed tokens', () => {
     expect(
       cleanupTransposerInput('-6 6   -5  -4-5   -4   4 -4', {
@@ -167,6 +172,15 @@ Now Playing`;
         removeExcessWhitespace: false,
       }),
     ).toBe('-6 6   -5  -4 -5   -4   4 -4');
+  });
+
+  it('preserves existing spacing while splitting adjacent unsigned token pairs', () => {
+    expect(
+      cleanupTransposerInput('5   -5 6   56 5 -4 4', {
+        stripInvalidContent: true,
+        removeExcessWhitespace: false,
+      }),
+    ).toBe('5   -5 6   5 6 5 -4 4');
   });
 });
 

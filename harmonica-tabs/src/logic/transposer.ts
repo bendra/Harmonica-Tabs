@@ -1,5 +1,10 @@
 import { normalizePc } from '../data/notes';
 import { buildTabsForPcSet, OverbendNotation, TabGroup } from './tabs';
+import {
+  isTransposerTokenStartChar,
+  normalizeTransposerEditInput,
+  parseTransposerTokenAt,
+} from './transposer-input';
 
 const ALL_PCS = new Set<number>(Array.from({ length: 12 }, (_, index) => index));
 
@@ -46,16 +51,16 @@ export type TransposeTabTextResult = {
   appliedDirection: 'up' | 'down';
 };
 
+export type ResolvedTransposerBaseShift = {
+  semitoneShift: number;
+  appliedDirection: 'up' | 'down';
+  isFirstPosition: boolean;
+};
+
 type TranspositionResolution = {
   semitoneShift: number;
   appliedDirection: 'up' | 'down';
   isFirstPositionOctaveShift: boolean;
-};
-
-type TokenMatch = {
-  raw: string;
-  canonical: string;
-  end: number;
 };
 
 function isAlphanumeric(value: string): boolean {
@@ -67,63 +72,12 @@ function isBoundary(input: string, index: number): boolean {
   return !isAlphanumeric(input[index]);
 }
 
-function isTokenStartChar(value: string): boolean {
-  return value === '+' || value === '-' || /[0-9]/.test(value);
-}
-
 function isUnsupportedTokenStartChar(value: string): boolean {
   return /[A-Za-z%]/.test(value);
 }
 
-function isApostropheChar(value: string | undefined): boolean {
-  return value === "'" || value === '’';
-}
-
-function parseTokenAt(input: string, start: number): TokenMatch | null {
-  if (!isBoundary(input, start - 1)) return null;
-
-  let cursor = start;
-  let sign = '';
-  const first = input[cursor];
-  if (first === '+' || first === '-') {
-    sign = first;
-    cursor += 1;
-  }
-
-  if (cursor >= input.length) return null;
-
-  let hole = '';
-  const firstDigit = input[cursor];
-  if (firstDigit === '1' && input[cursor + 1] === '0') {
-    hole = '10';
-    cursor += 2;
-  } else if (/[1-9]/.test(firstDigit)) {
-    hole = firstDigit;
-    cursor += 1;
-  } else {
-    return null;
-  }
-
-  let suffix = '';
-  if (input[cursor] === '°') {
-    suffix = '°';
-    cursor += 1;
-  } else {
-    while (isApostropheChar(input[cursor])) {
-      suffix += "'";
-      cursor += 1;
-    }
-  }
-
-  if (!isBoundary(input, cursor)) return null;
-
-  const raw = input.slice(start, cursor);
-  const normalizedSign = sign === '+' ? '' : sign;
-  const canonical = `${normalizedSign}${hole}${suffix}`;
-  return { raw, canonical, end: cursor };
-}
-
 export function parseTabText(input: string): ParseResult {
+  const normalizedInput = normalizeTransposerEditInput(input);
   const segments: ParsedSegment[] = [];
   const textBuffer: string[] = [];
   let cursor = 0;
@@ -134,20 +88,26 @@ export function parseTabText(input: string): ParseResult {
     textBuffer.length = 0;
   }
 
-  while (cursor < input.length) {
-    const char = input[cursor];
-    if (isTokenStartChar(char) && isBoundary(input, cursor - 1)) {
-      const parsed = parseTokenAt(input, cursor);
+  while (cursor < normalizedInput.length) {
+    const char = normalizedInput[cursor];
+    if (isTransposerTokenStartChar(char)) {
+      const parsed = parseTransposerTokenAt(normalizedInput, cursor);
       if (parsed) {
         flushText();
-        segments.push({ kind: 'token', raw: parsed.raw, canonical: parsed.canonical });
+        const raw = input.slice(cursor, parsed.end);
+        const canonical = parsed.raw.startsWith('+') ? parsed.raw.slice(1) : parsed.raw;
+        segments.push({ kind: 'token', raw, canonical });
         cursor = parsed.end;
         continue;
       }
 
       let fragmentEnd = cursor + 1;
-      while (fragmentEnd < input.length && !/\s/.test(input[fragmentEnd])) {
-        if (isBoundary(input, fragmentEnd - 1) && isBoundary(input, fragmentEnd + 1) && input[fragmentEnd] === ',') {
+      while (fragmentEnd < normalizedInput.length && !/\s/.test(normalizedInput[fragmentEnd])) {
+        if (
+          isBoundary(normalizedInput, fragmentEnd - 1) &&
+          isBoundary(normalizedInput, fragmentEnd + 1) &&
+          normalizedInput[fragmentEnd] === ','
+        ) {
           break;
         }
         fragmentEnd += 1;
@@ -159,10 +119,14 @@ export function parseTabText(input: string): ParseResult {
       continue;
     }
 
-    if (isUnsupportedTokenStartChar(char) && isBoundary(input, cursor - 1)) {
+    if (isUnsupportedTokenStartChar(char) && isBoundary(normalizedInput, cursor - 1)) {
       let fragmentEnd = cursor + 1;
-      while (fragmentEnd < input.length && !/\s/.test(input[fragmentEnd])) {
-        if (isBoundary(input, fragmentEnd - 1) && isBoundary(input, fragmentEnd) && input[fragmentEnd] === ',') {
+      while (fragmentEnd < normalizedInput.length && !/\s/.test(normalizedInput[fragmentEnd])) {
+        if (
+          isBoundary(normalizedInput, fragmentEnd - 1) &&
+          isBoundary(normalizedInput, fragmentEnd) &&
+          normalizedInput[fragmentEnd] === ','
+        ) {
           break;
         }
         fragmentEnd += 1;
@@ -174,7 +138,7 @@ export function parseTabText(input: string): ParseResult {
       continue;
     }
 
-    textBuffer.push(char);
+    textBuffer.push(input[cursor]);
     cursor += 1;
   }
 
@@ -235,9 +199,7 @@ function buildShift(sourcePc: number, targetPc: number, direction: 'up' | 'down'
   return upShift - 12;
 }
 
-function resolveTransposition(
-  params: TransposeTabTextInput,
-): TranspositionResolution {
+function resolveTransposition(params: TransposeTabTextInput): TranspositionResolution {
   if (normalizePc(params.targetRootPc - params.sourceHarmonicaPc) === 0) {
     return {
       semitoneShift: params.direction === 'down' ? -12 : 12,
@@ -253,11 +215,16 @@ function resolveTransposition(
   };
 }
 
-export function transposeTabText(params: TransposeTabTextInput): TransposeTabTextResult {
+type TransposeWithSemitoneShiftInput = Omit<TransposeTabTextInput, 'direction'> & {
+  semitoneShift: number;
+  appliedDirection: 'up' | 'down';
+  isFirstPositionOctaveShift: boolean;
+};
+
+function transposeTabTextWithResolvedShift(params: TransposeWithSemitoneShiftInput): TransposeTabTextResult {
   const parsed = parseTabText(params.input);
   const sourceTokenToMidi = buildSourceTokenMidiMap(params.sourceHarmonicaPc);
   const targetMidiToToken = buildTargetMidiTokenMap(params.sourceHarmonicaPc, params.notation, params.altPreference);
-  const resolution = resolveTransposition(params);
 
   let parsedTokenCount = 0;
   let transposedTokenCount = 0;
@@ -284,7 +251,7 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
       return;
     }
 
-    const targetMidi = sourceMidi + resolution.semitoneShift;
+    const targetMidi = sourceMidi + params.semitoneShift;
     const targetToken = targetMidiToToken.get(targetMidi);
     if (targetToken) {
       const tokenIndex = playableTokens.length;
@@ -313,9 +280,9 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
   if (unresolvedTokens.length > 0) {
     const unique = Array.from(new Set(unresolvedTokens));
     warnings.push(
-      resolution.isFirstPositionOctaveShift
-        ? `No playable ${resolution.appliedDirection}-octave transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`
-        : `No exact ${resolution.appliedDirection} transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`,
+      params.isFirstPositionOctaveShift
+        ? `No playable ${params.appliedDirection}-octave transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`
+        : `No exact ${params.appliedDirection} transposition available for ${unresolvedTokens.length} token(s): ${unique.slice(0, 3).join(', ')}`,
     );
   }
 
@@ -327,6 +294,94 @@ export function transposeTabText(params: TransposeTabTextInput): TransposeTabTex
     parsedTokenCount,
     transposedTokenCount,
     unavailableCount: unresolvedTokens.length,
-    appliedDirection: resolution.appliedDirection,
+    appliedDirection: params.appliedDirection,
   };
+}
+
+export function transposeTabText(params: TransposeTabTextInput): TransposeTabTextResult {
+  const resolution = resolveTransposition(params);
+  return transposeTabTextWithResolvedShift({
+    input: params.input,
+    sourceHarmonicaPc: params.sourceHarmonicaPc,
+    targetRootPc: params.targetRootPc,
+    notation: params.notation,
+    altPreference: params.altPreference,
+    semitoneShift: resolution.semitoneShift,
+    appliedDirection: resolution.appliedDirection,
+    isFirstPositionOctaveShift: resolution.isFirstPositionOctaveShift,
+  });
+}
+
+export function resolveTransposerBaseShift(
+  params: Omit<TransposeTabTextInput, 'direction'>,
+): ResolvedTransposerBaseShift {
+  const isFirstPosition = normalizePc(params.targetRootPc - params.sourceHarmonicaPc) === 0;
+  if (isFirstPosition) {
+    return {
+      semitoneShift: 0,
+      appliedDirection: 'up',
+      isFirstPosition: true,
+    };
+  }
+
+  const exactDownShift = buildShift(params.sourceHarmonicaPc, params.targetRootPc, 'down');
+  const exactUpShift = buildShift(params.sourceHarmonicaPc, params.targetRootPc, 'up');
+  const exactDown = transposeTabTextWithResolvedShift({
+    ...params,
+    semitoneShift: exactDownShift,
+    appliedDirection: 'down',
+    isFirstPositionOctaveShift: false,
+  });
+  const exactUp = transposeTabTextWithResolvedShift({
+    ...params,
+    semitoneShift: exactUpShift,
+    appliedDirection: 'up',
+    isFirstPositionOctaveShift: false,
+  });
+  if (exactDown.unavailableCount === 0) {
+    return {
+      semitoneShift: exactDownShift,
+      appliedDirection: 'down',
+      isFirstPosition: false,
+    };
+  }
+  if (exactUp.unavailableCount === 0) {
+    return {
+      semitoneShift: exactUpShift,
+      appliedDirection: 'up',
+      isFirstPosition: false,
+    };
+  }
+
+  return {
+    semitoneShift: exactDownShift,
+    appliedDirection: 'down',
+    isFirstPosition: false,
+  };
+}
+
+export function transposeTabTextAtShift(
+  params: Omit<TransposeTabTextInput, 'direction'> & {
+    semitoneShift: number;
+    baseSemitoneShift: number;
+    baseAppliedDirection: 'up' | 'down';
+  },
+): TransposeTabTextResult {
+  const appliedDirection: 'up' | 'down' =
+    params.semitoneShift === params.baseSemitoneShift
+      ? params.baseAppliedDirection
+      : params.semitoneShift < params.baseSemitoneShift
+        ? 'down'
+        : 'up';
+
+  return transposeTabTextWithResolvedShift({
+    input: params.input,
+    sourceHarmonicaPc: params.sourceHarmonicaPc,
+    targetRootPc: params.targetRootPc,
+    notation: params.notation,
+    altPreference: params.altPreference,
+    semitoneShift: params.semitoneShift,
+    appliedDirection,
+    isFirstPositionOctaveShift: params.semitoneShift !== params.baseSemitoneShift,
+  });
 }

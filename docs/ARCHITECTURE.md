@@ -1,6 +1,6 @@
 # Architecture Snapshot
 
-Date: 2026-03-17  
+Date: 2026-03-22  
 Status: Rapid exploration (structure and behavior are still changing quickly)
 
 This document describes the app as it exists today. It is intentionally practical: enough context for a typically-skilled React/TypeScript developer to contribute safely without reverse-engineering the whole codebase.
@@ -19,7 +19,7 @@ Out of scope today:
 
 - Entry: `harmonica-tabs/index.ts` registers `App`.
 - Main UI + orchestration: `harmonica-tabs/App.tsx`.
-- App is currently a single-screen architecture; most composition happens inside `App.tsx`.
+- App is still a manual single-component navigation architecture; most composition happens inside `App.tsx`.
 
 ## 3. Module Map
 
@@ -45,19 +45,21 @@ Out of scope today:
 ## 4. State Model (Current)
 
 In `App.tsx`, state is split by concern:
+- Top-level navigation: current workspace (`scales` vs `tabs`), properties return target, tabs-local subview (`transpose` vs `library`), and tabs-editor visibility.
 - Musical selection: harmonica key, scale root, scale id, overbend notation, arpeggio section selection.
-- Alternate tab choice: `altSelections` keyed by `rootPc:scaleId:midi`.
-- Pitch listening: start/stop status, detector snapshot (`frequency`, `confidence`, `rms`, `source`, `lastDetectedAt`), hold timer, debug controls.
-- Visual tracking: measured layouts for main tabs and each arpeggio row, selection checkboxes controlling which row receives caret.
-- Transposer follow: tone-follow enabled state, active output token index, hold/re-arm state, and tone-follow settings.
-- Saved-tab library: persisted records, currently loaded saved-tab id, explicit save mode (`overwrite`, `create_new`, `save_then_load`, `save_then_new`), save-dialog title/edit state, pending load confirmation state, and new-draft confirmation state.
+- Pitch listening: start/stop status, detector snapshot (`frequency`, `confidence`, `rms`, `source`, `lastDetectedAt`), hold timer, and debug controls.
+- Visual tracking: measured layouts for main tabs and each arpeggio row, plus row-selection state for caret placement.
+- Transposer source + follow: selected saved-tab id for the transposer, current octave offset (integer steps of 12 semitones), active output token index, hold/re-arm state, and tone-follow settings.
+- Editor state: raw draft text, current selection, linked saved-tab id, tabs-local return target, save-dialog state, dirty-open confirmation state, and new-draft confirmation state.
+- Saved-tab library: persisted records and library status text.
 
 Derived values (`useMemo`) drive most rendering:
 - `groups` from `buildTabsForScale(...)`.
 - `selectedTabs` (post-alt-selection projection of groups).
 - `arpeggioSections` from `buildArpeggioSections(...)`.
 - `pitchMatch` from `matchFrequencyToTabs(...)`.
-- `transposerResult` from `transposeTabText(...)`, including playable output tokens.
+- `transposerBaseShift` from `resolveTransposerBaseShift(...)`, using the selected saved tab's `inputText` plus the current target.
+- `transposerResult` from `transposeTabTextAtShift(...)`, using the current base shift plus octave offset.
 - `transposerFollowEvaluation` from `evaluateTransposerFollow(...)`.
 
 ## 5. Core Flows
@@ -66,7 +68,7 @@ Derived values (`useMemo`) drive most rendering:
 1. User picks harmonica key + scale key/scale type.
 2. `buildTabsForScale` gets target pitch classes.
 3. `buildTabsForPcSet` scans transposed Richter layout, collects playable candidates (blow/draw/bends/overbends), groups by MIDI, sorts options.
-4. UI renders one chip per MIDI slot, with optional `alt` overlay if `-2`/`3` dual fingering exists.
+4. UI renders one chip per MIDI slot, with optional `alt` handling if `-2`/`3` dual fingering exists.
 
 ### B) Build arpeggio rows
 1. User selects Triads, 7th, or Blues section.
@@ -81,24 +83,26 @@ Derived values (`useMemo`) drive most rendering:
 5. In-tune visual threshold uses `±10` cents (`toneToleranceCents`).
 
 ### D) Tone-followed transposer output
-1. User enters/pastes tabs and the transposer produces render segments plus playable output tokens.
-2. If the selected target is first position (same key as the harmonica), the transposer treats that as an octave move instead of a no-op. `Down` attempts one octave down, and `Up` attempts one octave up.
-3. The screen still auto-picks a default first-position direction by playability: prefer down when it keeps the whole passage playable, otherwise prefer up, otherwise default back to down and leave invalid notes flagged inline.
-4. User starts shared listening from the transposer page; tone follow is implied while listening is active.
-5. `evaluateTransposerFollow(...)` checks the current output token against the shared detector snapshot using tolerance, confidence, and hold-duration settings.
-6. Matching tokens advance the cursor; repeated identical notes require a release before the next advance, and the last playable token wraps back to the first.
-7. Clicking a playable output token moves the cursor manually, and any transposer-output change resets the cursor to the first playable token.
-8. The transposer output scroll view measures token positions and auto-scrolls minimally when the active token falls outside the visible viewport.
+1. User selects a saved source tab from the library.
+2. The transposer resolves one base shift for the current target.
+3. The displayed result is that base shift plus the current octave offset in 12-semitone steps.
+4. `Down` and `Up` move one more octave from the current display when the next step stays fully playable.
+5. `Base` resets the transposer to the saved tab in first position and also resets the target picker to first position on the current harmonica key.
+6. User starts shared listening from the transposer page; tone follow is implied while listening is active.
+7. `evaluateTransposerFollow(...)` checks the current output token against the shared detector snapshot using tolerance, confidence, and hold-duration settings.
+8. Matching tokens advance the cursor; repeated identical notes require a release before the next advance, and the last playable token wraps back to the first.
+9. Clicking a playable output token moves the cursor manually, and the transposer output scroll view auto-scrolls minimally when the active token falls outside the visible viewport.
 
-### E) Saved-tab library
-1. User saves the current transposer input with a title.
+### E) Tabs workspace, saved-tab library, and editor
+1. User enters the `Tabs` workspace, which contains sibling `Transpose` and `Library` views plus an editor child screen.
 2. `saved-tab-library.ts` persists only the raw `inputText` plus library metadata (`id`, `title`, timestamps) under one versioned storage key.
-3. Opening the Library screen lists saved items sorted by `updatedAt` descending.
-4. Loading a saved tab replaces only `transposerInput`; other musical/transposition settings stay untouched.
-5. If the current editor has unsaved changes, a confirmation dialog offers `Cancel`, `Load Anyway`, or `Save Then Load`.
-6. `Save As` branches the current editor text into a new saved record without overwriting the original loaded tab.
-7. `New` clears the editor into a blank draft; if there are unsaved changes, a confirmation dialog offers `Cancel`, `Discard and New`, or `Save Then New`.
-8. Deleting the active saved item removes it from storage but leaves the current editor text in place as an unsaved draft.
+3. The `Library` view lists saved items sorted by `updatedAt` descending.
+4. Choosing `Open` on a saved tab sets the transposer source tab and switches `Tabs` to the `Transpose` view; other musical/transposition settings stay untouched.
+5. Choosing `Edit` opens the editor child screen for that saved item; if the current editor has unsaved changes, a confirmation dialog offers `Cancel`, `Open Anyway`, or `Save Then Open`.
+6. `Clean Input` on the editor always strips non-tab content and normalizes excess whitespace before saving or further editing.
+7. `Save As` branches the current editor text into a new saved record without overwriting the original linked tab.
+8. `New` clears the editor into a blank draft; if there are unsaved changes, a confirmation dialog offers `Cancel`, `Discard and New`, or `Save Then New`.
+9. Deleting the active saved item removes it from storage; if that item was the current editor link, the editor keeps its text as an unsaved draft, and if it was the transposer source, the transposer falls back to its empty state.
 
 ## 6. Important Behavioral Rules
 
@@ -106,23 +110,25 @@ Derived values (`useMemo`) drive most rendering:
 - Overbends are excluded on holes `2`, `3`, and `8` (`tabs.ts`).
 - Overbend notation is user-selectable (`'` vs `°`).
 - Enharmonic spelling follows harmonica key flat/sharp preference.
-- Alternate selection is currently most visible for G (`-2` vs `3`) where both exist at same MIDI pitch.
+- Alternate selection is currently most visible for G (`-2` vs `3`) where both exist at the same MIDI pitch.
 - Saved tabs intentionally exclude harmonica key, position/key, transposition direction, tone-follow state, and derived output.
 - `Save` overwrites the linked saved record when one exists; `Save As` always creates a new saved record.
+- The transposer never works from an unsaved draft.
 - If mic is unavailable/blocked/unsupported, app runs with simulated frequency input.
 - Detector-specific code remains isolated so a future native audio pipeline can feed the same detector snapshot and transposer-follow logic.
 
 ## 7. Testing and Quality Gates
 
 - Test runner: Vitest (`npm test` in `harmonica-tabs`).
-- Current coverage focus: transposer behavior and UI interactions, plus core tab logic.
+- Current coverage focus: transposer behavior, editor/library UI interactions, and core tab logic.
 - Verified today by tests:
   - known C major output on C harp,
   - `-2` vs `3` alternate behavior,
   - overbend notation rendering,
   - overbend hole exclusions,
   - saved-tab persistence/update/sort behavior,
-  - transposer save/load/re-save/save-as/new-draft/delete flows and dirty-state confirmations.
+  - transposer source selection, token-clicking, and auto-scroll behavior,
+  - editor save/re-save/save-as/new-draft/dirty-open flows.
 
 Current gap:
 - No automated tests yet for `arpeggios.ts`, `pitch.ts`, or web audio detector behavior.
@@ -145,18 +151,12 @@ Current gap:
 ### Safe change strategy
 - Keep edits incremental; this codebase is in exploration mode.
 - Prefer adding/adjusting pure logic first, then wire UI.
-- Add or update tests whenever `tabs.ts` behavior changes.
+- Add or update tests whenever behavior changes.
 - Preserve current UX fallbacks (especially simulated Hz) unless intentionally changing product behavior.
-
-### High-value near-term contributions
-- Add tests for `arpeggios.ts` and `pitch.ts`.
-- Extract some `App.tsx` sections into small components/hooks without changing behavior.
-- Improve state-keying for alternates so arpeggio/main-tab selection is explicit and less coupled.
-- Improve mobile layout/row wrapping ergonomics with minimal visual churn.
 
 ## 9. Known Architecture Debt
 
-- `App.tsx` is large and mixes orchestration + rendering + interaction details.
+- `App.tsx` is still large and mixes orchestration + rendering + interaction details.
 - Layout-measurement logic is duplicated across main and arpeggio tab rows.
 - Pitch detection is web-only and intentionally lightweight (accuracy/stability tradeoffs).
 - Some data/logic assumptions are implicit (for example, technique ranking and alternate handling conventions).

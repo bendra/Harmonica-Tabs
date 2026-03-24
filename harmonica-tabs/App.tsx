@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Platform,
   SafeAreaView,
   ScrollView,
   Modal,
@@ -13,11 +12,14 @@ import {
 } from 'react-native';
 import { HARMONICA_KEYS } from './src/data/keys';
 import { SCALE_DEFINITIONS } from './src/data/scales';
-import { noteToPc, pcToNote, NoteName } from './src/data/notes';
+import { normalizePc, noteToPc, pcToNote, NoteName } from './src/data/notes';
 import { buildArpeggioSections } from './src/logic/arpeggios';
 import { buildTabsForPcSet, buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from './src/logic/tabs';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
-import { transposeTabText } from './src/logic/transposer';
+import {
+  resolveTransposerBaseShift,
+  transposeTabTextAtShift,
+} from './src/logic/transposer';
 import {
   createTransposerFollowState,
   DetectorSnapshot,
@@ -26,21 +28,9 @@ import {
 } from './src/logic/transposer-follow';
 import {
   cleanupTransposerInput,
-  deleteBackwardAtSelection,
-  insertAtSelection,
-  insertTokenAtSelection,
   normalizeTransposerEditInput,
   TextSelection,
-  TransposerCleanupOptions,
-  TransposerTokenSign,
-  TransposerTokenSuffix,
 } from './src/logic/transposer-input';
-import {
-  detectTransposerInputMode,
-  readWebTransposerInputSignals,
-  TransposerInputMode,
-} from './src/logic/transposer-input-mode';
-import { readClipboardText } from './src/logic/transposer-clipboard';
 import {
   buildSavedTabTitleCandidate,
   createSavedTabLibraryService,
@@ -91,33 +81,9 @@ type SingleSelectOption<T extends string> = {
 };
 
 type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
-type TabPadSignOption = {
-  label: string;
-  value: TransposerTokenSign;
-};
-
-type TabPadSuffixOption = {
-  label: string;
-  value: TransposerTokenSuffix;
-};
-type AppScreen = 'main' | 'properties' | 'tab-symbols' | 'library';
-type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_load' | 'save_then_new';
-
-const TAB_PAD_SIGN_OPTIONS: TabPadSignOption[] = [
-  { label: 'Plain', value: '' },
-  { label: 'Draw -', value: '-' },
-  { label: 'Blow +', value: '+' },
-];
-
-const TAB_PAD_SUFFIX_OPTIONS: TabPadSuffixOption[] = [
-  { label: 'Straight', value: '' },
-  { label: "'", value: "'" },
-  { label: "''", value: "''" },
-  { label: "'''", value: "'''" },
-  { label: '°', value: '°' },
-];
-
-const TAB_PAD_HOLES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+type AppScreen = 'scales' | 'tabs' | 'properties' | 'tab-symbols';
+type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_open' | 'save_then_new';
+type TabsSubview = 'transpose' | 'library';
 const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
 const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
@@ -161,14 +127,14 @@ function formatSavedTabTimestamp(value: string) {
 
 function getSaveDialogTitle(mode: SaveTabMode, hasLinkedRecord: boolean) {
   if (mode === 'create_new') return 'Save As New Tab';
-  if (mode === 'save_then_load') return 'Save Then Load';
+  if (mode === 'save_then_open') return 'Save Then Open';
   if (mode === 'save_then_new') return 'Save Then New';
   return hasLinkedRecord ? 'Update Saved Tab' : 'Save Tab';
 }
 
 function getSaveDialogConfirmLabel(mode: SaveTabMode) {
   if (mode === 'create_new') return 'Save As';
-  if (mode === 'save_then_load') return 'Save Then Load';
+  if (mode === 'save_then_open') return 'Save Then Open';
   if (mode === 'save_then_new') return 'Save Then New';
   return 'Save';
 }
@@ -295,9 +261,11 @@ function SingleSelectGroup<T extends string>(props: {
 export default function App() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = Math.min(width, height) < 420;
-  const isActEnvironment =
-    typeof globalThis !== 'undefined' && Boolean((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
-  const [screen, setScreen] = useState<AppScreen>('main');
+  const transposerOutputMaxHeight = Math.max(160, Math.round(height * (isSmallScreen ? 0.38 : 0.46)));
+  const [screen, setScreen] = useState<AppScreen>('scales');
+  const [tabsSubview, setTabsSubview] = useState<TabsSubview>('library');
+  const [tabsEditorVisible, setTabsEditorVisible] = useState(false);
+  const [propertiesReturnTo, setPropertiesReturnTo] = useState<'scales' | 'tabs'>('scales');
   const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
   const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
@@ -312,30 +280,24 @@ export default function App() {
   const [detectedRms, setDetectedRms] = useState(0);
   const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
   const [showDebug, setShowDebug] = useState(false);
-  const [pagerIndex, setPagerIndex] = useState(0);
-  const [transposerInput, setTransposerInput] = useState('');
-  const [transposerSelection, setTransposerSelection] = useState<TextSelection>({ start: 0, end: 0 });
-  const [transposerDirection, setTransposerDirection] = useState<'up' | 'down'>('down');
-  const [transposerPadVisible, setTransposerPadVisible] = useState(false);
-  const [transposerPadSign, setTransposerPadSign] = useState<TransposerTokenSign>('');
-  const [transposerPadSuffix, setTransposerPadSuffix] = useState<TransposerTokenSuffix>('');
-  const [transposerPasteStatus, setTransposerPasteStatus] = useState<string | null>(null);
-  const [transposerKeyboardPreference, setTransposerKeyboardPreference] = useState<'custom' | 'native' | null>('native');
+  const [editorInput, setEditorInput] = useState('');
+  const [editorSelection, setEditorSelection] = useState<TextSelection>({ start: 0, end: 0 });
+  const [editorSavedTabId, setEditorSavedTabId] = useState<string | null>(null);
+  const [editorReturnTo, setEditorReturnTo] = useState<TabsSubview>('library');
+  const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(null);
+  const [transposerOctaveOffset, setTransposerOctaveOffset] = useState(0);
   const [savedTabs, setSavedTabs] = useState<SavedTabRecord[]>([]);
   const [savedTabsStatus, setSavedTabsStatus] = useState<string | null>(null);
-  const [activeSavedTabId, setActiveSavedTabId] = useState<string | null>(null);
   const [saveTabModalVisible, setSaveTabModalVisible] = useState(false);
   const [saveTabMode, setSaveTabMode] = useState<SaveTabMode>('overwrite');
   const [saveTabTitleInput, setSaveTabTitleInput] = useState('');
   const [saveTabTitleError, setSaveTabTitleError] = useState<string | null>(null);
-  const [pendingLoadRecord, setPendingLoadRecord] = useState<SavedTabRecord | null>(null);
-  const [loadAfterSaveRecordId, setLoadAfterSaveRecordId] = useState<string | null>(null);
+  const [pendingOpenRecord, setPendingOpenRecord] = useState<SavedTabRecord | null>(null);
+  const [openAfterSaveRecordId, setOpenAfterSaveRecordId] = useState<string | null>(null);
   const [newDraftModalVisible, setNewDraftModalVisible] = useState(false);
   const [toneToleranceInput, setToneToleranceInput] = useState('60');
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
   const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
-  const [stripInvalidTransposerContent, setStripInvalidTransposerContent] = useState(true);
-  const [removeExcessTransposerWhitespace, setRemoveExcessTransposerWhitespace] = useState(true);
   const [listenError, setListenError] = useState<string | null>(null);
   const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
   const [transposerFollowState, setTransposerFollowState] = useState<TransposerFollowState>(
@@ -352,12 +314,10 @@ export default function App() {
   >({});
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
-  const pagerRef = useRef<ScrollView>(null);
   const transposerOutputScrollRef = useRef<ScrollView>(null);
   const transposerOutputScrollYRef = useRef(0);
-  const transposerInputRef = useRef<TextInput>(null);
+  const editorInputRef = useRef<TextInput>(null);
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
-  const transposerPadDismissInProgressRef = useRef(false);
 
   useEffect(() => {
     detectorRef.current = createWebAudioPitchDetector();
@@ -436,39 +396,101 @@ export default function App() {
     () => SCALE_DEFINITIONS.map((scale) => ({ label: scale.name, value: scale.id })),
     [],
   );
-  const pageWidth = Math.max(width - 40, 280);
-  const transposerOutputMaxHeight = Math.max(160, Math.min(Math.floor(height * 0.32), 280));
+  const firstPositionRoot = useMemo(
+    () => pcToNote(harmonicaKey.pc, harmonicaKey.preferFlats),
+    [harmonicaKey.pc, harmonicaKey.preferFlats],
+  );
+  const transposerSourceTab = useMemo(
+    () => savedTabs.find((tab) => tab.id === transposerSourceTabId) ?? null,
+    [savedTabs, transposerSourceTabId],
+  );
 
-  const transposerDownResult = useMemo(
+  const transposerSourceInput = transposerSourceTab?.inputText ?? '';
+  const transposerBaseShift = useMemo(
     () =>
-      transposeTabText({
-        input: transposerInput,
+      resolveTransposerBaseShift({
+        input: transposerSourceInput,
         sourceHarmonicaPc: harmonicaKey.pc,
         targetRootPc: scale.rootPc,
         notation,
         altPreference: gAltPreference,
-        direction: 'down',
       }),
-    [transposerInput, harmonicaKey.pc, scale.rootPc, notation, gAltPreference],
+    [transposerSourceInput, harmonicaKey.pc, scale.rootPc, notation, gAltPreference],
   );
-  const transposerUpResult = useMemo(
+  const transposerDisplayShift = transposerBaseShift.semitoneShift + transposerOctaveOffset * 12;
+  const transposerResult = useMemo(
     () =>
-      transposeTabText({
-        input: transposerInput,
+      transposeTabTextAtShift({
+        input: transposerSourceInput,
         sourceHarmonicaPc: harmonicaKey.pc,
         targetRootPc: scale.rootPc,
         notation,
         altPreference: gAltPreference,
-        direction: 'up',
+        semitoneShift: transposerDisplayShift,
+        baseSemitoneShift: transposerBaseShift.semitoneShift,
+        baseAppliedDirection: transposerBaseShift.appliedDirection,
       }),
-    [transposerInput, harmonicaKey.pc, scale.rootPc, notation, gAltPreference],
+    [
+      transposerSourceInput,
+      harmonicaKey.pc,
+      scale.rootPc,
+      notation,
+      gAltPreference,
+      transposerDisplayShift,
+      transposerBaseShift.semitoneShift,
+      transposerBaseShift.appliedDirection,
+    ],
   );
-  const defaultDirection: 'up' | 'down' =
-    transposerDownResult.unavailableCount === 0
-      ? 'down'
-      : transposerUpResult.unavailableCount === 0
-        ? 'up'
-        : 'down';
+  const transposerNextDownResult = useMemo(
+    () =>
+      transposeTabTextAtShift({
+        input: transposerSourceInput,
+        sourceHarmonicaPc: harmonicaKey.pc,
+        targetRootPc: scale.rootPc,
+        notation,
+        altPreference: gAltPreference,
+        semitoneShift: transposerDisplayShift - 12,
+        baseSemitoneShift: transposerBaseShift.semitoneShift,
+        baseAppliedDirection: transposerBaseShift.appliedDirection,
+      }),
+    [
+      transposerSourceInput,
+      harmonicaKey.pc,
+      scale.rootPc,
+      notation,
+      gAltPreference,
+      transposerDisplayShift,
+      transposerBaseShift.semitoneShift,
+      transposerBaseShift.appliedDirection,
+    ],
+  );
+  const transposerNextUpResult = useMemo(
+    () =>
+      transposeTabTextAtShift({
+        input: transposerSourceInput,
+        sourceHarmonicaPc: harmonicaKey.pc,
+        targetRootPc: scale.rootPc,
+        notation,
+        altPreference: gAltPreference,
+        semitoneShift: transposerDisplayShift + 12,
+        baseSemitoneShift: transposerBaseShift.semitoneShift,
+        baseAppliedDirection: transposerBaseShift.appliedDirection,
+      }),
+    [
+      transposerSourceInput,
+      harmonicaKey.pc,
+      scale.rootPc,
+      notation,
+      gAltPreference,
+      transposerDisplayShift,
+      transposerBaseShift.semitoneShift,
+      transposerBaseShift.appliedDirection,
+    ],
+  );
+  const canStepTransposerDown = transposerSourceTab !== null && transposerNextDownResult.unavailableCount === 0;
+  const canStepTransposerUp = transposerSourceTab !== null && transposerNextUpResult.unavailableCount === 0;
+  const isTransposerBaseResetState =
+    transposerSourceTab !== null && normalizePc(scale.rootPc - harmonicaKey.pc) === 0 && transposerOctaveOffset === 0;
 
   useEffect(() => {
     if (scaleKeyDropdownOptions.some((option) => option.value === scaleRoot)) return;
@@ -477,48 +499,14 @@ export default function App() {
       setScaleRoot(nextOption.value);
     }
   }, [scaleKeyDropdownOptions, scaleRoot]);
-  const transposerResult = transposerDirection === 'down' ? transposerDownResult : transposerUpResult;
-  const pagerTabs = [
-    { page: 0 as const, label: 'Visualizer' },
-    { page: 1 as const, label: 'Transposer' },
-  ];
-  const transposerInputDetection = useMemo(() => {
-    const runtimeSignals =
-      Platform.OS === 'web'
-        ? readWebTransposerInputSignals()
-        : { coarsePointerMediaMatches: false, maxTouchPoints: 0 };
-
-    return detectTransposerInputMode({
-      platformOs: Platform.OS,
-      viewportWidth: width,
-      viewportHeight: height,
-      coarsePointerMediaMatches: runtimeSignals.coarsePointerMediaMatches,
-      maxTouchPoints: runtimeSignals.maxTouchPoints,
-    });
-  }, [width, height]);
-  const effectiveTransposerInputMode =
-    transposerKeyboardPreference === 'custom'
-      ? 'pad'
-      : transposerKeyboardPreference === 'native'
-        ? 'native'
-        : transposerInputDetection.defaultMode;
-  const useCustomTransposerPad = effectiveTransposerInputMode === 'pad';
-  const shouldConsoleLogTransposerPadDebug = Platform.OS === 'web' && !isActEnvironment;
-  const transposerCleanupOptions = useMemo<TransposerCleanupOptions>(
-    () => ({
-      stripInvalidContent: stripInvalidTransposerContent,
-      removeExcessWhitespace: removeExcessTransposerWhitespace,
-    }),
-    [stripInvalidTransposerContent, removeExcessTransposerWhitespace],
-  );
-  const activeSavedTab = useMemo(
-    () => savedTabs.find((tab) => tab.id === activeSavedTabId) ?? null,
-    [activeSavedTabId, savedTabs],
+  const editorSavedTab = useMemo(
+    () => savedTabs.find((tab) => tab.id === editorSavedTabId) ?? null,
+    [editorSavedTabId, savedTabs],
   );
   const savedTabsStatusIsError = isSavedTabsErrorStatus(savedTabsStatus);
-  const hasUnsavedTransposerChanges = activeSavedTab
-    ? transposerInput !== activeSavedTab.inputText
-    : transposerInput.trim().length > 0;
+  const hasUnsavedEditorChanges = editorSavedTab
+    ? editorInput !== editorSavedTab.inputText
+    : editorInput.trim().length > 0;
   const toneToleranceCents = useMemo(
     () => parseBoundedNumber(toneToleranceInput, 60, 1, 120),
     [toneToleranceInput],
@@ -539,8 +527,8 @@ export default function App() {
   }, [transposerResult.playableTokens]);
 
   useEffect(() => {
-    setTransposerDirection(defaultDirection);
-  }, [defaultDirection]);
+    setTransposerOctaveOffset(0);
+  }, [transposerSourceTabId, harmonicaKey.pc, scale.rootPc]);
 
   useEffect(() => {
     if (!isListening || transposerResult.playableTokens.length === 0) return;
@@ -550,42 +538,6 @@ export default function App() {
 
     return () => clearInterval(intervalId);
   }, [isListening, transposerResult.playableTokens.length]);
-
-  /**
-   * Keeps the pager's visible page aligned with the saved page index.
-   */
-  function scrollToPagerPage(page: number, animated: boolean) {
-    pagerRef.current?.scrollTo({ x: page * pageWidth, animated });
-  }
-
-  useEffect(() => {
-    if (screen !== 'main') return;
-    const frameId = requestAnimationFrame(() => {
-      scrollToPagerPage(pagerIndex, false);
-    });
-    return () => cancelAnimationFrame(frameId);
-  }, [screen, pageWidth]);
-
-  useEffect(() => {
-    if (screen === 'main' && pagerIndex === 1) return;
-    setTransposerPadVisibleWithDebug(false, 'leave-transposer-page');
-  }, [pagerIndex, screen]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    if (useCustomTransposerPad) return;
-    setTransposerPadVisibleWithDebug(false, 'custom-pad-disabled');
-  }, [useCustomTransposerPad]);
-
-  function recordTransposerPadDebug(event: string, detail?: string) {
-    const summary = `mode=${effectiveTransposerInputMode} custom=${useCustomTransposerPad} visible=${transposerPadVisible} dismissing=${transposerPadDismissInProgressRef.current}`;
-    const message = detail ? `${event} | ${detail} | ${summary}` : `${event} | ${summary}`;
-    const prefixedMessage = `TRANSPOSE_PAD_DEBUG ${message}`;
-
-    if (shouldConsoleLogTransposerPadDebug) {
-      console.log(prefixedMessage);
-    }
-  }
 
   function renderToneFollowDebugPanel() {
     return (
@@ -623,11 +575,6 @@ export default function App() {
     );
   }
 
-  function setTransposerPadVisibleWithDebug(nextVisible: boolean, reason: string) {
-    recordTransposerPadDebug(nextVisible ? 'pad-visible:true' : 'pad-visible:false', reason);
-    setTransposerPadVisible(nextVisible);
-  }
-
   /**
    * Applies the global -2/3 preference when both choices exist for a tab group.
    */
@@ -651,16 +598,17 @@ export default function App() {
     ));
   }
 
-  function handleTransposerInputChange(value: string) {
-    setTransposerPasteStatus(null);
-    setTransposerInput(normalizeTransposerEditInput(value));
+  function handleEditorInputChange(value: string) {
+    setEditorInput(normalizeTransposerEditInput(value));
   }
 
-  function handleCleanTransposerInput() {
-    const cleaned = cleanupTransposerInput(transposerInput, transposerCleanupOptions);
-    setTransposerInput(cleaned);
-    setTransposerPasteStatus(null);
-    setTransposerSelection((prev) => ({
+  function handleCleanEditorInput() {
+    const cleaned = cleanupTransposerInput(editorInput, {
+      stripInvalidContent: true,
+      removeExcessWhitespace: true,
+    });
+    setEditorInput(cleaned);
+    setEditorSelection((prev) => ({
       start: Math.min(prev.start, cleaned.length),
       end: Math.min(prev.end, cleaned.length),
     }));
@@ -670,46 +618,44 @@ export default function App() {
     setSaveTabModalVisible(false);
     setSaveTabMode('overwrite');
     setSaveTabTitleError(null);
-    setLoadAfterSaveRecordId(null);
+    setOpenAfterSaveRecordId(null);
   }
 
-  function openSaveTabModal(mode: SaveTabMode = 'overwrite', nextLoadRecordId: string | null = null) {
-    if (transposerInput.trim().length === 0) {
+  function openSaveTabModal(mode: SaveTabMode = 'overwrite', nextOpenRecordId: string | null = null) {
+    if (editorInput.trim().length === 0) {
       setSavedTabsStatus('Enter some tab text before saving.');
       return;
     }
 
-    const defaultTitle =
-      mode === 'create_new'
-        ? activeSavedTab?.title ?? buildSavedTabTitleCandidate(transposerInput)
-        : activeSavedTab?.title ?? buildSavedTabTitleCandidate(transposerInput);
+    const defaultTitle = editorSavedTab?.title ?? buildSavedTabTitleCandidate(editorInput);
 
     setSaveTabMode(mode);
     setSaveTabTitleInput(defaultTitle);
     setSaveTabTitleError(null);
-    setLoadAfterSaveRecordId(nextLoadRecordId);
+    setOpenAfterSaveRecordId(nextOpenRecordId);
     setSaveTabModalVisible(true);
     setSavedTabsStatus(null);
   }
 
   function startNewDraft() {
-    setTransposerInput('');
-    setTransposerSelection({ start: 0, end: 0 });
-    setTransposerPasteStatus(null);
-    setActiveSavedTabId(null);
-    setPendingLoadRecord(null);
+    setEditorInput('');
+    setEditorSelection({ start: 0, end: 0 });
+    setEditorSavedTabId(null);
+    setPendingOpenRecord(null);
     setNewDraftModalVisible(false);
     setSavedTabsStatus('Started a new tab.');
-    transposerInputRef.current?.focus();
+    requestAnimationFrame(() => {
+      editorInputRef.current?.focus();
+    });
   }
 
   function handleNewDraftPress() {
-    if (!hasUnsavedTransposerChanges && activeSavedTabId === null && transposerInput.length === 0) {
+    if (!hasUnsavedEditorChanges && editorSavedTabId === null && editorInput.length === 0) {
       setSavedTabsStatus(null);
       return;
     }
 
-    if (hasUnsavedTransposerChanges) {
+    if (hasUnsavedEditorChanges) {
       setNewDraftModalVisible(true);
       return;
     }
@@ -717,18 +663,40 @@ export default function App() {
     startNewDraft();
   }
 
-  function loadSavedTabIntoEditor(record: SavedTabRecord) {
-    setTransposerInput(record.inputText);
-    setTransposerSelection({ start: 0, end: 0 });
-    setTransposerPasteStatus(null);
-    setActiveSavedTabId(record.id);
-    setPendingLoadRecord(null);
-    setScreen('main');
-    setPagerIndex(1);
+  function openTabsWorkspace() {
+    setTabsEditorVisible(false);
+    setTabsSubview(transposerSourceTabId ? 'transpose' : 'library');
+    setScreen('tabs');
+  }
+
+  function showTabsSubview(nextSubview: TabsSubview) {
+    setTabsEditorVisible(false);
+    setTabsSubview(nextSubview);
+    setScreen('tabs');
+  }
+
+  function openSavedTabInEditor(record: SavedTabRecord, returnTo: TabsSubview = 'library') {
+    setEditorInput(record.inputText);
+    setEditorSelection({ start: 0, end: 0 });
+    setEditorSavedTabId(record.id);
+    setEditorReturnTo(returnTo);
+    setPendingOpenRecord(null);
+    setTabsSubview(returnTo);
+    setTabsEditorVisible(true);
+    setScreen('tabs');
+    setSavedTabsStatus(`Opened "${record.title}" in the editor.`);
     requestAnimationFrame(() => {
-      scrollToPagerPage(1, false);
+      editorInputRef.current?.focus();
     });
-    setSavedTabsStatus(`Loaded "${record.title}".`);
+  }
+
+  function openEditorForNewDraft(returnTo: TabsSubview) {
+    startNewDraft();
+    setEditorReturnTo(returnTo);
+    setTabsSubview(returnTo);
+    setTabsEditorVisible(true);
+    setScreen('tabs');
+    setSavedTabsStatus(null);
   }
 
   async function handleSaveTabConfirm() {
@@ -740,15 +708,15 @@ export default function App() {
 
     try {
       const nextSaveMode = saveTabMode;
-      const nextLoadRecordId = loadAfterSaveRecordId;
-      const saveTargetId = nextSaveMode === 'create_new' ? null : activeSavedTabId;
+      const nextOpenRecordId = openAfterSaveRecordId;
+      const saveTargetId = nextSaveMode === 'create_new' ? null : editorSavedTabId;
       const result = await savedTabLibraryService.saveTab({
         id: saveTargetId,
         title: nextTitle,
-        inputText: transposerInput,
+        inputText: editorInput,
       });
       setSavedTabs(result.tabs);
-      setActiveSavedTabId(result.savedTab.id);
+      setEditorSavedTabId(result.savedTab.id);
       setSavedTabsStatus(`Saved "${result.savedTab.title}".`);
       closeSaveTabModal();
 
@@ -757,10 +725,10 @@ export default function App() {
         return;
       }
 
-      if (nextLoadRecordId) {
-        const nextRecord = result.tabs.find((tab) => tab.id === nextLoadRecordId) ?? null;
+      if (nextOpenRecordId) {
+        const nextRecord = result.tabs.find((tab) => tab.id === nextOpenRecordId) ?? null;
         if (nextRecord) {
-          loadSavedTabIntoEditor(nextRecord);
+          openSavedTabInEditor(nextRecord, 'library');
         }
       }
     } catch (error) {
@@ -769,30 +737,40 @@ export default function App() {
     }
   }
 
-  function handleSavedTabLoadPress(record: SavedTabRecord) {
-    if (!hasUnsavedTransposerChanges) {
-      loadSavedTabIntoEditor(record);
+  function handleSavedTabEditPress(record: SavedTabRecord) {
+    if (!hasUnsavedEditorChanges) {
+      openSavedTabInEditor(record, 'library');
       return;
     }
 
-    const wouldReplaceCurrentInput =
-      activeSavedTabId !== record.id || transposerInput !== record.inputText;
+    const wouldReplaceCurrentInput = editorSavedTabId !== record.id || editorInput !== record.inputText;
 
     if (!wouldReplaceCurrentInput) {
-      loadSavedTabIntoEditor(record);
+      openSavedTabInEditor(record, 'library');
       return;
     }
 
-    setPendingLoadRecord(record);
+    setPendingOpenRecord(record);
+  }
+
+  function handleSavedTabTransposePress(record: SavedTabRecord) {
+    setTransposerSourceTabId(record.id);
+    setSavedTabsStatus(`Selected "${record.title}" for transposing.`);
+    setTabsEditorVisible(false);
+    setTabsSubview('transpose');
+    setScreen('tabs');
   }
 
   async function handleDeleteSavedTab(record: SavedTabRecord) {
     try {
       const nextTabs = await savedTabLibraryService.deleteTab(record.id);
       setSavedTabs(nextTabs);
-      setPendingLoadRecord((prev) => (prev?.id === record.id ? null : prev));
-      if (activeSavedTabId === record.id) {
-        setActiveSavedTabId(null);
+      setPendingOpenRecord((prev) => (prev?.id === record.id ? null : prev));
+      if (editorSavedTabId === record.id) {
+        setEditorSavedTabId(null);
+      }
+      if (transposerSourceTabId === record.id) {
+        setTransposerSourceTabId(null);
       }
       setSavedTabsStatus(`Deleted "${record.title}".`);
     } catch {
@@ -831,146 +809,6 @@ export default function App() {
 
     return null;
   }
-
-  function insertQuickSymbol(symbol: string) {
-    const { nextValue, nextSelection } = insertAtSelection(transposerInput, transposerSelection, symbol);
-    setTransposerInput(nextValue);
-    setTransposerSelection(nextSelection);
-    setTransposerPasteStatus(null);
-    transposerInputRef.current?.focus();
-  }
-
-  function handleTransposerInputFocus() {
-    recordTransposerPadDebug('input-focus');
-  }
-
-  function describeTransposerBlurTarget(event: any) {
-    const relatedTarget = event?.nativeEvent?.relatedTarget ?? event?.relatedTarget ?? null;
-    if (relatedTarget == null) {
-      return 'relatedTarget=null';
-    }
-    if (typeof relatedTarget === 'number') {
-      return `relatedTarget=${relatedTarget}`;
-    }
-    if (typeof relatedTarget === 'object') {
-      const maybeElement = relatedTarget as {
-        tagName?: string;
-        id?: string;
-        dataset?: Record<string, string | undefined>;
-      };
-      const tagName = maybeElement.tagName ?? 'object';
-      const idPart = maybeElement.id ? `#${maybeElement.id}` : '';
-      const testIdPart = maybeElement.dataset?.testid ? `[data-testid=${maybeElement.dataset.testid}]` : '';
-      return `relatedTarget=${tagName}${idPart}${testIdPart}`;
-    }
-    return `relatedTarget=${String(relatedTarget)}`;
-  }
-
-  function openTransposerPad(source: string) {
-    recordTransposerPadDebug(source);
-    if (!useCustomTransposerPad) return;
-    if (transposerPadDismissInProgressRef.current) return;
-    setTransposerPadVisibleWithDebug(true, source);
-    transposerInputRef.current?.focus();
-  }
-
-  function handleTransposerInputPress() {
-    openTransposerPad('input-press-in');
-  }
-
-  function handleTransposerInputBlur(event: any) {
-    const blurTarget = describeTransposerBlurTarget(event);
-    recordTransposerPadDebug('input-blur', blurTarget);
-    if (!useCustomTransposerPad) return;
-    if (Platform.OS === 'web' && !transposerPadDismissInProgressRef.current) {
-      recordTransposerPadDebug('input-blur-ignored', blurTarget);
-      return;
-    }
-    setTransposerPadVisibleWithDebug(false, 'input-blur');
-  }
-
-  function dismissTransposerPad() {
-    recordTransposerPadDebug('dismiss-start');
-    transposerPadDismissInProgressRef.current = true;
-    transposerInputRef.current?.blur();
-    setTransposerPadVisibleWithDebug(false, 'dismiss');
-    requestAnimationFrame(() => {
-      transposerPadDismissInProgressRef.current = false;
-      recordTransposerPadDebug('dismiss-finished');
-    });
-  }
-
-  function handleDoneWithTransposerPad() {
-    dismissTransposerPad();
-  }
-
-  function handleTransposerKeyboardPreferenceChange(mode: TransposerInputMode) {
-    recordTransposerPadDebug('keyboard-preference-change', `next=${mode}`);
-    setTransposerKeyboardPreference(mode === 'pad' ? 'custom' : 'native');
-    if (mode === 'native') {
-      setTransposerPadVisibleWithDebug(false, 'keyboard-preference-native');
-      transposerInputRef.current?.focus();
-      return;
-    }
-    setTransposerPadVisibleWithDebug(true, 'keyboard-preference-pad');
-    transposerInputRef.current?.focus();
-  }
-
-  function handleTabPadHolePress(hole: string) {
-    const { nextValue, nextSelection } = insertTokenAtSelection(transposerInput, transposerSelection, {
-      sign: transposerPadSign,
-      hole,
-      suffix: transposerPadSuffix,
-    });
-    setTransposerInput(nextValue);
-    setTransposerSelection(nextSelection);
-    setTransposerPadSuffix('');
-    setTransposerPasteStatus(null);
-    transposerInputRef.current?.focus();
-  }
-
-  function handleTabPadBackspace() {
-    const { nextValue, nextSelection } = deleteBackwardAtSelection(transposerInput, transposerSelection);
-    setTransposerInput(nextValue);
-    setTransposerSelection(nextSelection);
-    setTransposerPasteStatus(null);
-    transposerInputRef.current?.focus();
-  }
-
-  async function handleTabPadPaste() {
-    recordTransposerPadDebug('paste-start');
-
-    try {
-      const clipboardText = await readClipboardText();
-
-      if (clipboardText.length === 0) {
-        setTransposerPasteStatus('Clipboard is empty.');
-        recordTransposerPadDebug('paste-empty');
-        return;
-      }
-
-      const { nextValue, nextSelection } = insertAtSelection(
-        transposerInput,
-        transposerSelection,
-        clipboardText,
-      );
-
-      setTransposerInput(nextValue);
-      setTransposerSelection(nextSelection);
-      setTransposerPasteStatus(null);
-      recordTransposerPadDebug('paste-success', `length=${clipboardText.length}`);
-      transposerInputRef.current?.focus();
-    } catch (error) {
-      const nextMessage =
-        error instanceof Error && error.message
-          ? error.message
-          : 'Clipboard paste failed. Try again or switch to Native Keyboard in Settings.';
-      setTransposerPasteStatus(nextMessage);
-      recordTransposerPadDebug('paste-failed', nextMessage);
-    }
-  }
-
-  const nextTokenPreview = `${transposerPadSign}4${transposerPadSuffix}`;
 
   const caretSize = 18;
 
@@ -1049,6 +887,7 @@ export default function App() {
         ? `${activeTab.tab} • ${frequency?.toFixed(1)} Hz ${pitchMatch ? formatCents(pitchMatch.centsOffset) : ''}`
         : 'No signal'
     : 'Off';
+  const canListenOnTransposer = transposerSourceTab !== null && transposerResult.playableTokens.length > 0;
 
   useEffect(() => {
     const nextState = transposerFollowEvaluation.state;
@@ -1124,21 +963,33 @@ export default function App() {
   }
 
   const headerTitle =
-    screen === 'main'
-      ? 'HarpPilot'
-      : screen === 'properties'
-        ? 'Properties'
-        : screen === 'tab-symbols'
-          ? 'Tab Symbols'
-          : 'Saved Tab Library';
+    screen === 'properties'
+      ? 'Properties'
+      : screen === 'tab-symbols'
+        ? 'Tab Symbols'
+        : screen === 'tabs' && tabsEditorVisible
+          ? 'Tab Editor'
+          : 'HarpPilot';
+
+  const showBackButton = screen === 'properties' || screen === 'tab-symbols' || (screen === 'tabs' && tabsEditorVisible);
+  const showWorkspaceSwitcher = (screen === 'scales' || screen === 'tabs') && !tabsEditorVisible;
 
   function handleHeaderButtonPress() {
-    setScreen((prev) => {
-      if (prev === 'main') return 'properties';
-      if (prev === 'tab-symbols') return 'properties';
-      if (prev === 'library') return 'main';
-      return 'main';
-    });
+    if (screen === 'properties') {
+      setScreen(propertiesReturnTo);
+      return;
+    }
+    if (screen === 'tab-symbols') {
+      setScreen('properties');
+      return;
+    }
+    if (screen === 'tabs' && tabsEditorVisible) {
+      setTabsEditorVisible(false);
+      setTabsSubview(editorReturnTo);
+      return;
+    }
+    setPropertiesReturnTo(screen);
+    setScreen('properties');
   }
 
   return (
@@ -1147,7 +998,7 @@ export default function App() {
         <View style={styles.headerRow}>
           <Text style={styles.title}>{headerTitle}</Text>
           <Pressable onPress={handleHeaderButtonPress} style={styles.gearButton}>
-            <Text style={styles.gearButtonText}>{screen === 'main' ? '⚙' : '←'}</Text>
+            <Text style={styles.gearButtonText}>{showBackButton ? '←' : '⚙'}</Text>
           </Pressable>
         </View>
 
@@ -1201,66 +1052,6 @@ export default function App() {
                 <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
               </Pressable>
             </View>
-            <Text style={styles.propertiesTitle}>Transposer Input</Text>
-            <View style={styles.propertiesField}>
-              <Text style={styles.dropdownLabel}>Keyboard</Text>
-              <View style={styles.propertiesChoiceRow}>
-                <Pressable
-                  onPress={() => handleTransposerKeyboardPreferenceChange('pad')}
-                  style={[
-                    styles.propertiesChoiceButton,
-                    useCustomTransposerPad && styles.propertiesChoiceButtonActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.propertiesChoiceText,
-                      useCustomTransposerPad && styles.propertiesChoiceTextActive,
-                    ]}
-                  >
-                    {useCustomTransposerPad ? '◉' : '○'} Custom Tab Pad
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => handleTransposerKeyboardPreferenceChange('native')}
-                  style={[
-                    styles.propertiesChoiceButton,
-                    !useCustomTransposerPad && styles.propertiesChoiceButtonActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.propertiesChoiceText,
-                      !useCustomTransposerPad && styles.propertiesChoiceTextActive,
-                    ]}
-                  >
-                    {!useCustomTransposerPad ? '◉' : '○'} Native Keyboard
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-            <Pressable
-              onPress={() => setStripInvalidTransposerContent((prev) => !prev)}
-              style={[
-                styles.propertiesToggleButton,
-                stripInvalidTransposerContent && styles.propertiesToggleButtonActive,
-              ]}
-            >
-              <Text style={styles.propertiesToggleText}>
-                {stripInvalidTransposerContent ? '☑' : '☐'} Strip invalid content from transposer input
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setRemoveExcessTransposerWhitespace((prev) => !prev)}
-              style={[
-                styles.propertiesToggleButton,
-                removeExcessTransposerWhitespace && styles.propertiesToggleButtonActive,
-              ]}
-            >
-              <Text style={styles.propertiesToggleText}>
-                {removeExcessTransposerWhitespace ? '☑' : '☐'} Remove excess white space in transposer input
-              </Text>
-            </Pressable>
             <Text style={styles.propertiesTitle}>Tone Follow</Text>
             <View style={styles.propertiesInlineFields}>
               <View style={styles.propertiesInlineField}>
@@ -1344,50 +1135,443 @@ export default function App() {
               <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to '.</Text>
             </View>
           </View>
-        ) : screen === 'library' ? (
-          <View style={styles.propertiesCard}>
-            <Text style={styles.propertiesTitle}>Saved Tabs</Text>
-            <Text style={styles.helperText}>Saved tabs keep only the input tab text and title.</Text>
-            {savedTabsStatus && (
-              <Text style={[styles.savedTabsStatus, savedTabsStatusIsError && styles.savedTabsStatusError]}>
-                {savedTabsStatus}
-              </Text>
-            )}
-            {savedTabs.length === 0 ? (
-              <Text style={styles.helperText}>No saved tabs yet. Use Save from the transposer to add one.</Text>
+        ) : screen === 'tabs' && tabsEditorVisible ? (
+          <View style={[styles.transposerCard, styles.transposerCardGrow]}>
+            <Text style={styles.transposerTitle}>
+              {editorSavedTab ? `Editing: ${editorSavedTab.title}` : 'New Tab Draft'}
+            </Text>
+            <Text style={styles.transposerMeta}>
+              Type or paste source tabs here. This is the only place raw tab text can be edited.
+            </Text>
+            <TextInput
+              ref={editorInputRef}
+              style={[styles.transposerInput, styles.transposerInputGrow]}
+              multiline
+              value={editorInput}
+              onChangeText={handleEditorInputChange}
+              onSelectionChange={(event) => {
+                const selection = event.nativeEvent.selection;
+                setEditorSelection(selection);
+              }}
+              selection={editorSelection}
+              keyboardType="default"
+              inputMode="text"
+              autoCorrect={false}
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
+              placeholderTextColor="#64748b"
+              textAlignVertical="top"
+            />
+            <View style={styles.editorPrimaryRow}>
+              <Pressable
+                testID="editor-clean-button"
+                onPress={handleCleanEditorInput}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  Clean Input
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="editor-library-button"
+                onPress={() => {
+                  setSavedTabsStatus(null);
+                  setTabsEditorVisible(false);
+                  setTabsSubview('library');
+                }}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  Open Library
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.transposerLibraryRow}>
+              <Pressable
+                testID="editor-new-button"
+                onPress={handleNewDraftPress}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  New
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="editor-save-button"
+                onPress={() => openSaveTabModal('overwrite')}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  {editorSavedTabId ? 'Re-save' : 'Save'}
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="editor-save-as-button"
+                onPress={() => openSaveTabModal('create_new')}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  Save As
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : screen === 'tabs' ? (
+          <>
+            {tabsSubview === 'library' ? (
+              <View style={styles.propertiesCard}>
+                <Text style={styles.propertiesTitle}>Saved Tabs</Text>
+                <Text style={styles.helperText}>Manage reusable source tabs for the editor and transposer.</Text>
+                <Pressable
+                  testID="library-new-button"
+                  onPress={() => openEditorForNewDraft('library')}
+                  style={styles.libraryNewButton}
+                >
+                  <Text style={styles.savedTabActionText}>New Tab</Text>
+                </Pressable>
+                {savedTabsStatus && (
+                  <Text style={[styles.savedTabsStatus, savedTabsStatusIsError && styles.savedTabsStatusError]}>
+                    {savedTabsStatus}
+                  </Text>
+                )}
+                {savedTabs.length === 0 ? (
+                  <Text style={styles.helperText}>No saved tabs yet. Use New Tab to create one in the editor.</Text>
+                ) : (
+                  <View style={styles.savedTabsList}>
+                    {savedTabs.map((tab) => (
+                      <View key={tab.id} style={styles.savedTabRow}>
+                        <View style={styles.savedTabRowHeader}>
+                          <Text style={styles.savedTabTitle}>{tab.title}</Text>
+                          {transposerSourceTabId === tab.id && <Text style={styles.savedTabActiveBadge}>Source</Text>}
+                        </View>
+                        <Text style={styles.savedTabPreview}>{formatSavedTabPreview(tab.inputText)}</Text>
+                        <Text style={styles.savedTabMeta}>Updated {formatSavedTabTimestamp(tab.updatedAt)}</Text>
+                        <View style={styles.savedTabActions}>
+                          <Pressable
+                            testID={`saved-tab-open:${tab.id}`}
+                            onPress={() => handleSavedTabTransposePress(tab)}
+                            style={styles.savedTabActionButton}
+                          >
+                            <Text style={styles.savedTabActionText}>Open</Text>
+                          </Pressable>
+                          <Pressable
+                            testID={`saved-tab-edit:${tab.id}`}
+                            onPress={() => handleSavedTabEditPress(tab)}
+                            style={styles.savedTabActionButton}
+                          >
+                            <Text style={styles.savedTabActionText}>Edit</Text>
+                          </Pressable>
+                          <Pressable
+                            testID={`saved-tab-delete:${tab.id}`}
+                            onPress={() => handleDeleteSavedTab(tab)}
+                            style={[styles.savedTabActionButton, styles.savedTabDeleteButton]}
+                          >
+                            <Text style={[styles.savedTabActionText, styles.savedTabDeleteText]}>Delete</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
             ) : (
-              <View style={styles.savedTabsList}>
-                {savedTabs.map((tab) => (
-                  <View key={tab.id} style={styles.savedTabRow}>
-                    <View style={styles.savedTabRowHeader}>
-                      <Text style={styles.savedTabTitle}>{tab.title}</Text>
-                      {activeSavedTabId === tab.id && <Text style={styles.savedTabActiveBadge}>Loaded</Text>}
-                    </View>
-                    <Text style={styles.savedTabPreview}>{formatSavedTabPreview(tab.inputText)}</Text>
-                    <Text style={styles.savedTabMeta}>Updated {formatSavedTabTimestamp(tab.updatedAt)}</Text>
-                    <View style={styles.savedTabActions}>
-                      <Pressable
-                        testID={`saved-tab-load:${tab.id}`}
-                        onPress={() => handleSavedTabLoadPress(tab)}
-                        style={styles.savedTabActionButton}
+              <>
+                <View style={styles.topRow}>
+                  <View style={styles.topRowKey}>
+                    <Dropdown
+                      label="Harmonica key"
+                      value={harmonicaKey.label}
+                      options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
+                      onChange={(label) => {
+                        const key = HARMONICA_KEYS.find((item) => item.label === label);
+                        if (key) setHarmonicaKey(key);
+                      }}
+                    />
+                  </View>
+                  <View style={styles.topRowKey}>
+                    <Dropdown
+                      label="Target Position/Key"
+                      value={scaleRoot}
+                      options={scaleKeyDropdownOptions}
+                      onChange={(nextRoot) => {
+                        setScaleRoot(nextRoot);
+                        setTransposerOctaveOffset(0);
+                      }}
+                    />
+                  </View>
+                </View>
+                <View style={[styles.transposerCard, styles.transposerCardGrow]}>
+                  <View style={styles.transposerFollowControls}>
+                    <Pressable
+                      testID="transposer-listen-button"
+                      disabled={!canListenOnTransposer && !isListening}
+                      onPress={() => {
+                        if (!canListenOnTransposer && !isListening) return;
+                        if (isListening) {
+                          stopListening();
+                        } else {
+                          startListening();
+                        }
+                      }}
+                      style={[
+                        styles.listenButton,
+                        isListening && styles.listenButtonActive,
+                        !canListenOnTransposer && !isListening && styles.listenButtonDisabled,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.listenButtonText,
+                          isListening && styles.listenButtonTextActive,
+                          !canListenOnTransposer && !isListening && styles.listenButtonTextDisabled,
+                        ]}
                       >
-                        <Text style={styles.savedTabActionText}>Load</Text>
+                        {isListening ? 'Stop' : 'Listen'}
+                      </Text>
+                    </Pressable>
+                    {savedTabsStatus && (
+                      <Text
+                        style={[
+                          styles.transposerSavedTabsStatus,
+                          savedTabsStatusIsError && styles.transposerSavedTabsStatusError,
+                        ]}
+                      >
+                        {savedTabsStatus}
+                      </Text>
+                    )}
+                  </View>
+                  {showDebug && renderToneFollowDebugPanel()}
+                  <View style={styles.transposerLibraryRow}>
+                    <Pressable
+                      testID="transposer-choose-tab-button"
+                      onPress={() => {
+                        setSavedTabsStatus(null);
+                        setTabsSubview('library');
+                      }}
+                      style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                    >
+                      <Text
+                        style={[
+                          styles.transposerActionButtonText,
+                          isSmallScreen && styles.transposerActionButtonTextCompact,
+                        ]}
+                      >
+                        Choose Tab
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      testID="transposer-edit-tab-button"
+                      onPress={() => {
+                        if (transposerSourceTab) {
+                          openSavedTabInEditor(transposerSourceTab, 'transpose');
+                        } else {
+                          openEditorForNewDraft('transpose');
+                        }
+                      }}
+                      style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+                    >
+                      <Text
+                        style={[
+                          styles.transposerActionButtonText,
+                          isSmallScreen && styles.transposerActionButtonTextCompact,
+                        ]}
+                      >
+                        {transposerSourceTab ? 'Edit Tab' : 'Create Tab'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.transposerCurrentTab}>
+                    {transposerSourceTab ? `Current tab: ${transposerSourceTab.title}` : 'Current tab: none selected'}
+                  </Text>
+                  <View style={[styles.transposerDirectionRow, isSmallScreen && styles.transposerDirectionRowCompact]}>
+                    <Text style={[styles.transposerSectionLabel, isSmallScreen && styles.transposerSectionLabelCompact]}>
+                      Octave Shift
+                    </Text>
+                    <View
+                      style={[
+                        styles.transposerDirectionOptions,
+                        isSmallScreen && styles.transposerDirectionOptionsCompact,
+                      ]}
+                    >
+                      <Pressable
+                        testID="transposer-octave-down-button"
+                        disabled={!canStepTransposerDown}
+                        onPress={() => {
+                          if (!canStepTransposerDown) return;
+                          setTransposerOctaveOffset((prev) => prev - 1);
+                        }}
+                        style={[
+                          styles.transposerDirectionOption,
+                          isSmallScreen && styles.transposerDirectionOptionCompact,
+                          !canStepTransposerDown && styles.transposerDirectionOptionDisabled,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerDirectionText,
+                            isSmallScreen && styles.transposerDirectionTextCompact,
+                            !canStepTransposerDown && styles.transposerDirectionTextDisabled,
+                          ]}
+                        >
+                          Down
+                        </Text>
                       </Pressable>
                       <Pressable
-                        testID={`saved-tab-delete:${tab.id}`}
-                        onPress={() => handleDeleteSavedTab(tab)}
-                        style={[styles.savedTabActionButton, styles.savedTabDeleteButton]}
+                        testID="transposer-octave-base-button"
+                        disabled={transposerSourceTab === null}
+                        onPress={() => {
+                          if (!transposerSourceTab) return;
+                          setScaleRoot(firstPositionRoot);
+                          setTransposerOctaveOffset(0);
+                        }}
+                        style={[
+                          styles.transposerDirectionOption,
+                          isSmallScreen && styles.transposerDirectionOptionCompact,
+                          isTransposerBaseResetState && styles.transposerDirectionOptionActive,
+                          transposerSourceTab === null && styles.transposerDirectionOptionDisabled,
+                        ]}
                       >
-                        <Text style={[styles.savedTabActionText, styles.savedTabDeleteText]}>Delete</Text>
+                        <Text
+                          style={[
+                            styles.transposerDirectionText,
+                            isSmallScreen && styles.transposerDirectionTextCompact,
+                            transposerSourceTab === null && styles.transposerDirectionTextDisabled,
+                          ]}
+                        >
+                          Base
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        testID="transposer-octave-up-button"
+                        disabled={!canStepTransposerUp}
+                        onPress={() => {
+                          if (!canStepTransposerUp) return;
+                          setTransposerOctaveOffset((prev) => prev + 1);
+                        }}
+                        style={[
+                          styles.transposerDirectionOption,
+                          isSmallScreen && styles.transposerDirectionOptionCompact,
+                          !canStepTransposerUp && styles.transposerDirectionOptionDisabled,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.transposerDirectionText,
+                            isSmallScreen && styles.transposerDirectionTextCompact,
+                            !canStepTransposerUp && styles.transposerDirectionTextDisabled,
+                          ]}
+                        >
+                          Up
+                        </Text>
                       </Pressable>
                     </View>
                   </View>
-                ))}
-              </View>
+                  <Text style={styles.transposerSectionLabel}>Transposed Tab</Text>
+                  <ScrollView
+                    ref={transposerOutputScrollRef}
+                    testID="transposer-output-scroll"
+                    style={[
+                      styles.transposerOutputBox,
+                      styles.transposerOutputBoxGrow,
+                      { maxHeight: transposerOutputMaxHeight },
+                    ]}
+                    contentContainerStyle={styles.transposerOutputContent}
+                    nestedScrollEnabled
+                    onLayout={(event) => {
+                      setTransposerOutputViewportHeight(event.nativeEvent.layout.height);
+                    }}
+                    onScroll={(event) => {
+                      transposerOutputScrollYRef.current = event.nativeEvent.contentOffset.y;
+                    }}
+                    scrollEventThrottle={16}
+                  >
+                    <Text style={styles.transposerOutputText}>
+                      {transposerSourceTab === null
+                        ? 'Choose a saved tab to generate a transposed tab.'
+                        : transposerResult.outputSegments.map((segment, index) => (
+                            <Text
+                              key={`out:${index}`}
+                              testID={segment.kind === 'token' ? `transposer-output-token:${segment.tokenIndex}` : undefined}
+                              onPress={
+                                segment.kind === 'token' && segment.tokenIndex !== undefined
+                                  ? () => moveTransposerCursor(segment.tokenIndex as number)
+                                  : undefined
+                              }
+                              onLayout={
+                                segment.kind === 'token' && segment.tokenIndex !== undefined
+                                  ? (event) => {
+                                      const { y, height } = event.nativeEvent.layout;
+                                      setTransposerOutputTokenLayouts((prev) => {
+                                        const current = prev[segment.tokenIndex as number];
+                                        if (current && current.y === y && current.height === height) {
+                                          return prev;
+                                        }
+                                        return {
+                                          ...prev,
+                                          [segment.tokenIndex as number]: { y, height },
+                                        };
+                                      });
+                                    }
+                                  : undefined
+                              }
+                              style={[
+                                segment.kind === 'error' && styles.transposerOutputError,
+                                segment.kind === 'token' && styles.transposerOutputToken,
+                                segment.kind === 'token' &&
+                                  segment.tokenIndex === transposerFollowState.activeTokenIndex &&
+                                  styles.transposerOutputTokenActive,
+                                segment.kind === 'token' &&
+                                  segment.tokenIndex === transposerFollowState.activeTokenIndex &&
+                                  transposerFollowEvaluation.matchingTarget &&
+                                  styles.transposerOutputTokenMatched,
+                              ]}
+                            >
+                              {segment.text}
+                            </Text>
+                          ))}
+                    </Text>
+                  </ScrollView>
+                  {transposerResult.warnings.length > 0 && (
+                    <View style={styles.transposerWarnings}>
+                      {transposerResult.warnings.map((warning, index) => (
+                        <Text key={`warning:${index}`} style={styles.transposerWarningText}>
+                          • {warning}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </>
             )}
-          </View>
+          </>
         ) : (
-          <>
+          <View style={styles.scalesWorkspace}>
             <View style={styles.topRow}>
               <View style={styles.topRowKey}>
                 <Dropdown
@@ -1405,709 +1589,255 @@ export default function App() {
                   label="Target Position/Key"
                   value={scaleRoot}
                   options={scaleKeyDropdownOptions}
-                  onChange={setScaleRoot}
+                  onChange={(nextRoot) => {
+                    setScaleRoot(nextRoot);
+                    setTransposerOctaveOffset(0);
+                  }}
                 />
               </View>
             </View>
 
-            <View style={styles.pagerShell}>
-              <ScrollView
-                ref={pagerRef}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                scrollEventThrottle={16}
-                onScroll={(event) => {
-                  const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
-                  const boundedPage = nextPage <= 0 ? 0 : 1;
-                  setPagerIndex((prev) => (prev === boundedPage ? prev : boundedPage));
-                }}
-                onMomentumScrollEnd={(event) => {
-                  const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
-                  setPagerIndex(nextPage === 0 ? 0 : 1);
-                }}
-              >
-                <View style={[styles.pagerPage, { width: pageWidth }]}>
-                  <View style={styles.pageOneHeader}>
-                    <View style={styles.scalePickerColumn}>
-                      <Dropdown
-                        label="Scale Name"
-                        value={scaleId}
-                        options={scaleNameDropdownOptions}
-                        onChange={setScaleId}
-                      />
-                    </View>
-                    <View style={styles.topRowToggle}>
-                      <SingleSelectGroup
-                        label="Arpeggios"
-                        value={arpeggioSelection}
-                        options={[
-                          { label: 'Triads', value: 'triads' },
-                          { label: '7th', value: 'sevenths' },
-                          { label: 'Blues', value: 'blues' },
-                        ]}
-                        onChange={setArpeggioSelection}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.listenCard}>
-                    <View style={styles.listenRow}>
-                      <Pressable
-                        onPress={() => {
-                          if (isListening) {
-                            stopListening();
-                          } else {
-                            startListening();
-                          }
-                        }}
-                        style={[styles.listenButton, isListening && styles.listenButtonActive]}
-                      >
-                        <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
-                          {isListening ? 'Stop' : 'Listen'}
-                        </Text>
-                      </Pressable>
-                      <Text style={styles.listenValue}>{statusText}</Text>
-                    </View>
-                    {showDebug && renderToneFollowDebugPanel()}
-                  </View>
-
-                  <View style={styles.resultsList}>
-                    <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={styles.resultRow}>
-                      <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.resultHeader}>
-                        <View style={styles.checkboxRow}>
-                          <Text style={styles.checkbox}>{mainSelected ? '☑' : '☐'}</Text>
-                          <Text style={styles.resultTitle}>
-                            {formatScaleLabel(scale.rootPc, scale.scaleId, harmonicaKey.preferFlats)}
-                          </Text>
-                        </View>
-                      </Pressable>
-                      {!mainSelected ? null : groups.length === 0 ? (
-                        <Text style={styles.resultTabs}>No tabs available.</Text>
-                      ) : (
-                        <View style={styles.tabGroupList}>
-                          {caretPos !== null && (
-                            <View
-                              style={[
-                                styles.tabCaret,
-                                mainInTune && styles.tabCaretInTune,
-                                { left: caretPos.left, top: caretPos.top, width: caretSize, height: caretSize },
-                              ]}
-                            />
-                          )}
-                          {groups.map((group, index) => {
-                            const option = selectedTabs[index];
-                            return (
-                              <Pressable
-                                key={`${scale.rootPc}:${scale.scaleId}:${group.midi}`}
-                                onLayout={(event) => {
-                                  const { x, y, width, height } = event.nativeEvent.layout;
-                                  setTabLayouts((prev) => {
-                                    const next = [...prev];
-                                    next[index] = { x, y, width, height };
-                                    return next;
-                                  });
-                                }}
-                                onPress={() => {
-                                  setMainSelected((prev) => !prev);
-                                }}
-                                style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.resultTabs,
-                                    isSmallScreen && styles.resultTabsSmall,
-                                    option.isRoot && styles.resultTabsRoot,
-                                  ]}
-                                >
-                                  {option.tab}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      )}
-                      {arpeggioSections.length > 0 && (
-                        <View style={styles.arpeggioSection}>
-                          {arpeggioSections.map((section) => (
-                            <View key={`arp:${section.id}`} style={styles.arpeggioBlock}>
-                              <Text style={styles.arpeggioTitle}>{section.title}</Text>
-                              {section.note && <Text style={styles.arpeggioNote}>{section.note}</Text>}
-                              {section.items.length === 0 ? (
-                                <Text style={styles.arpeggioEmpty}>{section.emptyNote ?? 'None'}</Text>
-                              ) : (
-                                section.items.map((item) => {
-                                  const tabGroups = buildTabsForPcSet(
-                                    item.pcs,
-                                    item.rootPc,
-                                    harmonicaKey.pc,
-                                    notation,
-                                  );
-                                  const tabTokens = tabGroups
-                                    .map((group) => {
-                                      const option = getPreferredTabOption(group);
-                                      return option
-                                        ? {
-                                            tab: option.tab,
-                                            isRoot: group.isRoot,
-                                            midi: group.midi,
-                                          }
-                                        : null;
-                                    })
-                                    .filter(Boolean) as Array<{
-                                      tab: string;
-                                      isRoot: boolean;
-                                      midi: number;
-                                    }>;
-                                  const rowSelected = arpeggioItemSelected[item.id] ?? false;
-                                  const rowMatch =
-                                    isListening && frequency && rowSelected
-                                      ? matchFrequencyToTabs(
-                                          tabTokens.map((token) => token.midi),
-                                          frequency,
-                                          25,
-                                        )
-                                      : null;
-                                  const rowCaretPos = rowSelected
-                                    ? getCaretPosition(rowMatch, arpeggioLayouts[item.id] ?? [])
-                                    : null;
-                                  const rowInTune =
-                                    rowMatch !== null && Math.abs(rowMatch.centsOffset) <= toneToleranceCents;
-                                  return (
-                                    <Pressable
-                                      key={item.id}
-                                      onPress={(event) => {
-                                        event.stopPropagation?.();
-                                        setArpeggioItemSelected((prev) => ({
-                                          ...prev,
-                                          [item.id]: !(prev[item.id] ?? false),
-                                        }));
-                                      }}
-                                      style={styles.arpeggioRow}
-                                    >
-                                      <View style={styles.checkboxRow}>
-                                        <Text style={styles.checkbox}>
-                                          {arpeggioItemSelected[item.id] ? '☑' : '☐'}
-                                        </Text>
-                                        <Text style={styles.arpeggioLabel}>
-                                          {item.label} · {formatNotes(item.orderedPcs, item.rootPc)}
-                                        </Text>
-                                      </View>
-                                      {rowSelected &&
-                                        (tabTokens.length === 0 ? (
-                                          <Text style={styles.arpeggioTabs}>No tabs available.</Text>
-                                        ) : (
-                                          <View style={styles.arpeggioTabList}>
-                                            {rowCaretPos !== null && (
-                                              <View
-                                                style={[
-                                                  styles.tabCaret,
-                                                  rowInTune && styles.tabCaretInTune,
-                                                  {
-                                                    left: rowCaretPos.left,
-                                                    top: rowCaretPos.top,
-                                                    width: caretSize,
-                                                    height: caretSize,
-                                                  },
-                                                ]}
-                                              />
-                                            )}
-                                            {tabTokens.map((token, index) => (
-                                              <View
-                                                key={`${item.id}:tab:${index}`}
-                                                onLayout={(event) => {
-                                                  const { x, y, width, height } = event.nativeEvent.layout;
-                                                  setArpeggioLayouts((prev) => {
-                                                    const next = { ...prev };
-                                                    const row = [...(next[item.id] ?? [])];
-                                                    row[index] = { x, y, width, height };
-                                                    next[item.id] = row;
-                                                    return next;
-                                                  });
-                                                }}
-                                                style={[
-                                                  styles.arpeggioTabChip,
-                                                  token.isRoot && styles.arpeggioTabChipRoot,
-                                                ]}
-                                              >
-                                                <Text
-                                                  style={[
-                                                    styles.arpeggioTabValue,
-                                                    token.isRoot && styles.arpeggioTabValueRoot,
-                                                  ]}
-                                                >
-                                                  {token.tab}
-                                                </Text>
-                                              </View>
-                                            ))}
-                                          </View>
-                                        ))}
-                                    </Pressable>
-                                  );
-                                })
-                              )}
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </View>
-
-                <View style={[styles.pagerPage, { width: pageWidth }]}>
-                  <View style={styles.transposerCard}>
-                    <View style={styles.transposerFollowControls}>
-                      <Pressable
-                        testID="transposer-listen-button"
-                        onPress={() => {
-                          if (isListening) {
-                            stopListening();
-                          } else {
-                            startListening();
-                          }
-                        }}
-                        style={[styles.listenButton, isListening && styles.listenButtonActive]}
-                      >
-                        <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
-                          {isListening ? 'Stop' : 'Listen'}
-                        </Text>
-                      </Pressable>
-                      {savedTabsStatus && (
-                        <Text
-                          style={[
-                            styles.transposerSavedTabsStatus,
-                            savedTabsStatusIsError && styles.transposerSavedTabsStatusError,
-                          ]}
-                        >
-                          {savedTabsStatus}
-                        </Text>
-                      )}
-                    </View>
-                    {Platform.OS === 'web' && useCustomTransposerPad ? (
-                      <Pressable
-                        testID="transposer-input-shell"
-                        onPress={() => openTransposerPad('input-shell-press')}
-                        style={styles.transposerInputShell}
-                      >
-                        <TextInput
-                          ref={transposerInputRef}
-                          style={[styles.transposerInput, styles.transposerInputTouchWeb]}
-                          multiline
-                          value={transposerInput}
-                          onChangeText={handleTransposerInputChange}
-                          onFocus={handleTransposerInputFocus}
-                          onBlur={handleTransposerInputBlur}
-                          onSelectionChange={(event) => {
-                            const selection = event.nativeEvent.selection;
-                            recordTransposerPadDebug(
-                              'selection-change',
-                              `start=${selection.start} end=${selection.end}`,
-                            );
-                            setTransposerSelection(selection);
-                          }}
-                          selection={transposerSelection}
-                          keyboardType="default"
-                          inputMode="none"
-                          showSoftInputOnFocus={false}
-                          autoCorrect={false}
-                          autoCapitalize="none"
-                          spellCheck={false}
-                          placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
-                          placeholderTextColor="#64748b"
-                          textAlignVertical="top"
-                          pointerEvents="none"
-                        />
-                      </Pressable>
-                    ) : (
-                      <TextInput
-                        ref={transposerInputRef}
-                        style={[
-                          styles.transposerInput,
-                          Platform.OS === 'web' && useCustomTransposerPad && styles.transposerInputTouchWeb,
-                        ]}
-                        multiline
-                        value={transposerInput}
-                        onChangeText={handleTransposerInputChange}
-                        onFocus={handleTransposerInputFocus}
-                        onPressIn={handleTransposerInputPress}
-                        onBlur={handleTransposerInputBlur}
-                        onSelectionChange={(event) => {
-                          const selection = event.nativeEvent.selection;
-                          recordTransposerPadDebug(
-                            'selection-change',
-                            `start=${selection.start} end=${selection.end}`,
-                          );
-                          setTransposerSelection(selection);
-                        }}
-                        selection={transposerSelection}
-                        keyboardType="default"
-                        inputMode={useCustomTransposerPad ? 'none' : 'text'}
-                        showSoftInputOnFocus={!useCustomTransposerPad}
-                        autoCorrect={false}
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
-                        placeholderTextColor="#64748b"
-                        textAlignVertical="top"
-                      />
-                    )}
-                    {useCustomTransposerPad && (
-                      <Text style={styles.transposerPadHint}>
-                        {Platform.OS === 'web'
-                          ? 'Custom tab pad is active. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings for the browser edit menu.'
-                          : 'Tap the field to use the tab pad. Use Paste in the pad for clipboard text, or switch to Native Keyboard in Settings.'}
-                      </Text>
-                    )}
-                    {transposerPasteStatus && <Text style={styles.transposerPadStatus}>{transposerPasteStatus}</Text>}
-                    {showDebug && renderToneFollowDebugPanel()}
-                    <View
-                      style={[
-                        styles.transposerLibraryRow,
-                        isSmallScreen && styles.transposerDirectionRowCompact,
-                      ]}
-                    >
-                      <Pressable
-                        testID="transposer-new-button"
-                        onPress={handleNewDraftPress}
-                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-                      >
-                        <Text
-                          style={[
-                            styles.transposerActionButtonText,
-                            isSmallScreen && styles.transposerActionButtonTextCompact,
-                          ]}
-                        >
-                          New
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        testID="transposer-save-button"
-                        onPress={() => openSaveTabModal('overwrite')}
-                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-                      >
-                        <Text
-                          style={[
-                            styles.transposerActionButtonText,
-                            isSmallScreen && styles.transposerActionButtonTextCompact,
-                          ]}
-                        >
-                          {activeSavedTabId ? 'Re-save' : 'Save'}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        testID="transposer-save-as-button"
-                        onPress={() => openSaveTabModal('create_new')}
-                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-                      >
-                        <Text
-                          style={[
-                            styles.transposerActionButtonText,
-                            isSmallScreen && styles.transposerActionButtonTextCompact,
-                          ]}
-                        >
-                          Save As
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        testID="transposer-library-button"
-                        onPress={() => {
-                          setSavedTabsStatus(null);
-                          setScreen('library');
-                        }}
-                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-                      >
-                        <Text
-                          style={[
-                            styles.transposerActionButtonText,
-                            isSmallScreen && styles.transposerActionButtonTextCompact,
-                          ]}
-                        >
-                          Library
-                        </Text>
-                      </Pressable>
-                    </View>
-                    <View
-                      style={[
-                        styles.transposerDirectionRow,
-                        isSmallScreen && styles.transposerDirectionRowCompact,
-                      ]}
-                    >
-                      <Text style={[styles.transposerSectionLabel, isSmallScreen && styles.transposerSectionLabelCompact]}>
-                        Direction
-                      </Text>
-                      <View
-                        style={[
-                          styles.transposerDirectionOptions,
-                          isSmallScreen && styles.transposerDirectionOptionsCompact,
-                        ]}
-                      >
-                        <Pressable
-                          onPress={() => setTransposerDirection('down')}
-                          style={[
-                            styles.transposerDirectionOption,
-                            isSmallScreen && styles.transposerDirectionOptionCompact,
-                            transposerDirection === 'down' && styles.transposerDirectionOptionActive,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.transposerDirectionText,
-                              isSmallScreen && styles.transposerDirectionTextCompact,
-                            ]}
-                          >
-                            {transposerDirection === 'down' ? '◉' : '○'} Down
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => setTransposerDirection('up')}
-                          style={[
-                            styles.transposerDirectionOption,
-                            isSmallScreen && styles.transposerDirectionOptionCompact,
-                            transposerDirection === 'up' && styles.transposerDirectionOptionActive,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.transposerDirectionText,
-                              isSmallScreen && styles.transposerDirectionTextCompact,
-                            ]}
-                          >
-                            {transposerDirection === 'up' ? '◉' : '○'} Up
-                          </Text>
-                        </Pressable>
-                      </View>
-                      <Pressable
-                        onPress={handleCleanTransposerInput}
-                        style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-                      >
-                        <Text
-                          style={[
-                            styles.transposerActionButtonText,
-                            isSmallScreen && styles.transposerActionButtonTextCompact,
-                          ]}
-                        >
-                          Clean Input
-                        </Text>
-                      </Pressable>
-                    </View>
-                    <Text style={styles.transposerSectionLabel}>Transposed Output</Text>
-                    <ScrollView
-                      ref={transposerOutputScrollRef}
-                      testID="transposer-output-scroll"
-                      style={[styles.transposerOutputBox, { maxHeight: transposerOutputMaxHeight }]}
-                      contentContainerStyle={styles.transposerOutputContent}
-                      nestedScrollEnabled
-                      onLayout={(event) => {
-                        setTransposerOutputViewportHeight(event.nativeEvent.layout.height);
-                      }}
-                      onScroll={(event) => {
-                        transposerOutputScrollYRef.current = event.nativeEvent.contentOffset.y;
-                      }}
-                      scrollEventThrottle={16}
-                    >
-                      <Text style={styles.transposerOutputText}>
-                        {transposerInput.trim().length === 0
-                          ? 'Enter tabs above to generate a transposed tab.'
-                          : transposerResult.outputSegments.map((segment, index) => (
-                              <Text
-                                key={`out:${index}`}
-                                testID={segment.kind === 'token' ? `transposer-output-token:${segment.tokenIndex}` : undefined}
-                                onPress={
-                                  segment.kind === 'token' && segment.tokenIndex !== undefined
-                                    ? () => moveTransposerCursor(segment.tokenIndex as number)
-                                    : undefined
-                                }
-                                onLayout={
-                                  segment.kind === 'token' && segment.tokenIndex !== undefined
-                                    ? (event) => {
-                                        const { y, height } = event.nativeEvent.layout;
-                                        setTransposerOutputTokenLayouts((prev) => {
-                                          const current = prev[segment.tokenIndex as number];
-                                          if (current && current.y === y && current.height === height) {
-                                            return prev;
-                                          }
-                                          return {
-                                            ...prev,
-                                            [segment.tokenIndex as number]: { y, height },
-                                          };
-                                        });
-                                      }
-                                    : undefined
-                                }
-                                style={[
-                                  segment.kind === 'error' && styles.transposerOutputError,
-                                  segment.kind === 'token' && styles.transposerOutputToken,
-                                  segment.kind === 'token' &&
-                                    segment.tokenIndex === transposerFollowState.activeTokenIndex &&
-                                    styles.transposerOutputTokenActive,
-                                  segment.kind === 'token' &&
-                                    segment.tokenIndex === transposerFollowState.activeTokenIndex &&
-                                    transposerFollowEvaluation.matchingTarget &&
-                                    styles.transposerOutputTokenMatched,
-                                ]}
-                              >
-                                {segment.text}
-                              </Text>
-                            ))}
-                      </Text>
-                    </ScrollView>
-                    {transposerResult.warnings.length > 0 && (
-                      <View style={styles.transposerWarnings}>
-                        {transposerResult.warnings.map((warning, index) => (
-                          <Text key={`warning:${index}`} style={styles.transposerWarningText}>
-                            • {warning}
-                          </Text>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </ScrollView>
-
-              <View style={styles.pagerDotsRow}>
-                {pagerTabs.map((tab) => {
-                  const selected = pagerIndex === tab.page;
-                  return (
-                    <Pressable
-                      key={`dot:${tab.page}`}
-                      onPress={() => {
-                        setPagerIndex(tab.page);
-                        scrollToPagerPage(tab.page, true);
-                      }}
-                      style={[styles.pagerDot, selected && styles.pagerDotActive]}
-                    >
-                      <Text style={[styles.pagerDotText, selected && styles.pagerDotTextActive]}>{tab.label}</Text>
-                    </Pressable>
-                  );
-                })}
+            <View style={styles.pageOneHeader}>
+              <View style={styles.scalePickerColumn}>
+                <Dropdown
+                  label="Scale Name"
+                  value={scaleId}
+                  options={scaleNameDropdownOptions}
+                  onChange={setScaleId}
+                />
+              </View>
+              <View style={styles.topRowToggle}>
+                <SingleSelectGroup
+                  label="Arpeggios"
+                  value={arpeggioSelection}
+                  options={[
+                    { label: 'Triads', value: 'triads' },
+                    { label: '7th', value: 'sevenths' },
+                    { label: 'Blues', value: 'blues' },
+                  ]}
+                  onChange={setArpeggioSelection}
+                />
               </View>
             </View>
-            {useCustomTransposerPad && (
-              <Modal
-                transparent
-                visible={transposerPadVisible}
-                animationType="slide"
-                onRequestClose={dismissTransposerPad}
-              >
-                <View style={styles.transposerPadOverlay}>
-                  <Pressable style={StyleSheet.absoluteFill} onPress={dismissTransposerPad} />
-                  <View style={styles.transposerPadSheet}>
-                    <View style={styles.transposerPadHandle} />
-                    <Text style={styles.transposerPadTitle}>Tab Pad</Text>
-                    <Text style={styles.transposerPadPreview}>
-                      Next token preview: {nextTokenPreview}
+
+            <View style={styles.listenCard}>
+              <View style={styles.listenRow}>
+                <Pressable
+                  onPress={() => {
+                    if (isListening) {
+                      stopListening();
+                    } else {
+                      startListening();
+                    }
+                  }}
+                  style={[styles.listenButton, isListening && styles.listenButtonActive]}
+                >
+                  <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
+                    {isListening ? 'Stop' : 'Listen'}
+                  </Text>
+                </Pressable>
+                <Text style={styles.listenValue}>{statusText}</Text>
+              </View>
+              {showDebug && renderToneFollowDebugPanel()}
+            </View>
+
+            <View style={styles.resultsList}>
+              <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={styles.resultRow}>
+                <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.resultHeader}>
+                  <View style={styles.checkboxRow}>
+                    <Text style={styles.checkbox}>{mainSelected ? '☑' : '☐'}</Text>
+                    <Text style={styles.resultTitle}>
+                      {formatScaleLabel(scale.rootPc, scale.scaleId, harmonicaKey.preferFlats)}
                     </Text>
-                    <View style={styles.transposerPadSection}>
-                      <Text style={styles.transposerPadSectionLabel}>Airflow</Text>
-                      <View style={styles.transposerPadOptionRow}>
-                        {TAB_PAD_SIGN_OPTIONS.map((option) => {
-                          const selected = transposerPadSign === option.value;
-                          return (
-                            <Pressable
-                              key={`sign:${option.label}`}
-                              onPress={() => setTransposerPadSign(option.value)}
-                              style={[
-                                styles.transposerPadOptionButton,
-                                selected && styles.transposerPadOptionButtonActive,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.transposerPadOptionText,
-                                  selected && styles.transposerPadOptionTextActive,
-                                ]}
-                              >
-                                {option.label}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-                    <View style={styles.transposerPadSection}>
-                      <Text style={styles.transposerPadSectionLabel}>Suffix</Text>
-                      <View style={styles.transposerPadOptionRow}>
-                        {TAB_PAD_SUFFIX_OPTIONS.map((option) => {
-                          const selected = transposerPadSuffix === option.value;
-                          return (
-                            <Pressable
-                              key={`suffix:${option.label}`}
-                              onPress={() => setTransposerPadSuffix(option.value)}
-                              style={[
-                                styles.transposerPadOptionButton,
-                                selected && styles.transposerPadOptionButtonActive,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.transposerPadOptionText,
-                                  selected && styles.transposerPadOptionTextActive,
-                                ]}
-                              >
-                                {option.label}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-                    <View style={styles.transposerPadSection}>
-                      <Text style={styles.transposerPadSectionLabel}>Hole</Text>
-                      <View style={styles.transposerPadHoleGrid}>
-                        {TAB_PAD_HOLES.map((hole) => (
-                          <Pressable
-                            key={`hole:${hole}`}
-                            onPress={() => handleTabPadHolePress(hole)}
-                            style={styles.transposerPadHoleButton}
-                          >
-                            <Text style={styles.transposerPadHoleText}>{hole}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </View>
-                    <View style={styles.transposerPadActionRow}>
-                      <Pressable
-                        onPress={handleTabPadPaste}
-                        style={styles.transposerPadActionButton}
-                      >
-                        <Text style={styles.transposerPadActionText}>Paste</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => insertQuickSymbol(' ')}
-                        style={styles.transposerPadActionButton}
-                      >
-                        <Text style={styles.transposerPadActionText}>Space</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => insertQuickSymbol('\n')}
-                        style={styles.transposerPadActionButton}
-                      >
-                        <Text style={styles.transposerPadActionText}>New line</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={handleTabPadBackspace}
-                        style={styles.transposerPadActionButton}
-                      >
-                        <Text style={styles.transposerPadActionText}>Backspace</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={handleDoneWithTransposerPad}
-                        style={[styles.transposerPadActionButton, styles.transposerPadDoneButton]}
-                      >
-                        <Text style={[styles.transposerPadActionText, styles.transposerPadDoneText]}>Done</Text>
-                      </Pressable>
-                    </View>
                   </View>
-                </View>
-              </Modal>
-            )}
-          </>
+                </Pressable>
+                {!mainSelected ? null : groups.length === 0 ? (
+                  <Text style={styles.resultTabs}>No tabs available.</Text>
+                ) : (
+                  <View style={styles.tabGroupList}>
+                    {caretPos !== null && (
+                      <View
+                        style={[
+                          styles.tabCaret,
+                          mainInTune && styles.tabCaretInTune,
+                          { left: caretPos.left, top: caretPos.top, width: caretSize, height: caretSize },
+                        ]}
+                      />
+                    )}
+                    {groups.map((group, index) => {
+                      const option = selectedTabs[index];
+                      return (
+                        <Pressable
+                          key={`${scale.rootPc}:${scale.scaleId}:${group.midi}`}
+                          onLayout={(event) => {
+                            const { x, y, width, height } = event.nativeEvent.layout;
+                            setTabLayouts((prev) => {
+                              const next = [...prev];
+                              next[index] = { x, y, width, height };
+                              return next;
+                            });
+                          }}
+                          onPress={() => {
+                            setMainSelected((prev) => !prev);
+                          }}
+                          style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
+                        >
+                          <Text
+                            style={[
+                              styles.resultTabs,
+                              isSmallScreen && styles.resultTabsSmall,
+                              option.isRoot && styles.resultTabsRoot,
+                            ]}
+                          >
+                            {option.tab}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+                {arpeggioSections.length > 0 && (
+                  <View style={styles.arpeggioSection}>
+                    {arpeggioSections.map((section) => (
+                      <View key={`arp:${section.id}`} style={styles.arpeggioBlock}>
+                        <Text style={styles.arpeggioTitle}>{section.title}</Text>
+                        {section.note && <Text style={styles.arpeggioNote}>{section.note}</Text>}
+                        {section.items.length === 0 ? (
+                          <Text style={styles.arpeggioEmpty}>{section.emptyNote ?? 'None'}</Text>
+                        ) : (
+                          section.items.map((item) => {
+                            const tabGroups = buildTabsForPcSet(item.pcs, item.rootPc, harmonicaKey.pc, notation);
+                            const tabTokens = tabGroups
+                              .map((group) => {
+                                const option = getPreferredTabOption(group);
+                                return option
+                                  ? {
+                                      tab: option.tab,
+                                      isRoot: group.isRoot,
+                                      midi: group.midi,
+                                    }
+                                  : null;
+                              })
+                              .filter(Boolean) as Array<{
+                              tab: string;
+                              isRoot: boolean;
+                              midi: number;
+                            }>;
+                            const rowSelected = arpeggioItemSelected[item.id] ?? false;
+                            const rowMatch =
+                              isListening && frequency && rowSelected
+                                ? matchFrequencyToTabs(
+                                    tabTokens.map((token) => token.midi),
+                                    frequency,
+                                    25,
+                                  )
+                                : null;
+                            const rowCaretPos = rowSelected
+                              ? getCaretPosition(rowMatch, arpeggioLayouts[item.id] ?? [])
+                              : null;
+                            const rowInTune =
+                              rowMatch !== null && Math.abs(rowMatch.centsOffset) <= toneToleranceCents;
+                            return (
+                              <Pressable
+                                key={item.id}
+                                onPress={(event) => {
+                                  event.stopPropagation?.();
+                                  setArpeggioItemSelected((prev) => ({
+                                    ...prev,
+                                    [item.id]: !(prev[item.id] ?? false),
+                                  }));
+                                }}
+                                style={styles.arpeggioRow}
+                              >
+                                <View style={styles.checkboxRow}>
+                                  <Text style={styles.checkbox}>{arpeggioItemSelected[item.id] ? '☑' : '☐'}</Text>
+                                  <Text style={styles.arpeggioLabel}>
+                                    {item.label} · {formatNotes(item.orderedPcs, item.rootPc)}
+                                  </Text>
+                                </View>
+                                {rowSelected &&
+                                  (tabTokens.length === 0 ? (
+                                    <Text style={styles.arpeggioTabs}>No tabs available.</Text>
+                                  ) : (
+                                    <View style={styles.arpeggioTabList}>
+                                      {rowCaretPos !== null && (
+                                        <View
+                                          style={[
+                                            styles.tabCaret,
+                                            rowInTune && styles.tabCaretInTune,
+                                            {
+                                              left: rowCaretPos.left,
+                                              top: rowCaretPos.top,
+                                              width: caretSize,
+                                              height: caretSize,
+                                            },
+                                          ]}
+                                        />
+                                      )}
+                                      {tabTokens.map((token, index) => (
+                                        <View
+                                          key={`${item.id}:tab:${index}`}
+                                          onLayout={(event) => {
+                                            const { x, y, width, height } = event.nativeEvent.layout;
+                                            setArpeggioLayouts((prev) => {
+                                              const next = { ...prev };
+                                              const row = [...(next[item.id] ?? [])];
+                                              row[index] = { x, y, width, height };
+                                              next[item.id] = row;
+                                              return next;
+                                            });
+                                          }}
+                                          style={[styles.arpeggioTabChip, token.isRoot && styles.arpeggioTabChipRoot]}
+                                        >
+                                          <Text
+                                            style={[styles.arpeggioTabValue, token.isRoot && styles.arpeggioTabValueRoot]}
+                                          >
+                                            {token.tab}
+                                          </Text>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  ))}
+                              </Pressable>
+                            );
+                          })
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+        {showWorkspaceSwitcher && (
+          <View style={styles.workspaceNavRow}>
+            <Pressable
+              testID="workspace-scales-button"
+              onPress={() => {
+                setTabsEditorVisible(false);
+                setScreen('scales');
+              }}
+              style={[styles.workspaceNavButton, screen === 'scales' && styles.workspaceNavButtonActive]}
+            >
+              <Text style={[styles.workspaceNavText, screen === 'scales' && styles.workspaceNavTextActive]}>Scales</Text>
+            </Pressable>
+            <Pressable
+              testID="workspace-tabs-button"
+              onPress={openTabsWorkspace}
+              style={[styles.workspaceNavButton, screen === 'tabs' && !tabsEditorVisible && styles.workspaceNavButtonActive]}
+            >
+              <Text style={[styles.workspaceNavText, screen === 'tabs' && !tabsEditorVisible && styles.workspaceNavTextActive]}>
+                Tabs
+              </Text>
+            </Pressable>
+          </View>
         )}
         <Modal transparent visible={saveTabModalVisible} animationType="fade" onRequestClose={closeSaveTabModal}>
           <View style={styles.dialogOverlay}>
             <Pressable style={StyleSheet.absoluteFill} onPress={closeSaveTabModal} />
             <View style={styles.dialogCard}>
-              <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, activeSavedTab !== null)}</Text>
+              <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, editorSavedTab !== null)}</Text>
               <Text style={styles.helperText}>Titles help users find a saved tab later.</Text>
               <TextInput
                 testID="save-tab-title-input"
@@ -2181,40 +1911,40 @@ export default function App() {
         </Modal>
         <Modal
           transparent
-          visible={pendingLoadRecord !== null}
+          visible={pendingOpenRecord !== null}
           animationType="fade"
-          onRequestClose={() => setPendingLoadRecord(null)}
+          onRequestClose={() => setPendingOpenRecord(null)}
         >
           <View style={styles.dialogOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingLoadRecord(null)} />
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
             <View style={styles.dialogCard}>
               <Text style={styles.dialogTitle}>Unsaved changes</Text>
               <Text style={styles.helperText}>
-                Loading "{pendingLoadRecord?.title ?? 'this tab'}" will replace the current editor text.
+                Opening "{pendingOpenRecord?.title ?? 'this tab'}" will replace the current editor text.
               </Text>
               <View style={styles.dialogActionColumn}>
-                <Pressable onPress={() => setPendingLoadRecord(null)} style={styles.dialogButton}>
+                <Pressable onPress={() => setPendingOpenRecord(null)} style={styles.dialogButton}>
                   <Text style={styles.dialogButtonText}>Cancel</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    if (pendingLoadRecord) {
-                      loadSavedTabIntoEditor(pendingLoadRecord);
+                    if (pendingOpenRecord) {
+                      openSavedTabInEditor(pendingOpenRecord, 'library');
                     }
                   }}
                   style={styles.dialogButton}
                 >
-                  <Text style={styles.dialogButtonText}>Load Anyway</Text>
+                  <Text style={styles.dialogButtonText}>Open Anyway</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    if (!pendingLoadRecord) return;
-                    openSaveTabModal('save_then_load', pendingLoadRecord.id);
-                    setPendingLoadRecord(null);
+                    if (!pendingOpenRecord) return;
+                    openSaveTabModal('save_then_open', pendingOpenRecord.id);
+                    setPendingOpenRecord(null);
                   }}
                   style={[styles.dialogButton, styles.dialogPrimaryButton]}
                 >
-                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Load</Text>
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Open</Text>
                 </Pressable>
               </View>
             </View>
@@ -2240,6 +1970,7 @@ const styles = StyleSheet.create({
   container: {
     padding: 20,
     gap: 12,
+    flexGrow: 1,
   },
   title: {
     fontSize: 17,
@@ -2456,11 +2187,48 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 160,
   },
+  workspaceNavRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 'auto',
+    paddingTop: 8,
+  },
+  workspaceNavButton: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  workspaceNavButtonActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  workspaceNavText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  workspaceNavTextActive: {
+    color: '#e0f2fe',
+  },
+  scalesWorkspace: {
+    gap: 10,
+  },
   pagerShell: {
     gap: 10,
   },
   pagerPage: {
     gap: 10,
+  },
+  pagerPageGrow: {
+    flex: 1,
   },
   pageOneHeader: {
     flexDirection: 'row',
@@ -2589,6 +2357,11 @@ const styles = StyleSheet.create({
     borderColor: '#38bdf8',
     backgroundColor: '#0b3b4a',
   },
+  listenButtonDisabled: {
+    borderColor: '#1f2937',
+    backgroundColor: '#111827',
+    opacity: 0.55,
+  },
   listenButtonText: {
     color: '#e2e8f0',
     fontWeight: '700',
@@ -2598,6 +2371,9 @@ const styles = StyleSheet.create({
   },
   listenButtonTextActive: {
     color: '#e0f2fe',
+  },
+  listenButtonTextDisabled: {
+    color: '#94a3b8',
   },
   listenLabel: {
     color: '#94a3b8',
@@ -2641,31 +2417,6 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontSize: 12,
     fontWeight: '600',
-  },
-  propertiesChoiceRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  propertiesChoiceButton: {
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  propertiesChoiceButtonActive: {
-    borderColor: '#38bdf8',
-    backgroundColor: '#0b3b4a',
-  },
-  propertiesChoiceText: {
-    color: '#e2e8f0',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  propertiesChoiceTextActive: {
-    color: '#e0f2fe',
   },
   symbolRow: {
     flexDirection: 'row',
@@ -2864,6 +2615,9 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
+  transposerCardGrow: {
+    flex: 1,
+  },
   transposerTitle: {
     color: '#e2e8f0',
     fontSize: 15,
@@ -2885,17 +2639,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     fontSize: 13,
   },
-  transposerInputShell: {
-    borderRadius: 10,
+  transposerInputGrow: {
+    flex: 1,
   },
-  transposerInputTouchWeb: {
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  transposerPadHint: {
-    color: '#94a3b8',
-    fontSize: 12,
-    lineHeight: 18,
+  editorPrimaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   savedTabsStatus: {
     color: '#93c5fd',
@@ -2929,6 +2679,11 @@ const styles = StyleSheet.create({
     flex: 1,
     flexShrink: 1,
   },
+  transposerCurrentTab: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 18,
+  },
   transposerSavedTabsStatusError: {
     color: '#f87171',
   },
@@ -2961,6 +2716,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  transposerSourceCard: {
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#182233',
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  transposerEmptyState: {
+    borderWidth: 1,
+    borderColor: '#182233',
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
   },
   transposerDirectionRow: {
     flexDirection: 'row',
@@ -2998,10 +2770,16 @@ const styles = StyleSheet.create({
   transposerDirectionOptionActive: {
     borderColor: '#38bdf8',
   },
+  transposerDirectionOptionDisabled: {
+    opacity: 0.45,
+  },
   transposerDirectionText: {
     color: '#e2e8f0',
     fontSize: 12,
     fontWeight: '600',
+  },
+  transposerDirectionTextDisabled: {
+    color: '#94a3b8',
   },
   transposerDirectionTextCompact: {
     fontSize: 11,
@@ -3012,6 +2790,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#0a101b',
     minHeight: 120,
+  },
+  transposerOutputBoxGrow: {
+    flex: 1,
   },
   transposerOutputContent: {
     paddingVertical: 10,
@@ -3027,7 +2808,6 @@ const styles = StyleSheet.create({
     color: '#f8fafc',
     borderRadius: 999,
     paddingVertical: 1,
-    paddingHorizontal: 5,
   },
   transposerOutputTokenActive: {
     borderWidth: 2,
@@ -3055,6 +2835,15 @@ const styles = StyleSheet.create({
   },
   savedTabsList: {
     gap: 10,
+  },
+  libraryNewButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   savedTabRow: {
     gap: 8,
@@ -3101,6 +2890,7 @@ const styles = StyleSheet.create({
   },
   savedTabActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   savedTabActionButton: {
@@ -3188,130 +2978,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   dialogPrimaryButtonText: {
-    color: '#e0f2fe',
-  },
-  transposerPadOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(5, 8, 14, 0.55)',
-    justifyContent: 'flex-end',
-  },
-  transposerPadSheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    backgroundColor: '#0b1220',
-    borderTopWidth: 1,
-    borderColor: '#1f2937',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 24,
-    gap: 12,
-  },
-  transposerPadHandle: {
-    width: 44,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: '#334155',
-    alignSelf: 'center',
-  },
-  transposerPadTitle: {
-    color: '#f8fafc',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  transposerPadPreview: {
-    color: '#94a3b8',
-    fontFamily: 'Courier',
-    fontSize: 12,
-  },
-  transposerPadSection: {
-    gap: 8,
-  },
-  transposerPadSectionLabel: {
-    color: '#94a3b8',
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    fontWeight: '700',
-  },
-  transposerPadOptionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  transposerPadOptionButton: {
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  transposerPadOptionButtonActive: {
-    borderColor: '#38bdf8',
-    backgroundColor: '#0b3b4a',
-  },
-  transposerPadOptionText: {
-    color: '#e2e8f0',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  transposerPadOptionTextActive: {
-    color: '#e0f2fe',
-  },
-  transposerPadHoleGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  transposerPadHoleButton: {
-    width: '18%',
-    minWidth: 56,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  transposerPadHoleText: {
-    color: '#f8fafc',
-    fontFamily: 'Courier',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  transposerPadActionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  transposerPadStatus: {
-    marginTop: 8,
-    color: '#b45309',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  transposerPadActionButton: {
-    flexGrow: 1,
-    minWidth: 72,
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-  },
-  transposerPadActionText: {
-    color: '#e2e8f0',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  transposerPadDoneButton: {
-    borderColor: '#38bdf8',
-    backgroundColor: '#0b3b4a',
-  },
-  transposerPadDoneText: {
     color: '#e0f2fe',
   },
 });

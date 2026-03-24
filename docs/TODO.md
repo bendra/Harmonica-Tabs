@@ -1,22 +1,23 @@
 # TODO / Next Steps
 
 - Revisit tab ordering and octave handling if alternate tunings are added.
+- Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.
-- Improve UI responsiveness so it's more effective on different screen sizes
+- Improve UI responsiveness so it's more effective on different screen sizes.
+- Validate the new `Scales` / `Tabs` workspace naming after more user testing.
 - Revisit `-2` vs `3` toggle behavior for chord visualization.
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.
-- Consider whether the transposer's explicit `Paste` action should grow into a fuller clipboard/edit menu.
+- Consider a compact current-source label on the transposer if users miss the removed source preview card.
 - Add native (iOS/Android) detector producers that feed the same shared detector snapshot used by tone follow.
 - Consolidate repeated UI/runtime default values into shared default-setting constants so input defaults and fallback values stay in sync.
-- Persist transposer cleanup preferences across sessions.
 - Persist tone-follow settings across sessions if they prove useful.
-- Consider persisting the transposer keyboard choice across sessions if users ask for it.
-- Consider a helper hint for the transposer `Clean Input` flow beyond the current mobile pad guidance.
+- Consider a helper hint for the editor `Clean Input` flow if users need more guidance after the custom pad removal.
 - Expand the saved-tab library viewer with search/filter, sort options, larger previews, and future multi-select actions.
 - Consider whether the library screen should grow rename/duplicate entry points in addition to the editor-level `Save As` flow.
+- Consider whether the transposer should remember the last selected source tab across launches.
 - Add library import/export so users can share or back up their saved tabs, likely starting with whole-library JSON export/import.
 - Consider single-tab sharing/export flows after whole-library import/export exists.
 - Consider cross-device sync only after local import/export proves useful.
-- accessability
+- accessibility
 - localization
