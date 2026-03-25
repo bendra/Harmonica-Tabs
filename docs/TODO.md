@@ -5,6 +5,8 @@
 - Consider exposing chord logic as a pure helper to test more directly.
 - Improve UI responsiveness so it's more effective on different screen sizes.
 - Validate the new `Scales` / `Tabs` workspace naming after more user testing.
+- Validate whether the new editor close `X` and `Choose Tab` wording are clear enough for first-time users.
+- Re-check whether the editor still needs any in-overlay draft-management action beyond `Save` / `Save As`, or whether library-only draft entry is enough.
 - Revisit `-2` vs `3` toggle behavior for chord visualization.
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.

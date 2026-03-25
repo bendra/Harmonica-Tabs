@@ -56,6 +56,22 @@ type ScaleKeyOption = {
   note: NoteName;
 };
 
+function formatOrdinal(value: number) {
+  const mod100 = value % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
+
+  switch (value % 10) {
+    case 1:
+      return `${value}st`;
+    case 2:
+      return `${value}nd`;
+    case 3:
+      return `${value}rd`;
+    default:
+      return `${value}th`;
+  }
+}
+
 /**
  * Builds the 12 position-playing key options for the selected harmonica.
  */
@@ -82,7 +98,7 @@ type SingleSelectOption<T extends string> = {
 
 type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 type AppScreen = 'scales' | 'tabs' | 'properties' | 'tab-symbols';
-type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_open' | 'save_then_new';
+type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_open' | 'save_then_close';
 type TabsSubview = 'transpose' | 'library';
 const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
@@ -128,14 +144,14 @@ function formatSavedTabTimestamp(value: string) {
 function getSaveDialogTitle(mode: SaveTabMode, hasLinkedRecord: boolean) {
   if (mode === 'create_new') return 'Save As New Tab';
   if (mode === 'save_then_open') return 'Save Then Open';
-  if (mode === 'save_then_new') return 'Save Then New';
+  if (mode === 'save_then_close') return 'Save Then Close';
   return hasLinkedRecord ? 'Update Saved Tab' : 'Save Tab';
 }
 
 function getSaveDialogConfirmLabel(mode: SaveTabMode) {
   if (mode === 'create_new') return 'Save As';
   if (mode === 'save_then_open') return 'Save Then Open';
-  if (mode === 'save_then_new') return 'Save Then New';
+  if (mode === 'save_then_close') return 'Save Then Close';
   return 'Save';
 }
 
@@ -294,7 +310,7 @@ export default function App() {
   const [saveTabTitleError, setSaveTabTitleError] = useState<string | null>(null);
   const [pendingOpenRecord, setPendingOpenRecord] = useState<SavedTabRecord | null>(null);
   const [openAfterSaveRecordId, setOpenAfterSaveRecordId] = useState<string | null>(null);
-  const [newDraftModalVisible, setNewDraftModalVisible] = useState(false);
+  const [closeEditorModalVisible, setCloseEditorModalVisible] = useState(false);
   const [toneToleranceInput, setToneToleranceInput] = useState('60');
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
   const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
@@ -388,7 +404,11 @@ export default function App() {
   }, [scaleKeyOptions, positionKeyFilter]);
 
   const scaleKeyDropdownOptions = useMemo<DropdownOption<NoteName>[]>(
-    () => visibleScaleKeyOptions.map(({ position, note }) => ({ label: `${position} - ${note}`, value: note })),
+    () =>
+      visibleScaleKeyOptions.map(({ position, note }) => ({
+        label: `${formatOrdinal(position)} / ${note}`,
+        value: note,
+      })),
     [visibleScaleKeyOptions],
   );
 
@@ -617,8 +637,15 @@ export default function App() {
   function closeSaveTabModal() {
     setSaveTabModalVisible(false);
     setSaveTabMode('overwrite');
+    setSaveTabTitleInput('');
     setSaveTabTitleError(null);
     setOpenAfterSaveRecordId(null);
+  }
+
+  function resetEditorDialogState() {
+    closeSaveTabModal();
+    setCloseEditorModalVisible(false);
+    setPendingOpenRecord(null);
   }
 
   function openSaveTabModal(mode: SaveTabMode = 'overwrite', nextOpenRecordId: string | null = null) {
@@ -642,25 +669,25 @@ export default function App() {
     setEditorSelection({ start: 0, end: 0 });
     setEditorSavedTabId(null);
     setPendingOpenRecord(null);
-    setNewDraftModalVisible(false);
     setSavedTabsStatus('Started a new tab.');
     requestAnimationFrame(() => {
       editorInputRef.current?.focus();
     });
   }
 
-  function handleNewDraftPress() {
-    if (!hasUnsavedEditorChanges && editorSavedTabId === null && editorInput.length === 0) {
-      setSavedTabsStatus(null);
-      return;
-    }
+  function finishClosingEditor() {
+    resetEditorDialogState();
+    setTabsEditorVisible(false);
+    setTabsSubview(editorReturnTo);
+  }
 
+  function handleEditorCloseRequest() {
     if (hasUnsavedEditorChanges) {
-      setNewDraftModalVisible(true);
+      setCloseEditorModalVisible(true);
       return;
     }
 
-    startNewDraft();
+    finishClosingEditor();
   }
 
   function openTabsWorkspace() {
@@ -720,8 +747,8 @@ export default function App() {
       setSavedTabsStatus(`Saved "${result.savedTab.title}".`);
       closeSaveTabModal();
 
-      if (nextSaveMode === 'save_then_new') {
-        startNewDraft();
+      if (nextSaveMode === 'save_then_close') {
+        finishClosingEditor();
         return;
       }
 
@@ -730,7 +757,10 @@ export default function App() {
         if (nextRecord) {
           openSavedTabInEditor(nextRecord, 'library');
         }
+        return;
       }
+
+      finishClosingEditor();
     } catch (error) {
       const nextMessage = error instanceof Error && error.message ? error.message : 'Could not save this tab.';
       setSaveTabTitleError(nextMessage);
@@ -888,6 +918,8 @@ export default function App() {
         : 'No signal'
     : 'Off';
   const canListenOnTransposer = transposerSourceTab !== null && transposerResult.playableTokens.length > 0;
+  const listenFeatureLabel = '🎤 Listen & Highlight Notes';
+  const listenToggleStateLabel = `[${isListening ? 'On' : 'Off'}]`;
 
   useEffect(() => {
     const nextState = transposerFollowEvaluation.state;
@@ -967,11 +999,10 @@ export default function App() {
       ? 'Properties'
       : screen === 'tab-symbols'
         ? 'Tab Symbols'
-        : screen === 'tabs' && tabsEditorVisible
-          ? 'Tab Editor'
-          : 'HarpPilot';
+        : 'HarpPilot';
 
-  const showBackButton = screen === 'properties' || screen === 'tab-symbols' || (screen === 'tabs' && tabsEditorVisible);
+  const isTabsLibraryScreen = screen === 'tabs' && tabsSubview === 'library' && !tabsEditorVisible;
+  const showBackButton = screen === 'properties' || screen === 'tab-symbols';
   const showWorkspaceSwitcher = (screen === 'scales' || screen === 'tabs') && !tabsEditorVisible;
 
   function handleHeaderButtonPress() {
@@ -983,18 +1014,102 @@ export default function App() {
       setScreen('properties');
       return;
     }
-    if (screen === 'tabs' && tabsEditorVisible) {
-      setTabsEditorVisible(false);
-      setTabsSubview(editorReturnTo);
-      return;
-    }
     setPropertiesReturnTo(screen);
     setScreen('properties');
   }
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+  function renderEditorOverlay() {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <View style={styles.headerRow}>
+            <Text style={styles.title}>Tab Editor</Text>
+            <Pressable testID="editor-close-button" onPress={handleEditorCloseRequest} style={styles.gearButton}>
+              <Text style={styles.gearButtonText}>X</Text>
+            </Pressable>
+          </View>
+          <View style={[styles.transposerCard, styles.transposerCardGrow]}>
+            <Text style={styles.transposerTitle}>
+              {editorSavedTab ? `Editing: ${editorSavedTab.title}` : 'New Tab Draft'}
+            </Text>
+            <Text style={styles.transposerMeta}>
+              Type or paste source tabs here. This is the only place raw tab text can be edited.
+            </Text>
+            <TextInput
+              ref={editorInputRef}
+              style={[styles.transposerInput, styles.transposerInputGrow]}
+              multiline
+              value={editorInput}
+              onChangeText={handleEditorInputChange}
+              onSelectionChange={(event) => {
+                const selection = event.nativeEvent.selection;
+                setEditorSelection(selection);
+              }}
+              selection={editorSelection}
+              keyboardType="default"
+              inputMode="text"
+              autoCorrect={false}
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
+              placeholderTextColor="#64748b"
+              textAlignVertical="top"
+            />
+            <View style={styles.editorPrimaryRow}>
+              <Pressable
+                testID="editor-clean-button"
+                onPress={handleCleanEditorInput}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  Clean Input
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.transposerLibraryRow}>
+              <Pressable
+                testID="editor-save-button"
+                onPress={() => openSaveTabModal('overwrite')}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  {editorSavedTabId ? 'Re-save' : 'Save'}
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="editor-save-as-button"
+                onPress={() => openSaveTabModal('create_new')}
+                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  Save As
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  function renderMainContent() {
+    return (
+      <>
         <View style={styles.headerRow}>
           <Text style={styles.title}>{headerTitle}</Text>
           <Pressable onPress={handleHeaderButtonPress} style={styles.gearButton}>
@@ -1135,117 +1250,10 @@ export default function App() {
               <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to '.</Text>
             </View>
           </View>
-        ) : screen === 'tabs' && tabsEditorVisible ? (
-          <View style={[styles.transposerCard, styles.transposerCardGrow]}>
-            <Text style={styles.transposerTitle}>
-              {editorSavedTab ? `Editing: ${editorSavedTab.title}` : 'New Tab Draft'}
-            </Text>
-            <Text style={styles.transposerMeta}>
-              Type or paste source tabs here. This is the only place raw tab text can be edited.
-            </Text>
-            <TextInput
-              ref={editorInputRef}
-              style={[styles.transposerInput, styles.transposerInputGrow]}
-              multiline
-              value={editorInput}
-              onChangeText={handleEditorInputChange}
-              onSelectionChange={(event) => {
-                const selection = event.nativeEvent.selection;
-                setEditorSelection(selection);
-              }}
-              selection={editorSelection}
-              keyboardType="default"
-              inputMode="text"
-              autoCorrect={false}
-              autoCapitalize="none"
-              spellCheck={false}
-              placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
-              placeholderTextColor="#64748b"
-              textAlignVertical="top"
-            />
-            <View style={styles.editorPrimaryRow}>
-              <Pressable
-                testID="editor-clean-button"
-                onPress={handleCleanEditorInput}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  Clean Input
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="editor-library-button"
-                onPress={() => {
-                  setSavedTabsStatus(null);
-                  setTabsEditorVisible(false);
-                  setTabsSubview('library');
-                }}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  Open Library
-                </Text>
-              </Pressable>
-            </View>
-            <View style={styles.transposerLibraryRow}>
-              <Pressable
-                testID="editor-new-button"
-                onPress={handleNewDraftPress}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  New
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="editor-save-button"
-                onPress={() => openSaveTabModal('overwrite')}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  {editorSavedTabId ? 'Re-save' : 'Save'}
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="editor-save-as-button"
-                onPress={() => openSaveTabModal('create_new')}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  Save As
-                </Text>
-              </Pressable>
-            </View>
-          </View>
         ) : screen === 'tabs' ? (
           <>
             {tabsSubview === 'library' ? (
-              <View style={styles.propertiesCard}>
+              <View style={[styles.propertiesCard, styles.libraryCard]}>
                 <Text style={styles.propertiesTitle}>Saved Tabs</Text>
                 <Text style={styles.helperText}>Manage reusable source tabs for the editor and transposer.</Text>
                 <Pressable
@@ -1261,9 +1269,17 @@ export default function App() {
                   </Text>
                 )}
                 {savedTabs.length === 0 ? (
-                  <Text style={styles.helperText}>No saved tabs yet. Use New Tab to create one in the editor.</Text>
+                  <View style={styles.libraryListArea}>
+                    <Text style={styles.helperText}>No saved tabs yet. Use New Tab to create one in the editor.</Text>
+                  </View>
                 ) : (
-                  <View style={styles.savedTabsList}>
+                  <ScrollView
+                    testID="saved-tabs-scroll"
+                    style={styles.libraryListArea}
+                    contentContainerStyle={styles.savedTabsList}
+                    keyboardShouldPersistTaps="handled"
+                    nestedScrollEnabled
+                  >
                     {savedTabs.map((tab) => (
                       <View key={tab.id} style={styles.savedTabRow}>
                         <View style={styles.savedTabRowHeader}>
@@ -1297,7 +1313,7 @@ export default function App() {
                         </View>
                       </View>
                     ))}
-                  </View>
+                  </ScrollView>
                 )}
               </View>
             ) : (
@@ -1345,26 +1361,27 @@ export default function App() {
                         !canListenOnTransposer && !isListening && styles.listenButtonDisabled,
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.listenButtonText,
-                          isListening && styles.listenButtonTextActive,
-                          !canListenOnTransposer && !isListening && styles.listenButtonTextDisabled,
-                        ]}
-                      >
-                        {isListening ? 'Stop' : 'Listen'}
-                      </Text>
+                      <View style={styles.listenButtonContent}>
+                        <Text
+                          style={[
+                            styles.listenButtonTitle,
+                            isListening && styles.listenButtonTextActive,
+                            !canListenOnTransposer && !isListening && styles.listenButtonTextDisabled,
+                          ]}
+                        >
+                          {listenFeatureLabel}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.listenButtonState,
+                            isListening && styles.listenButtonTextActive,
+                            !canListenOnTransposer && !isListening && styles.listenButtonTextDisabled,
+                          ]}
+                        >
+                          {listenToggleStateLabel}
+                        </Text>
+                      </View>
                     </Pressable>
-                    {savedTabsStatus && (
-                      <Text
-                        style={[
-                          styles.transposerSavedTabsStatus,
-                          savedTabsStatusIsError && styles.transposerSavedTabsStatusError,
-                        ]}
-                      >
-                        {savedTabsStatus}
-                      </Text>
-                    )}
                   </View>
                   {showDebug && renderToneFollowDebugPanel()}
                   <View style={styles.transposerLibraryRow}>
@@ -1372,6 +1389,7 @@ export default function App() {
                       testID="transposer-choose-tab-button"
                       onPress={() => {
                         setSavedTabsStatus(null);
+                        setTransposerSourceTabId(null);
                         setTabsSubview('library');
                       }}
                       style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
@@ -1632,9 +1650,14 @@ export default function App() {
                   }}
                   style={[styles.listenButton, isListening && styles.listenButtonActive]}
                 >
-                  <Text style={[styles.listenButtonText, isListening && styles.listenButtonTextActive]}>
-                    {isListening ? 'Stop' : 'Listen'}
-                  </Text>
+                  <View style={styles.listenButtonContent}>
+                    <Text style={[styles.listenButtonTitle, isListening && styles.listenButtonTextActive]}>
+                      {listenFeatureLabel}
+                    </Text>
+                    <Text style={[styles.listenButtonState, isListening && styles.listenButtonTextActive]}>
+                      {listenToggleStateLabel}
+                    </Text>
+                  </View>
                 </Pressable>
                 <Text style={styles.listenValue}>{statusText}</Text>
               </View>
@@ -1657,6 +1680,7 @@ export default function App() {
                   <View style={styles.tabGroupList}>
                     {caretPos !== null && (
                       <View
+                        testID="main-tab-caret"
                         style={[
                           styles.tabCaret,
                           mainInTune && styles.tabCaretInTune,
@@ -1669,6 +1693,7 @@ export default function App() {
                       return (
                         <Pressable
                           key={`${scale.rootPc}:${scale.scaleId}:${group.midi}`}
+                          testID={`main-tab-group:${index}`}
                           onLayout={(event) => {
                             const { x, y, width, height } = event.nativeEvent.layout;
                             setTabLayouts((prev) => {
@@ -1833,8 +1858,29 @@ export default function App() {
             </Pressable>
           </View>
         )}
-        <Modal transparent visible={saveTabModalVisible} animationType="fade" onRequestClose={closeSaveTabModal}>
-          <View style={styles.dialogOverlay}>
+      </>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {isTabsLibraryScreen ? (
+        <View style={styles.staticContainer}>{renderMainContent()}</View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          {renderMainContent()}
+        </ScrollView>
+      )}
+      <Modal
+        testID="editor-overlay-modal"
+        visible={screen === 'tabs' && tabsEditorVisible}
+        animationType="slide"
+        onRequestClose={handleEditorCloseRequest}
+      >
+        {renderEditorOverlay()}
+      </Modal>
+      <Modal transparent visible={saveTabModalVisible} animationType="fade" onRequestClose={closeSaveTabModal}>
+          <View testID="save-tab-modal" style={styles.dialogOverlay}>
             <Pressable style={StyleSheet.absoluteFill} onPress={closeSaveTabModal} />
             <View style={styles.dialogCard}>
               <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, editorSavedTab !== null)}</Text>
@@ -1872,85 +1918,86 @@ export default function App() {
               </View>
             </View>
           </View>
-        </Modal>
-        <Modal
-          transparent
-          visible={newDraftModalVisible}
-          animationType="fade"
-          onRequestClose={() => setNewDraftModalVisible(false)}
-        >
-          <View style={styles.dialogOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setNewDraftModalVisible(false)} />
-            <View style={styles.dialogCard}>
-              <Text style={styles.dialogTitle}>Unsaved changes</Text>
-              <Text style={styles.helperText}>Starting a new tab will clear the current editor text.</Text>
-              <View style={styles.dialogActionColumn}>
-                <Pressable onPress={() => setNewDraftModalVisible(false)} style={styles.dialogButton}>
-                  <Text style={styles.dialogButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  testID="discard-and-new-button"
-                  onPress={startNewDraft}
-                  style={styles.dialogButton}
-                >
-                  <Text style={styles.dialogButtonText}>Discard and New</Text>
-                </Pressable>
-                <Pressable
-                  testID="save-then-new-button"
-                  onPress={() => {
-                    openSaveTabModal('save_then_new');
-                    setNewDraftModalVisible(false);
-                  }}
-                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
-                >
-                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then New</Text>
-                </Pressable>
-              </View>
+      </Modal>
+      <Modal
+        testID="pending-open-modal"
+        transparent
+        visible={pendingOpenRecord !== null}
+        animationType="fade"
+        onRequestClose={() => setPendingOpenRecord(null)}
+      >
+        <View style={styles.dialogOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Unsaved changes</Text>
+            <Text style={styles.helperText}>
+              Opening "{pendingOpenRecord?.title ?? 'this tab'}" will replace the current editor text.
+            </Text>
+            <View style={styles.dialogActionColumn}>
+              <Pressable onPress={() => setPendingOpenRecord(null)} style={styles.dialogButton}>
+                <Text style={styles.dialogButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (pendingOpenRecord) {
+                    openSavedTabInEditor(pendingOpenRecord, 'library');
+                  }
+                }}
+                style={styles.dialogButton}
+              >
+                <Text style={styles.dialogButtonText}>Open Anyway</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (!pendingOpenRecord) return;
+                  openSaveTabModal('save_then_open', pendingOpenRecord.id);
+                  setPendingOpenRecord(null);
+                }}
+                style={[styles.dialogButton, styles.dialogPrimaryButton]}
+              >
+                <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Open</Text>
+              </Pressable>
             </View>
           </View>
-        </Modal>
-        <Modal
-          transparent
-          visible={pendingOpenRecord !== null}
-          animationType="fade"
-          onRequestClose={() => setPendingOpenRecord(null)}
-        >
-          <View style={styles.dialogOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
-            <View style={styles.dialogCard}>
-              <Text style={styles.dialogTitle}>Unsaved changes</Text>
-              <Text style={styles.helperText}>
-                Opening "{pendingOpenRecord?.title ?? 'this tab'}" will replace the current editor text.
-              </Text>
-              <View style={styles.dialogActionColumn}>
-                <Pressable onPress={() => setPendingOpenRecord(null)} style={styles.dialogButton}>
-                  <Text style={styles.dialogButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (pendingOpenRecord) {
-                      openSavedTabInEditor(pendingOpenRecord, 'library');
-                    }
-                  }}
-                  style={styles.dialogButton}
-                >
-                  <Text style={styles.dialogButtonText}>Open Anyway</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (!pendingOpenRecord) return;
-                    openSaveTabModal('save_then_open', pendingOpenRecord.id);
-                    setPendingOpenRecord(null);
-                  }}
-                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
-                >
-                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Open</Text>
-                </Pressable>
-              </View>
+        </View>
+      </Modal>
+      <Modal
+        testID="editor-close-confirm-modal"
+        transparent
+        visible={closeEditorModalVisible}
+        animationType="fade"
+        onRequestClose={() => setCloseEditorModalVisible(false)}
+      >
+        <View style={styles.dialogOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setCloseEditorModalVisible(false)} />
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Unsaved changes</Text>
+            <Text style={styles.helperText}>Closing the editor will discard the current unsaved changes.</Text>
+            <View style={styles.dialogActionColumn}>
+              <Pressable onPress={() => setCloseEditorModalVisible(false)} style={styles.dialogButton}>
+                <Text style={styles.dialogButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                testID="editor-close-discard-button"
+                onPress={finishClosingEditor}
+                style={styles.dialogButton}
+              >
+                <Text style={styles.dialogButtonText}>Discard</Text>
+              </Pressable>
+              <Pressable
+                testID="editor-close-save-button"
+                onPress={() => {
+                  openSaveTabModal('save_then_close');
+                  setCloseEditorModalVisible(false);
+                }}
+                style={[styles.dialogButton, styles.dialogPrimaryButton]}
+              >
+                <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save</Text>
+              </Pressable>
             </View>
           </View>
-        </Modal>
-      </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1971,6 +2018,12 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 12,
     flexGrow: 1,
+  },
+  staticContainer: {
+    flex: 1,
+    minHeight: 0,
+    padding: 20,
+    gap: 12,
   },
   title: {
     fontSize: 17,
@@ -2005,6 +2058,11 @@ const styles = StyleSheet.create({
     borderColor: '#182233',
     padding: 12,
     gap: 10,
+  },
+  libraryCard: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
   },
   propertiesTitle: {
     color: '#e2e8f0',
@@ -2346,8 +2404,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   listenButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: '#1f2937',
@@ -2362,12 +2420,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#111827',
     opacity: 0.55,
   },
-  listenButtonText: {
+  listenButtonContent: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  listenButtonTitle: {
     color: '#e2e8f0',
+    fontWeight: '700',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  listenButtonState: {
+    color: '#cbd5e1',
     fontWeight: '700',
     fontSize: 11,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   listenButtonTextActive: {
     color: '#e0f2fe',
@@ -2672,20 +2740,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  transposerSavedTabsStatus: {
-    color: '#93c5fd',
-    fontSize: 12,
-    lineHeight: 18,
-    flex: 1,
-    flexShrink: 1,
-  },
   transposerCurrentTab: {
     color: '#94a3b8',
     fontSize: 12,
     lineHeight: 18,
-  },
-  transposerSavedTabsStatusError: {
-    color: '#f87171',
   },
   transposerActionButton: {
     borderWidth: 1,
@@ -2835,6 +2893,12 @@ const styles = StyleSheet.create({
   },
   savedTabsList: {
     gap: 10,
+    paddingBottom: 4,
+  },
+  libraryListArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
   },
   libraryNewButton: {
     alignSelf: 'flex-start',

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestRenderer, { act } from 'react-test-renderer';
 import { resetReactNativeMocks, scrollToSpy } from './react-native.mock';
 import { parseSavedTabLibrary, SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
+import { HARMONICA_KEYS } from '../../src/data/keys';
+import { buildTabsForScale } from '../../src/logic/tabs';
 
 const { asyncStorageMock, asyncStorageValues } = vi.hoisted(() => {
   const values = new Map<string, string>();
@@ -66,12 +68,22 @@ function findAllText(root: any, text: string) {
   return root.findAll((node: any) => node.type === 'Text' && flattenTextChildren(node.children).trim() === text);
 }
 
+function flattenStyle(style: any): any[] {
+  if (!style) return [];
+  if (Array.isArray(style)) return style.flatMap((item) => flattenStyle(item));
+  return [style];
+}
+
 function findTextInput(root: any) {
   return root.find((node: any) => node.type === 'TextInput');
 }
 
 function findTransposerOutputScroll(root: any) {
   return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'transposer-output-scroll');
+}
+
+function findSavedTabsScroll(root: any) {
+  return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'saved-tabs-scroll');
 }
 
 function readTransposerOutputText(root: any) {
@@ -96,10 +108,6 @@ function measureTransposerToken(root: any, tokenIndex: number, y: number, height
   });
 
   return token;
-}
-
-function findVisibleModal(root: any) {
-  return root.findAll((node: any) => node.type === 'Modal')[0] ?? null;
 }
 
 function findByTestId(root: any, testID: string) {
@@ -169,7 +177,7 @@ async function openLibraryTab(root: any, id: string) {
 
 function chooseTargetPosition(root: any, label: string) {
   act(() => {
-    findDropdownByLabel(root, 'Target Position/Key').props.onChange(label.split(' - ')[1]);
+    findDropdownByLabel(root, 'Target Position/Key').props.onChange(label.split(' / ')[1]);
   });
 }
 
@@ -249,6 +257,28 @@ describe('App navigation', () => {
     expect(findAllText(root, 'New Tab').length).toBeGreaterThan(0);
   });
 
+  it('keeps the workspace nav visible while the library list scrolls internally', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs(
+      Array.from({ length: 12 }, (_, index) => ({
+        id: `tab-${index}`,
+        title: `Tab ${index + 1}`,
+        inputText: '4 -4 5 -5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      })),
+    );
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+
+    expect(findByTestId(root, 'workspace-scales-button')).toBeTruthy();
+    expect(findByTestId(root, 'workspace-tabs-button')).toBeTruthy();
+    expect(findSavedTabsScroll(root).props.nestedScrollEnabled).toBe(true);
+  });
+
   it('renders transposed output inside a bounded inner scroll area', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
     seedSavedTabs([
@@ -303,6 +333,71 @@ describe('App navigation', () => {
     expect(() => findByTestId(root, 'transposer-output-token:0')).not.toThrow();
   });
 
+  it('returns to the transposer when switching away from Tabs after opening a source tab', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    await openLibraryTab(root, 'source');
+
+    act(() => {
+      findByTestId(root, 'workspace-scales-button').props.onPress();
+    });
+
+    expect(findAllText(root, 'Saved Tabs').length).toBe(0);
+
+    goToTabs(root);
+
+    expect(findAllText(root, 'Current tab: Source').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Choose Tab').length).toBeGreaterThan(0);
+  });
+
+  it('choose tab clears the active source and keeps Tabs on the library when revisiting', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    await openLibraryTab(root, 'source');
+
+    act(() => {
+      findByTestId(root, 'transposer-choose-tab-button').props.onPress();
+    });
+
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Current tab: Source').length).toBe(0);
+
+    act(() => {
+      findByTestId(root, 'workspace-scales-button').props.onPress();
+    });
+
+    goToTabs(root);
+
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Current tab: Source').length).toBe(0);
+  });
+
   it('steps octaves relative to the current display and base resets back to first position', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
     seedSavedTabs([
@@ -323,14 +418,14 @@ describe('App navigation', () => {
     await openLibraryTab(root, 'source');
 
     expect(readTransposerOutputText(root)).toBe('7 -8');
-    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
+    expect(findAllText(root, '1st / C').length).toBeGreaterThan(0);
 
     act(() => {
       findByTestId(root, 'transposer-octave-down-button').props.onPress();
     });
 
     expect(readTransposerOutputText(root)).toBe('4 -4');
-    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
+    expect(findAllText(root, '1st / C').length).toBeGreaterThan(0);
 
     act(() => {
       findByTestId(root, 'transposer-octave-down-button').props.onPress();
@@ -344,7 +439,7 @@ describe('App navigation', () => {
     });
 
     expect(readTransposerOutputText(root)).toBe('7 -8');
-    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
+    expect(findAllText(root, '1st / C').length).toBeGreaterThan(0);
   });
 
   it('base resets a non-first-position target back to first position on the current harmonica', async () => {
@@ -366,17 +461,17 @@ describe('App navigation', () => {
     openLibraryFromTransposer(root);
     await openLibraryTab(root, 'source');
 
-    chooseTargetPosition(root, '2 - G');
+    chooseTargetPosition(root, '2nd / G');
 
     expect(readTransposerOutputText(root)).not.toBe('4 -4');
-    expect(findAllText(root, '2 - G').length).toBeGreaterThan(0);
+    expect(findAllText(root, '2nd / G').length).toBeGreaterThan(0);
 
     act(() => {
       findByTestId(root, 'transposer-octave-base-button').props.onPress();
     });
 
     expect(readTransposerOutputText(root)).toBe('4 -4');
-    expect(findAllText(root, '1 - C').length).toBeGreaterThan(0);
+    expect(findAllText(root, '1st / C').length).toBeGreaterThan(0);
   });
 
   it('disables unavailable octave buttons based on the next step from the current display', async () => {
@@ -553,7 +648,45 @@ describe('App navigation', () => {
       findByTestId(root, 'transposer-listen-button').props.onPress();
     });
 
-    expect(flattenTextChildren(findByTestId(root, 'transposer-listen-button').children).trim()).toBe('Stop');
+    expect(flattenTextChildren(findByTestId(root, 'transposer-listen-button').children).trim()).toBe(
+      '🎤 Listen & Highlight Notes[On]',
+    );
+  });
+
+  it('highlights the matching note on the main tab row while listening', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+    const groups = buildTabsForScale({ rootPc: 0, scaleId: 'major' }, HARMONICA_KEYS[0].pc, 'apostrophe');
+    const targetIndex = groups.findIndex((group) => group.midi === 69);
+
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+
+    await act(async () => {
+      findPressableByText(root, '🎤 Listen & Highlight Notes').props.onPress();
+      await Promise.resolve();
+    });
+    expect(flattenTextChildren(findPressableByText(root, '🎤 Listen & Highlight Notes').children).trim()).toBe(
+      '🎤 Listen & Highlight Notes[On]',
+    );
+
+    act(() => {
+      groups.forEach((_, index) => {
+        findByTestId(root, `main-tab-group:${index}`).props.onLayout({
+          nativeEvent: { layout: { x: index * 24, y: 0, width: 20, height: 20 } },
+        });
+      });
+    });
+
+    const matchedGroup = findByTestId(root, `main-tab-group:${targetIndex}`);
+    const groupStyles = flattenStyle(matchedGroup.props.style);
+    const caret = findByTestId(root, 'main-tab-caret');
+    const caretStyles = flattenStyle(caret.props.style);
+
+    expect(groupStyles.some((style: any) => style?.borderColor === '#16e05d')).toBe(false);
+    expect(caretStyles.some((style: any) => style?.borderColor === '#16e05d')).toBe(true);
+    expect(caretStyles.some((style: any) => style?.backgroundColor === 'rgba(22, 224, 93, 0.4)')).toBe(true);
   });
 
   it('library edit opens the editor with the saved text loaded', async () => {
@@ -575,8 +708,65 @@ describe('App navigation', () => {
     openLibraryFromTransposer(root);
     await editLibraryTab(root, 'edit-me');
 
+    expect(findByTestId(root, 'editor-close-button')).toBeTruthy();
     expect(findTextInput(root).props.value).toBe('4 -4 5');
     expect(findAllText(root, 'Editing: Edit Me').length).toBeGreaterThan(0);
+  });
+
+  it('closing the editor opened from the library returns to the library', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'edit-me',
+        title: 'Edit Me',
+        inputText: '4 -4 5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    await editLibraryTab(root, 'edit-me');
+
+    act(() => {
+      findByTestId(root, 'editor-close-button').props.onPress();
+    });
+
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+  });
+
+  it('closing the editor opened from the transposer returns to the transposer', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    await openLibraryTab(root, 'source');
+
+    act(() => {
+      findByTestId(root, 'transposer-edit-tab-button').props.onPress();
+    });
+
+    act(() => {
+      findByTestId(root, 'editor-close-button').props.onPress();
+    });
+
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Current tab: Source').length).toBeGreaterThan(0);
   });
 
   it('saves a new editor tab to the library', async () => {
@@ -597,6 +787,9 @@ describe('App navigation', () => {
       await Promise.resolve();
     });
 
+    expect(findAllText(root, 'Save Tab').length).toBeGreaterThan(0);
+    expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
+
     await act(async () => {
       findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
       await Promise.resolve();
@@ -611,6 +804,8 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs).toHaveLength(1);
     expect(storedLibrary.tabs[0]?.title).toBe('Warmup');
     expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
   });
 
   it('edits a saved tab and re-saves it from the editor', async () => {
@@ -649,6 +844,47 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs).toHaveLength(1);
     expect(storedLibrary.tabs[0]?.title).toBe('Warmup');
     expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4 5');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+  });
+
+  it('re-saving from the transposer editor returns to the transposer', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'warmup',
+        title: 'Warmup',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    await openLibraryTab(root, 'warmup');
+
+    act(() => {
+      findByTestId(root, 'transposer-edit-tab-button').props.onPress();
+    });
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4 5');
+    });
+
+    await act(async () => {
+      findByTestId(root, 'editor-save-button').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
+    });
+
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Current tab: Warmup').length).toBeGreaterThan(0);
   });
 
   it('lets a saved tab branch into a new record with Save As from the editor', async () => {
@@ -679,6 +915,9 @@ describe('App navigation', () => {
       await Promise.resolve();
     });
 
+    expect(findAllText(root, 'Save As New Tab').length).toBeGreaterThan(0);
+    expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
+
     await act(async () => {
       findByTestId(root, 'save-tab-title-input').props.onChangeText('Original copy');
       await Promise.resolve();
@@ -693,15 +932,30 @@ describe('App navigation', () => {
     expect(storedLibrary.tabs.map((tab) => tab.title).sort()).toEqual(['Original', 'Original copy']);
     expect(storedLibrary.tabs.find((tab) => tab.title === 'Original')?.inputText).toBe('4 -4');
     expect(storedLibrary.tabs.find((tab) => tab.title === 'Original copy')?.inputText).toBe('4 -4 5');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
   });
 
-  it('prompts before starting a new draft when the editor has unsaved changes and can discard them', async () => {
+  it('hides the workspace switcher while the editor overlay is open', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
     const root = renderer.root;
 
-    goToTransposer(root);
+    goToTabs(root);
+    openCreateTab(root);
+
+    expect(root.findAll((node: any) => node.props?.testID === 'workspace-scales-button')).toHaveLength(0);
+    expect(root.findAll((node: any) => node.props?.testID === 'workspace-tabs-button')).toHaveLength(0);
+  });
+
+  it('prompts before closing the editor with unsaved changes and can discard them', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
     openCreateTab(root);
 
     act(() => {
@@ -709,37 +963,69 @@ describe('App navigation', () => {
     });
 
     act(() => {
-      findByTestId(root, 'editor-new-button').props.onPress();
+      findByTestId(root, 'editor-close-button').props.onPress();
     });
 
-    expect(findAllText(root, 'Unsaved changes').length).toBeGreaterThan(0);
-    expect(findAllText(root, 'Discard and New').length).toBeGreaterThan(0);
-    expect(findAllText(root, 'Save Then New').length).toBeGreaterThan(0);
+    expect(findByTestId(root, 'editor-close-discard-button')).toBeTruthy();
+    expect(findAllText(root, 'Discard').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
 
     act(() => {
       findPressableByText(root, 'Cancel').props.onPress();
     });
 
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-discard-button')).toHaveLength(0);
     expect(findTextInput(root).props.value).toBe('4 -4');
 
     act(() => {
-      findByTestId(root, 'editor-new-button').props.onPress();
+      findByTestId(root, 'editor-close-button').props.onPress();
     });
 
     act(() => {
-      findByTestId(root, 'discard-and-new-button').props.onPress();
+      findByTestId(root, 'editor-close-discard-button').props.onPress();
     });
 
-    expect(findTextInput(root).props.value).toBe('');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
   });
 
-  it('can save the current editor work and then start a new blank draft', async () => {
+  it('lets the save dialog cancel and return focus to the editor', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
     const root = renderer.root;
 
-    goToTransposer(root);
+    goToTabs(root);
+    openCreateTab(root);
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+    });
+
+    await act(async () => {
+      findByTestId(root, 'editor-save-button').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(findAllText(root, 'Save Tab').length).toBeGreaterThan(0);
+    expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
+
+    act(() => {
+      findPressableByText(root, 'Cancel').props.onPress();
+    });
+
+    expect(root.findAll((node: any) => node.props?.testID === 'save-tab-title-input')).toHaveLength(0);
+    expect(findByTestId(root, 'editor-close-button')).toBeTruthy();
+    expect(findTextInput(root).props.value).toBe('4 -4');
+  });
+
+  it('can save and close the editor with unsaved changes', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
     openCreateTab(root);
 
     act(() => {
@@ -747,16 +1033,16 @@ describe('App navigation', () => {
     });
 
     act(() => {
-      findByTestId(root, 'editor-new-button').props.onPress();
+      findByTestId(root, 'editor-close-button').props.onPress();
     });
 
     await act(async () => {
-      findByTestId(root, 'save-then-new-button').props.onPress();
+      findByTestId(root, 'editor-close-save-button').props.onPress();
       await Promise.resolve();
     });
 
     await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('New draft source');
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Saved on close');
       await Promise.resolve();
     });
 
@@ -764,75 +1050,14 @@ describe('App navigation', () => {
       await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
-    expect(findTextInput(root).props.value).toBe('');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
 
     const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
     expect(storedLibrary.tabs).toHaveLength(1);
-    expect(storedLibrary.tabs[0]?.title).toBe('New draft source');
-    expect(storedLibrary.tabs[0]?.inputText).toBe('6 -6');
+    expect(storedLibrary.tabs[0]?.title).toBe('Saved on close');
   });
 
-  it('prompts before opening another saved tab over editor changes and can save then open', async () => {
-    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
-    seedSavedTabs([
-      {
-        id: 'first',
-        title: 'First',
-        inputText: '4 -4',
-        createdAt: '2026-03-17T00:00:00.000Z',
-        updatedAt: '2026-03-17T00:00:00.000Z',
-      },
-      {
-        id: 'second',
-        title: 'Second',
-        inputText: '5 -5',
-        createdAt: '2026-03-17T01:00:00.000Z',
-        updatedAt: '2026-03-17T01:00:00.000Z',
-      },
-    ]);
-
-    const renderer = await renderApp();
-    const root = renderer.root;
-
-    goToTransposer(root);
-    openCreateTab(root);
-
-    act(() => {
-      findTextInput(root).props.onChangeText('6 -6');
-    });
-
-    act(() => {
-      findByTestId(root, 'editor-library-button').props.onPress();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'saved-tab-edit:first').props.onPress();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(findVisibleModal(root)).not.toBeNull();
-    expect(findAllText(root, 'Unsaved changes').length).toBeGreaterThan(0);
-
-    await act(async () => {
-      findPressableByText(root, 'Save Then Open').props.onPress();
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Draft before load');
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
-    });
-
-    expect(findTextInput(root).props.value).toBe('4 -4');
-
-    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
-    expect(storedLibrary.tabs.map((tab) => tab.title).sort()).toEqual(['Draft before load', 'First', 'Second']);
-  });
 
   it('clears the transposer back to its empty output state when deleting the current source tab', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 5 });

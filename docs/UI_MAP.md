@@ -49,20 +49,23 @@ SafeAreaView (styles.safeArea)
       │  │     ├─ Section Title (styles.propertiesTitle)
       │  │     ├─ New Tab Button (styles.libraryNewButton)
       │  │     ├─ Status Text (styles.savedTabsStatus, conditional)
-      │  │     └─ Saved Tab Rows (styles.savedTabsList + styles.savedTabRow)
-      │  │        ├─ Row Header (styles.savedTabRowHeader)
-      │  │        ├─ Preview (styles.savedTabPreview)
-      │  │        ├─ Updated Meta (styles.savedTabMeta)
-      │  │        └─ Row Actions (styles.savedTabActions + styles.savedTabActionButton)
-      │  │           └─ Includes `Open`, `Edit`, and `Delete`
-      │  └─ Editor Child Screen (`screen === 'tabs'` + editor visible)
+      │  │     └─ Saved Tab Scroll Area (styles.libraryListArea + styles.savedTabsList)
+      │  │        └─ Saved Tab Rows (styles.savedTabRow)
+      │  │           ├─ Row Header (styles.savedTabRowHeader)
+      │  │           ├─ Preview (styles.savedTabPreview)
+      │  │           ├─ Updated Meta (styles.savedTabMeta)
+      │  │           └─ Row Actions (styles.savedTabActions + styles.savedTabActionButton)
+      │  │              └─ Includes `Open`, `Edit`, and `Delete`
+      │  └─ Editor Overlay (`screen === 'tabs'` + editor visible, modal)
+      │     ├─ Overlay Header (styles.headerRow + styles.title + styles.gearButton)
+      │     │  └─ Includes `Tab Editor` title and close `X`
       │     └─ Editor Card (styles.transposerCard)
-      │     ├─ Draft Title + Meta (styles.transposerTitle + styles.transposerMeta)
-      │     ├─ Input (styles.transposerInput)
-      │     ├─ Utility Row (styles.editorPrimaryRow + styles.transposerActionButton)
-      │     │  └─ Includes `Clean Input` and `Open Library`
-      │     └─ Save Row (styles.transposerLibraryRow + styles.transposerActionButton)
-      │        └─ Includes `New`, `Save` / `Re-save`, and `Save As`
+      │        ├─ Draft Title + Meta (styles.transposerTitle + styles.transposerMeta)
+      │        ├─ Input (styles.transposerInput)
+      │        ├─ Utility Row (styles.editorPrimaryRow + styles.transposerActionButton)
+      │        │  └─ Includes `Clean Input`
+      │        └─ Save Row (styles.transposerLibraryRow + styles.transposerActionButton)
+      │           └─ Includes `Save` / `Re-save` and `Save As`
       ├─ Properties Screen (`screen === 'properties'`)
       │  └─ Properties Card (styles.propertiesCard)
       │     ├─ Section Title (styles.propertiesTitle)
@@ -83,8 +86,8 @@ SafeAreaView (styles.safeArea)
    │  └─ `Tabs` button (styles.workspaceNavButton)
    └─ Global Modals
       ├─ Save Tab Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogInput)
-      ├─ New Draft Confirmation Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
-      └─ Unsaved Changes Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
+      ├─ Unsaved Open Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
+      └─ Editor Close Confirmation Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
 ```
 
 ## Naming Reference
@@ -105,5 +108,5 @@ SafeAreaView (styles.safeArea)
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
 - **Tab Transposer**: `transposerCard`, `transposerFollowControls`, `transposerSavedTabsStatus`, `transposerCurrentTab`, `transposerLibraryRow`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
 - **Tab Editor**: `transposerTitle`, `transposerMeta`, `transposerInput`, `editorPrimaryRow`
-- **Saved Tab Library**: `savedTabsStatus`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
+- **Saved Tab Library**: `savedTabsStatus`, `libraryListArea`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
 - **Dialogs**: `dialogOverlay`, `dialogCard`, `dialogTitle`, `dialogInput`, `dialogActionRow`, `dialogActionColumn`, `dialogButton`
