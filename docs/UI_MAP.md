@@ -12,6 +12,8 @@ SafeAreaView (styles.safeArea)
    │  └─ Screen Toggle Button (styles.gearButton + styles.gearButtonText)
    └─ Screen Body (conditional)
       ├─ Scales Workspace (`screen === 'scales'`)
+      │  ├─ Responsive Shell (`testID="scales-workspace-shell"`, wide screens may cap width)
+      │  │  └─ Scales Content (`styles.scalesWorkspace`)
       │  ├─ Fixed Top Row
       │  │  └─ Container (styles.topRow)
       │  │     ├─ Harmonica Key (styles.topRowKey + styles.dropdown*)
@@ -22,8 +24,9 @@ SafeAreaView (styles.safeArea)
       │  ├─ Listen Card (styles.listenCard)
       │  │  ├─ Listen Row (styles.listenRow)
       │  │  └─ Debug Panel (styles.debugPanel, conditional)
-      │  └─ Results List (styles.resultsList)
-      │     └─ Result Card (styles.resultRow)
+      │  └─ Results Scroll Area (`testID="scales-results-scroll"`, `styles.scalesResultsScroll`)
+      │     └─ Results List (styles.resultsList)
+      │        └─ Result Card (styles.resultRow)
       │        ├─ Main Tab Row (styles.tabGroupList)
       │        └─ Arpeggio Section (styles.arpeggioSection, conditional)
       ├─ Tabs Workspace (`screen === 'tabs'`)
@@ -57,20 +60,20 @@ SafeAreaView (styles.safeArea)
       │  │           └─ Row Actions (styles.savedTabActions + styles.savedTabActionButton)
       │  │              └─ Includes `Open`, `Edit`, and `Delete`
       │  └─ Editor Overlay (`screen === 'tabs'` + editor visible, modal)
-      │     ├─ Overlay Header (styles.headerRow + styles.title + styles.gearButton)
-      │     │  └─ Includes `Tab Editor` title and close `X`
+      │     ├─ Overlay Header (styles.headerRow + styles.title)
+      │     │  └─ Includes `Tab Editor` title
       │     └─ Editor Card (styles.transposerCard)
       │        ├─ Draft Title + Meta (styles.transposerTitle + styles.transposerMeta)
-      │        ├─ Input (styles.transposerInput)
-      │        ├─ Utility Row (styles.editorPrimaryRow + styles.transposerActionButton)
+      │        ├─ Primary Action Row (styles.editorPrimaryRow + styles.editorPrimaryActionButton)
+      │        │  └─ Includes `Cancel`, `Save` / `Re-save`, and `Save As`
+      │        ├─ Secondary Helper Row (styles.editorSecondaryRow + styles.editorSecondaryButton)
       │        │  └─ Includes `Clean Input`
-      │        └─ Save Row (styles.transposerLibraryRow + styles.transposerActionButton)
-      │           └─ Includes `Save` / `Re-save` and `Save As`
+      │        ├─ Input (styles.transposerInput)
       ├─ Properties Screen (`screen === 'properties'`)
       │  └─ Properties Card (styles.propertiesCard)
       │     ├─ Section Title (styles.propertiesTitle)
       │     ├─ Overbend Symbol Select (styles.propertiesField + styles.dropdown*)
-      │     ├─ Position/Key Set Select (styles.propertiesField + styles.dropdown*)
+      │     ├─ Positions Select (styles.propertiesField + styles.dropdown*)
       │     ├─ 2 Draw / 3 Blow Preference Select (styles.propertiesField + styles.dropdown*)
       │     ├─ Tone Tolerance Select (styles.propertiesField + styles.dropdown*)
       │     ├─ Minimum Confidence Select (styles.propertiesField + styles.dropdown*)
@@ -102,11 +105,11 @@ SafeAreaView (styles.safeArea)
 - **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
 - **Tab Symbols**: `symbolRow`, `symbolKey`, `symbolMeaning`
 - **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue`, `debugPanel`, `debugPanelLabel`
-- **Scales Workspace**: `scalesWorkspace`
+- **Scales Workspace**: `scalesWorkspace`, responsive shell via `testID="scales-workspace-shell"`, results scroller via `testID="scales-results-scroll"`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
 - **Tab Transposer**: `transposerCard`, `transposerFollowControls`, `transposerSavedTabsStatus`, `transposerCurrentTab`, `transposerLibraryRow`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
-- **Tab Editor**: `transposerTitle`, `transposerMeta`, `transposerInput`, `editorPrimaryRow`
+- **Tab Editor**: `editorDismissButton`, `transposerTitle`, `transposerMeta`, `editorPrimaryRow`, `editorPrimaryActionButton`, `editorSecondaryRow`, `editorSecondaryButton`, `transposerInput`
 - **Saved Tab Library**: `savedTabsStatus`, `libraryListArea`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
 - **Dialogs**: `dialogOverlay`, `dialogCard`, `dialogTitle`, `dialogInput`, `dialogActionRow`, `dialogActionColumn`, `dialogButton`

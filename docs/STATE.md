@@ -25,6 +25,8 @@
 - Saved tabs persist only `inputText` plus library metadata (`id`, `title`, `createdAt`, `updatedAt`).
 - The transposer works only from a selected saved-library tab; unsaved drafts never feed the transposer.
 - The app now has two top-level user-facing workspaces: `Scales` and `Tabs`.
+- The `Scales` workspace keeps its single-column phone flow on larger screens, but now uses compact/regular/wide sizing tiers so controls and tabs scale up on tablets instead of staying phone-sized.
+- The `Scales` workspace keeps its top controls and bottom workspace navigation fixed while the results area scrolls internally when scale/arpeggio content overflows.
 - The `Tabs` workspace owns `Transpose` and `Library` views; entering `Tabs` opens `Transpose` when a source tab is active and `Library` when there is no active source.
 - `Choose Tab` is an explicit reset action: it clears the current transposer source and returns `Tabs` to the library state until another source is opened.
 - The editor is a full-screen overlay within the `Tabs` workspace, not a separate peer workflow.
@@ -39,13 +41,16 @@
 ## UI Summary
 - Top-level workspace switcher exposes `Scales` and `Tabs`.
 - `Scales` contains the former visualizer flow: Harmonica key, Target Position/Key, Scale Name, Arpeggios, listen/debug, and generated tabs/arpeggios.
+- `Scales` now scales spacing, control sizes, card padding, and tab/arpeggio typography across compact, regular, and wide layouts while staying single-column.
+- On wider screens, the `Scales` content can use a centered max-width shell, but compact and regular widths stay aligned with the full workspace width.
+- On `Scales`, only the results list scrolls when content is long; the workspace navigation remains visible.
 - Entering `Tabs` shows `Library` until a source tab is opened; afterward, returning to `Tabs` shows `Transpose` for that active source.
 - `Tabs -> Transpose` contains source actions, octave-shift buttons, shared listen control, clickable transposed tab output, and parser/transpose warnings.
 - The transposer also shows a compact label for the currently displayed saved tab.
 - The transposer includes `Choose Tab` plus `Edit Tab` actions instead of direct text editing; `Choose Tab` clears the active source and returns to the library.
 - `Tabs -> Library` owns saved-tab browsing with `Open`, `Edit`, `Delete`, and `New Tab`.
 - The library keeps the bottom workspace navigation visible; when saved tabs overflow, the list scrolls inside the library card instead of pushing the workspace nav off-screen.
-- The editor is a full-screen overlay within `Tabs` and owns raw tab entry, `Clean Input`, `Save`, and `Save As`.
+- The editor is a full-screen overlay within `Tabs` and owns a labeled `Cancel` dismiss action, top-aligned `Save` / `Save As` controls, a secondary `Clean Input` helper, and raw tab entry.
 - The editor now relies entirely on the platform keyboard and normal paste behavior; the custom tab pad has been removed.
 - The transposer now keeps a numeric octave offset relative to the current target result instead of a fixed `down/base/up` candidate trio.
 - `Down` and `Up` step one octave from whatever tab is currently displayed, and can be pressed repeatedly until the next octave becomes unavailable.
@@ -82,6 +87,7 @@
   - Title defaults, malformed-data fallback, save/update behavior, and sort order for persisted saved tabs.
 - `harmonica-tabs/tests/ui/navigation.test.tsx`
   - Top-level `Scales` / `Tabs` navigation and Tabs editor/library flows work as expected.
+  - The `Scales` workspace scales its main tab sizing across compact, regular, and wide screen sizes, only caps width on wide layouts, and keeps its results list in an inner scroll area.
   - `Tabs` opens on the library until a transposer source is selected.
   - Returning to `Tabs` preserves the active transposer source unless `Choose Tab` was used to clear it.
   - The transposer shows its empty output state until a saved source tab is selected, then exposes clickable output tokens and the shared listen button.

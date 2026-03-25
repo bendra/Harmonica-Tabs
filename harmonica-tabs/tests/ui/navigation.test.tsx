@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestRenderer, { act } from 'react-test-renderer';
-import { resetReactNativeMocks, scrollToSpy } from './react-native.mock';
+import { resetReactNativeMocks, scrollToSpy, setReactNativeWindowDimensions } from './react-native.mock';
 import { parseSavedTabLibrary, SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
 import { HARMONICA_KEYS } from '../../src/data/keys';
 import { buildTabsForScale } from '../../src/logic/tabs';
@@ -74,6 +74,13 @@ function flattenStyle(style: any): any[] {
   return [style];
 }
 
+function readStyleNumber(style: any, key: string) {
+  return flattenStyle(style).reduce<number | undefined>(
+    (value, entry) => (typeof entry?.[key] === 'number' ? entry[key] : value),
+    undefined,
+  );
+}
+
 function findTextInput(root: any) {
   return root.find((node: any) => node.type === 'TextInput');
 }
@@ -84,6 +91,10 @@ function findTransposerOutputScroll(root: any) {
 
 function findSavedTabsScroll(root: any) {
   return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'saved-tabs-scroll');
+}
+
+function findScalesResultsScroll(root: any) {
+  return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'scales-results-scroll');
 }
 
 function readTransposerOutputText(root: any) {
@@ -112,6 +123,10 @@ function measureTransposerToken(root: any, tokenIndex: number, y: number, height
 
 function findByTestId(root: any, testID: string) {
   return root.find((node: any) => node.props?.testID === testID);
+}
+
+function findNodeOrder(root: any, predicate: (node: any) => boolean) {
+  return root.findAll(() => true).findIndex(predicate);
 }
 
 function stubWebInputEnvironment(params: { coarsePointerMatches: boolean; maxTouchPoints: number }) {
@@ -199,6 +214,11 @@ async function renderApp() {
   return renderer;
 }
 
+function renderAppAtSize(width: number, height: number) {
+  setReactNativeWindowDimensions({ width, height });
+  return renderApp();
+}
+
 describe('App navigation', () => {
   beforeEach(() => {
     resetReactNativeMocks();
@@ -255,6 +275,43 @@ describe('App navigation', () => {
 
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
     expect(findAllText(root, 'New Tab').length).toBeGreaterThan(0);
+  });
+
+  it('scales the Scales workspace up across compact, regular, and wide widths', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const compactRenderer = await renderAppAtSize(390, 844);
+    const compactRoot = compactRenderer.root;
+    const compactTabText = findByTestId(compactRoot, 'main-tab-group:1').findByType('Text');
+    const compactShell = findByTestId(compactRoot, 'scales-workspace-shell');
+
+    const regularRenderer = await renderAppAtSize(700, 1024);
+    const regularRoot = regularRenderer.root;
+    const regularTabText = findByTestId(regularRoot, 'main-tab-group:1').findByType('Text');
+    const regularShell = findByTestId(regularRoot, 'scales-workspace-shell');
+
+    const wideRenderer = await renderAppAtSize(900, 1200);
+    const wideRoot = wideRenderer.root;
+    const wideTabText = findByTestId(wideRoot, 'main-tab-group:1').findByType('Text');
+    const wideShell = findByTestId(wideRoot, 'scales-workspace-shell');
+
+    expect(readStyleNumber(compactTabText.props.style, 'fontSize')).toBe(12);
+    expect(readStyleNumber(regularTabText.props.style, 'fontSize')).toBe(16);
+    expect(readStyleNumber(wideTabText.props.style, 'fontSize')).toBe(18);
+    expect(readStyleNumber(compactShell.props.style, 'maxWidth')).toBeUndefined();
+    expect(readStyleNumber(regularShell.props.style, 'maxWidth')).toBeUndefined();
+    expect(readStyleNumber(wideShell.props.style, 'maxWidth')).toBe(1280);
+  });
+
+  it('keeps the workspace nav visible while the Scales results scroll internally', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderAppAtSize(900, 1200);
+    const root = renderer.root;
+
+    expect(findByTestId(root, 'workspace-scales-button')).toBeTruthy();
+    expect(findByTestId(root, 'workspace-tabs-button')).toBeTruthy();
+    expect(findScalesResultsScroll(root).props.nestedScrollEnabled).toBe(true);
   });
 
   it('keeps the workspace nav visible while the library list scrolls internally', async () => {
@@ -328,8 +385,8 @@ describe('App navigation', () => {
     await openLibraryTab(root, 'first');
 
     expect(findAllText(root, 'Amazing Grace')).toHaveLength(0);
-    expect(findAllText(root, 'Transposed Tab').length).toBeGreaterThan(0);
     expect(findAllText(root, 'Current tab: Amazing Grace').length).toBeGreaterThan(0);
+    expect(readTransposerOutputText(root)).toBe('4 -4');
     expect(() => findByTestId(root, 'transposer-output-token:0')).not.toThrow();
   });
 
@@ -709,8 +766,38 @@ describe('App navigation', () => {
     await editLibraryTab(root, 'edit-me');
 
     expect(findByTestId(root, 'editor-close-button')).toBeTruthy();
+    expect(findAllText(root, 'Cancel').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'X')).toHaveLength(0);
     expect(findTextInput(root).props.value).toBe('4 -4 5');
     expect(findAllText(root, 'Editing: Edit Me').length).toBeGreaterThan(0);
+  });
+
+  it('places cancel, save actions, and helper controls above the editor input', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    openCreateTab(root);
+
+    expect(findAllText(root, 'Cancel').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Save As').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Helpers').length).toBeGreaterThan(0);
+
+    const cancelOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-close-button');
+    const saveOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-save-button');
+    const cleanOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-clean-button');
+    const editorInputOrder = findNodeOrder(root, (node: any) => node.type === 'TextInput');
+
+    expect(cancelOrder).toBeGreaterThan(-1);
+    expect(saveOrder).toBeGreaterThan(-1);
+    expect(cleanOrder).toBeGreaterThan(-1);
+    expect(editorInputOrder).toBeGreaterThan(-1);
+    expect(cancelOrder).toBeLessThan(editorInputOrder);
+    expect(saveOrder).toBeLessThan(editorInputOrder);
+    expect(cleanOrder).toBeLessThan(editorInputOrder);
   });
 
   it('closing the editor opened from the library returns to the library', async () => {
@@ -971,7 +1058,7 @@ describe('App navigation', () => {
     expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
 
     act(() => {
-      findPressableByText(root, 'Cancel').props.onPress();
+      findPressableByText(findByTestId(root, 'editor-close-confirm-modal'), 'Cancel').props.onPress();
     });
 
     expect(root.findAll((node: any) => node.props?.testID === 'editor-close-discard-button')).toHaveLength(0);
@@ -1011,12 +1098,32 @@ describe('App navigation', () => {
     expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
 
     act(() => {
-      findPressableByText(root, 'Cancel').props.onPress();
+      findPressableByText(findByTestId(root, 'save-tab-modal'), 'Cancel').props.onPress();
     });
 
     expect(root.findAll((node: any) => node.props?.testID === 'save-tab-title-input')).toHaveLength(0);
     expect(findByTestId(root, 'editor-close-button')).toBeTruthy();
     expect(findTextInput(root).props.value).toBe('4 -4');
+  });
+
+  it('keeps Clean Input working after moving it above the editor field', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    openCreateTab(root);
+
+    act(() => {
+      findTextInput(root).props.onChangeText('Song:\t5    5    5   6  5  -4');
+    });
+
+    act(() => {
+      findByTestId(root, 'editor-clean-button').props.onPress();
+    });
+
+    expect(findTextInput(root).props.value).toBe('5 5 5 6 5 -4');
   });
 
   it('can save and close the editor with unsaved changes', async () => {

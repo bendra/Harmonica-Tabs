@@ -72,6 +72,108 @@ function formatOrdinal(value: number) {
   }
 }
 
+function getLayoutTier(shortEdge: number): LayoutTier {
+  if (shortEdge < 420) return 'compact';
+  if (shortEdge >= 768) return 'wide';
+  return 'regular';
+}
+
+function getScalesLayoutMetrics(layoutTier: LayoutTier) {
+  switch (layoutTier) {
+    case 'wide':
+      return {
+        contentMaxWidth: 1280,
+        containerPadding: 28,
+        workspaceGap: 16,
+        sectionGap: 16,
+        cardPadding: 16,
+        listenCardPadding: 16,
+        controlSize: 'wide' as ResponsiveControlSize,
+        listenButtonMinHeight: 64,
+        listenButtonPaddingVertical: 12,
+        listenButtonPaddingHorizontal: 18,
+        listenTitleFontSize: 14,
+        listenStateFontSize: 12,
+        listenValueFontSize: 16,
+        titleFontSize: 18,
+        checkboxFontSize: 14,
+        tabFontSize: 18,
+        tabLineHeight: 26,
+        tabRootFontSize: 21,
+        tabChipPaddingVertical: 5,
+        tabChipPaddingHorizontal: 10,
+        tabGap: 8,
+        arpeggioTitleFontSize: 15,
+        arpeggioNoteFontSize: 12,
+        arpeggioLabelFontSize: 14,
+        arpeggioTabFontSize: 14,
+        arpeggioTabPaddingHorizontal: 4,
+        arpeggioTabGap: 6,
+      };
+    case 'regular':
+      return {
+        contentMaxWidth: null,
+        containerPadding: 24,
+        workspaceGap: 12,
+        sectionGap: 14,
+        cardPadding: 12,
+        listenCardPadding: 12,
+        controlSize: 'regular' as ResponsiveControlSize,
+        listenButtonMinHeight: 56,
+        listenButtonPaddingVertical: 10,
+        listenButtonPaddingHorizontal: 16,
+        listenTitleFontSize: 13,
+        listenStateFontSize: 11,
+        listenValueFontSize: 15,
+        titleFontSize: 17,
+        checkboxFontSize: 13,
+        tabFontSize: 16,
+        tabLineHeight: 24,
+        tabRootFontSize: 18,
+        tabChipPaddingVertical: 4,
+        tabChipPaddingHorizontal: 8,
+        tabGap: 6,
+        arpeggioTitleFontSize: 14,
+        arpeggioNoteFontSize: 12,
+        arpeggioLabelFontSize: 13,
+        arpeggioTabFontSize: 12,
+        arpeggioTabPaddingHorizontal: 3,
+        arpeggioTabGap: 4,
+      };
+    case 'compact':
+    default:
+      return {
+        contentMaxWidth: null,
+        containerPadding: 20,
+        workspaceGap: 10,
+        sectionGap: 12,
+        cardPadding: 10,
+        listenCardPadding: 0,
+        controlSize: 'regular' as ResponsiveControlSize,
+        listenButtonMinHeight: 0,
+        listenButtonPaddingVertical: 8,
+        listenButtonPaddingHorizontal: 12,
+        listenTitleFontSize: 12,
+        listenStateFontSize: 11,
+        listenValueFontSize: 14,
+        titleFontSize: 16,
+        checkboxFontSize: 12,
+        tabFontSize: 14,
+        tabLineHeight: 20,
+        tabRootFontSize: 16,
+        tabChipPaddingVertical: 2,
+        tabChipPaddingHorizontal: 5,
+        tabGap: 4,
+        arpeggioTitleFontSize: 13,
+        arpeggioNoteFontSize: 11,
+        arpeggioLabelFontSize: 12,
+        arpeggioTabFontSize: 11,
+        arpeggioTabPaddingHorizontal: 2,
+        arpeggioTabGap: 2,
+      };
+  }
+}
+
 /**
  * Builds the 12 position-playing key options for the selected harmonica.
  */
@@ -90,6 +192,9 @@ type DropdownOption<T> = {
   label: string;
   value: T;
 };
+
+type LayoutTier = 'compact' | 'regular' | 'wide';
+type ResponsiveControlSize = 'compact' | 'regular' | 'wide';
 
 type SingleSelectOption<T extends string> = {
   label: string;
@@ -170,12 +275,16 @@ function Dropdown<T extends string | number>(props: {
   options: DropdownOption<T>[];
   onChange: (value: T) => void;
   compact?: boolean;
+  size?: ResponsiveControlSize;
 }) {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
   const [menuLayout, setMenuLayout] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const triggerRef = useRef<View>(null);
   const active = props.options.find((opt) => opt.value === props.value);
+  const controlSize = props.size ?? 'regular';
+  const compact = props.compact || controlSize === 'compact';
+  const wide = controlSize === 'wide';
 
   function openMenu() {
     triggerRef.current?.measureInWindow((x, y, width, height) => {
@@ -185,24 +294,33 @@ function Dropdown<T extends string | number>(props: {
   }
 
   return (
-    <View style={[styles.dropdown, props.compact && styles.dropdownCompact]}>
-      <Text style={[styles.dropdownLabel, props.compact && styles.dropdownLabelCompact]}>{props.label}</Text>
+    <View style={[styles.dropdown, compact && styles.dropdownCompact]}>
+      <Text style={[styles.dropdownLabel, compact && styles.dropdownLabelCompact, wide && styles.dropdownLabelWide]}>
+        {props.label}
+      </Text>
       <Pressable
         ref={triggerRef}
         onPress={() => (open ? setOpen(false) : openMenu())}
         style={[
           styles.dropdownTrigger,
-          props.compact && styles.dropdownTriggerCompact,
+          compact && styles.dropdownTriggerCompact,
+          wide && styles.dropdownTriggerWide,
           open && styles.dropdownTriggerOpen,
         ]}
       >
         <Text
           numberOfLines={1}
-          style={[styles.dropdownTriggerText, props.compact && styles.dropdownTriggerTextCompact]}
+          style={[
+            styles.dropdownTriggerText,
+            compact && styles.dropdownTriggerTextCompact,
+            wide && styles.dropdownTriggerTextWide,
+          ]}
         >
           {active?.label ?? 'Select'}
         </Text>
-        <Text style={[styles.dropdownCaret, props.compact && styles.dropdownCaretCompact]}>{open ? '▲' : '▼'}</Text>
+        <Text style={[styles.dropdownCaret, compact && styles.dropdownCaretCompact, wide && styles.dropdownCaretWide]}>
+          {open ? '▲' : '▼'}
+        </Text>
       </Pressable>
       <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
         <View style={styles.dropdownOverlay}>
@@ -228,7 +346,7 @@ function Dropdown<T extends string | number>(props: {
                   }}
                   style={styles.dropdownItem}
                 >
-                  <Text style={styles.dropdownItemText}>{option.label}</Text>
+                  <Text style={[styles.dropdownItemText, wide && styles.dropdownItemTextWide]}>{option.label}</Text>
                 </Pressable>
               ))}
             </ScrollView>
@@ -247,10 +365,14 @@ function SingleSelectGroup<T extends string>(props: {
   options: SingleSelectOption<T>[];
   value: T | null;
   onChange: (value: T | null) => void;
+  size?: ResponsiveControlSize;
 }) {
+  const controlSize = props.size ?? 'regular';
+  const wide = controlSize === 'wide';
+
   return (
     <View style={styles.toggleGroup}>
-      <Text style={styles.dropdownLabel}>{props.label}</Text>
+      <Text style={[styles.dropdownLabel, wide && styles.dropdownLabelWide]}>{props.label}</Text>
       <View style={styles.toggleRow}>
         {props.options.map((option) => {
           const selected = props.value === option.value;
@@ -258,9 +380,15 @@ function SingleSelectGroup<T extends string>(props: {
             <Pressable
               key={option.value}
               onPress={() => props.onChange(selected ? null : option.value)}
-              style={[styles.toggleItem, selected && styles.toggleItemSelected]}
+              style={[styles.toggleItem, wide && styles.toggleItemWide, selected && styles.toggleItemSelected]}
             >
-              <Text style={[styles.toggleItemText, selected && styles.toggleItemTextSelected]}>
+              <Text
+                style={[
+                  styles.toggleItemText,
+                  wide && styles.toggleItemTextWide,
+                  selected && styles.toggleItemTextSelected,
+                ]}
+              >
                 {selected ? '●' : '○'} {option.label}
               </Text>
             </Pressable>
@@ -276,7 +404,10 @@ function SingleSelectGroup<T extends string>(props: {
  */
 export default function App() {
   const { width, height } = useWindowDimensions();
-  const isSmallScreen = Math.min(width, height) < 420;
+  const shortEdge = Math.min(width, height);
+  const layoutTier = getLayoutTier(shortEdge);
+  const scalesLayout = getScalesLayoutMetrics(layoutTier);
+  const isSmallScreen = layoutTier === 'compact';
   const transposerOutputMaxHeight = Math.max(160, Math.round(height * (isSmallScreen ? 0.38 : 0.46)));
   const [screen, setScreen] = useState<AppScreen>('scales');
   const [tabsSubview, setTabsSubview] = useState<TabsSubview>('library');
@@ -334,10 +465,14 @@ export default function App() {
   const transposerOutputScrollYRef = useRef(0);
   const editorInputRef = useRef<TextInput>(null);
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
+  const isMountedRef = useRef(true);
+  const listenSessionRef = useRef(0);
 
   useEffect(() => {
     detectorRef.current = createWebAudioPitchDetector();
     return () => {
+      isMountedRef.current = false;
+      listenSessionRef.current += 1;
       detectorRef.current?.stop();
     };
   }, []);
@@ -920,6 +1055,101 @@ export default function App() {
   const canListenOnTransposer = transposerSourceTab !== null && transposerResult.playableTokens.length > 0;
   const listenFeatureLabel = '🎤 Listen & Highlight Notes';
   const listenToggleStateLabel = `[${isListening ? 'On' : 'Off'}]`;
+  const scalesContainerStyle = {
+    padding: scalesLayout.containerPadding,
+    gap: scalesLayout.workspaceGap,
+  };
+  const scalesWorkspaceShellStyle = [
+    styles.scalesWorkspaceShell,
+    scalesLayout.contentMaxWidth
+      ? {
+          maxWidth: scalesLayout.contentMaxWidth,
+          alignSelf: 'center' as const,
+        }
+      : null,
+  ];
+  const scalesWorkspaceStyle = {
+    gap: scalesLayout.workspaceGap,
+  };
+  const scalesTopRowStyle = {
+    gap: scalesLayout.sectionGap,
+  };
+  const scalesPageHeaderStyle = {
+    gap: scalesLayout.sectionGap,
+  };
+  const scalesListenCardStyle = {
+    padding: scalesLayout.listenCardPadding,
+    gap: Math.max(6, Math.round(scalesLayout.sectionGap / 2)),
+  };
+  const scalesListenRowStyle = {
+    gap: Math.max(8, Math.round(scalesLayout.sectionGap / 1.5)),
+  };
+  const scalesListenButtonStyle = {
+    minHeight: scalesLayout.listenButtonMinHeight || undefined,
+    paddingVertical: scalesLayout.listenButtonPaddingVertical,
+    paddingHorizontal: scalesLayout.listenButtonPaddingHorizontal,
+  };
+  const scalesListenButtonTitleStyle = {
+    fontSize: scalesLayout.listenTitleFontSize,
+  };
+  const scalesListenButtonStateStyle = {
+    fontSize: scalesLayout.listenStateFontSize,
+  };
+  const scalesListenValueStyle = {
+    fontSize: scalesLayout.listenValueFontSize,
+  };
+  const scalesResultRowStyle = {
+    padding: scalesLayout.cardPadding,
+  };
+  const scalesCheckboxStyle = {
+    fontSize: scalesLayout.checkboxFontSize,
+  };
+  const scalesResultTitleStyle = {
+    fontSize: scalesLayout.titleFontSize,
+  };
+  const scalesResultTabsStyle = {
+    fontSize: scalesLayout.tabFontSize,
+    lineHeight: scalesLayout.tabLineHeight,
+  };
+  const scalesResultTabsRootStyle = {
+    fontSize: scalesLayout.tabRootFontSize,
+  };
+  const scalesTabGroupListStyle = {
+    gap: scalesLayout.tabGap,
+  };
+  const scalesTabGroupStyle = {
+    paddingVertical: scalesLayout.tabChipPaddingVertical,
+    paddingHorizontal: scalesLayout.tabChipPaddingHorizontal,
+  };
+  const scalesArpeggioSectionStyle = {
+    gap: Math.max(6, Math.round(scalesLayout.sectionGap / 2)),
+  };
+  const scalesArpeggioBlockStyle = {
+    gap: Math.max(4, Math.round(scalesLayout.sectionGap / 3)),
+  };
+  const scalesArpeggioTitleStyle = {
+    fontSize: scalesLayout.arpeggioTitleFontSize,
+  };
+  const scalesArpeggioNoteStyle = {
+    fontSize: scalesLayout.arpeggioNoteFontSize,
+  };
+  const scalesArpeggioLabelStyle = {
+    fontSize: scalesLayout.arpeggioLabelFontSize,
+    lineHeight: Math.round(scalesLayout.arpeggioLabelFontSize * 1.45),
+  };
+  const scalesArpeggioTabsStyle = {
+    fontSize: scalesLayout.arpeggioTabFontSize,
+  };
+  const scalesArpeggioTabListStyle = {
+    gap: scalesLayout.arpeggioTabGap,
+  };
+  const scalesArpeggioTabChipStyle = {
+    paddingHorizontal: scalesLayout.arpeggioTabPaddingHorizontal,
+  };
+  const scalesArpeggioTabValueStyle = {
+    fontSize: scalesLayout.arpeggioTabFontSize,
+  };
+  const isScalesScreen = screen === 'scales' && !tabsEditorVisible;
 
   useEffect(() => {
     const nextState = transposerFollowEvaluation.state;
@@ -955,13 +1185,23 @@ export default function App() {
    * Starts microphone/sim listening and wires detector updates into state.
    */
   async function startListening() {
+    const listenSession = listenSessionRef.current + 1;
+    listenSessionRef.current = listenSession;
     setListenError(null);
     setDetectedFrequency(null);
     setDetectedConfidence(0);
+    setDetectedRms(0);
+    setLastDetectedAt(null);
+
+    function isCurrentListenSession() {
+      return isMountedRef.current && listenSessionRef.current === listenSession;
+    }
+
     const detector = detectorRef.current;
     if (detector?.isSupported()) {
       try {
         await detector.start((update) => {
+          if (!isCurrentListenSession()) return;
           setDetectedFrequency(update.frequency);
           setDetectedConfidence(update.confidence);
           setDetectedRms(update.rms);
@@ -969,15 +1209,20 @@ export default function App() {
             setLastDetectedAt(Date.now());
           }
         });
+        if (!isCurrentListenSession()) return;
         setListenSource('web');
       } catch (error) {
+        if (!isCurrentListenSession()) return;
         setListenError('Mic blocked or unavailable (using sim)');
         setListenSource('sim');
       }
     } else {
+      if (!isCurrentListenSession()) return;
       setListenError('Mic not supported in this browser (using sim)');
       setListenSource('sim');
     }
+
+    if (!isCurrentListenSession()) return;
     setIsListening(true);
   }
 
@@ -985,6 +1230,7 @@ export default function App() {
    * Stops listening and clears detector-related state.
    */
   function stopListening() {
+    listenSessionRef.current += 1;
     detectorRef.current?.stop();
     setIsListening(false);
     setListenSource(null);
@@ -1024,9 +1270,6 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
             <Text style={styles.title}>Tab Editor</Text>
-            <Pressable testID="editor-close-button" onPress={handleEditorCloseRequest} style={styles.gearButton}>
-              <Text style={styles.gearButtonText}>X</Text>
-            </Pressable>
           </View>
           <View style={[styles.transposerCard, styles.transposerCardGrow]}>
             <Text style={styles.transposerTitle}>
@@ -1035,6 +1278,70 @@ export default function App() {
             <Text style={styles.transposerMeta}>
               Type or paste source tabs here. This is the only place raw tab text can be edited.
             </Text>
+            <View style={styles.editorPrimaryRow}>
+              <Pressable
+                testID="editor-close-button"
+                onPress={handleEditorCloseRequest}
+                style={[
+                  styles.editorDismissButton,
+                  styles.editorPrimaryActionButton,
+                  isSmallScreen && styles.transposerActionButtonCompact,
+                ]}
+              >
+                <Text style={styles.editorDismissButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                testID="editor-save-button"
+                onPress={() => openSaveTabModal('overwrite')}
+                style={[
+                  styles.transposerActionButton,
+                  styles.editorPrimaryActionButton,
+                  isSmallScreen && styles.transposerActionButtonCompact,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  {editorSavedTabId ? 'Re-save' : 'Save'}
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="editor-save-as-button"
+                onPress={() => openSaveTabModal('create_new')}
+                style={[
+                  styles.transposerActionButton,
+                  styles.editorPrimaryActionButton,
+                  isSmallScreen && styles.transposerActionButtonCompact,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.transposerActionButtonText,
+                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                  ]}
+                >
+                  Save As
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.editorSecondaryRow}>
+              <Text style={styles.editorSecondaryLabel}>Helpers</Text>
+              <Pressable
+                testID="editor-clean-button"
+                onPress={handleCleanEditorInput}
+                style={[
+                  styles.editorSecondaryButton,
+                  isSmallScreen && styles.editorSecondaryButtonCompact,
+                ]}
+              >
+                <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
+                  Clean Input
+                </Text>
+              </Pressable>
+            </View>
             <TextInput
               ref={editorInputRef}
               style={[styles.transposerInput, styles.transposerInputGrow]}
@@ -1055,52 +1362,6 @@ export default function App() {
               placeholderTextColor="#64748b"
               textAlignVertical="top"
             />
-            <View style={styles.editorPrimaryRow}>
-              <Pressable
-                testID="editor-clean-button"
-                onPress={handleCleanEditorInput}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  Clean Input
-                </Text>
-              </Pressable>
-            </View>
-            <View style={styles.transposerLibraryRow}>
-              <Pressable
-                testID="editor-save-button"
-                onPress={() => openSaveTabModal('overwrite')}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  {editorSavedTabId ? 'Re-save' : 'Save'}
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="editor-save-as-button"
-                onPress={() => openSaveTabModal('create_new')}
-                style={[styles.transposerActionButton, isSmallScreen && styles.transposerActionButtonCompact]}
-              >
-                <Text
-                  style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
-                  ]}
-                >
-                  Save As
-                </Text>
-              </Pressable>
-            </View>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -1136,12 +1397,12 @@ export default function App() {
               <View style={styles.propertiesCompactDropdownField}>
                 <Dropdown
                   compact
-                  label="Key Set"
+                  label="Positions"
                   value={positionKeyFilter}
                   options={[
-                    { label: '1, 2, 3', value: '1-2-3' },
-                    { label: '1, 2, 3, 5', value: '1-2-3-5' },
-                    { label: 'all', value: 'all' },
+                    { label: '1st, 2nd, 3rd', value: '1-2-3' },
+                    { label: '1st, 2nd, 3rd, 5th', value: '1-2-3-5' },
+                    { label: 'All', value: 'all' },
                   ]}
                   onChange={(value) => setPositionKeyFilter(value as PositionKeyFilter)}
                 />
@@ -1510,7 +1771,6 @@ export default function App() {
                       </Pressable>
                     </View>
                   </View>
-                  <Text style={styles.transposerSectionLabel}>Transposed Tab</Text>
                   <ScrollView
                     ref={transposerOutputScrollRef}
                     testID="transposer-output-scroll"
@@ -1589,12 +1849,14 @@ export default function App() {
             )}
           </>
         ) : (
-          <View style={styles.scalesWorkspace}>
-            <View style={styles.topRow}>
+          <View testID="scales-workspace-shell" style={scalesWorkspaceShellStyle}>
+            <View testID="scales-workspace" style={[styles.scalesWorkspace, scalesWorkspaceStyle]}>
+            <View style={[styles.topRow, scalesTopRowStyle]}>
               <View style={styles.topRowKey}>
                 <Dropdown
                   label="Harmonica key"
                   value={harmonicaKey.label}
+                  size={scalesLayout.controlSize}
                   options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
                   onChange={(label) => {
                     const key = HARMONICA_KEYS.find((item) => item.label === label);
@@ -1606,6 +1868,7 @@ export default function App() {
                 <Dropdown
                   label="Target Position/Key"
                   value={scaleRoot}
+                  size={scalesLayout.controlSize}
                   options={scaleKeyDropdownOptions}
                   onChange={(nextRoot) => {
                     setScaleRoot(nextRoot);
@@ -1615,11 +1878,12 @@ export default function App() {
               </View>
             </View>
 
-            <View style={styles.pageOneHeader}>
+            <View style={[styles.pageOneHeader, scalesPageHeaderStyle]}>
               <View style={styles.scalePickerColumn}>
                 <Dropdown
                   label="Scale Name"
                   value={scaleId}
+                  size={scalesLayout.controlSize}
                   options={scaleNameDropdownOptions}
                   onChange={setScaleId}
                 />
@@ -1627,6 +1891,7 @@ export default function App() {
               <View style={styles.topRowToggle}>
                 <SingleSelectGroup
                   label="Arpeggios"
+                  size={scalesLayout.controlSize}
                   value={arpeggioSelection}
                   options={[
                     { label: 'Triads', value: 'triads' },
@@ -1638,8 +1903,8 @@ export default function App() {
               </View>
             </View>
 
-            <View style={styles.listenCard}>
-              <View style={styles.listenRow}>
+            <View style={[styles.listenCard, scalesListenCardStyle]}>
+              <View style={[styles.listenRow, scalesListenRowStyle]}>
                 <Pressable
                   onPress={() => {
                     if (isListening) {
@@ -1648,36 +1913,54 @@ export default function App() {
                       startListening();
                     }
                   }}
-                  style={[styles.listenButton, isListening && styles.listenButtonActive]}
+                  style={[styles.listenButton, scalesListenButtonStyle, isListening && styles.listenButtonActive]}
                 >
                   <View style={styles.listenButtonContent}>
-                    <Text style={[styles.listenButtonTitle, isListening && styles.listenButtonTextActive]}>
+                    <Text
+                      style={[
+                        styles.listenButtonTitle,
+                        scalesListenButtonTitleStyle,
+                        isListening && styles.listenButtonTextActive,
+                      ]}
+                    >
                       {listenFeatureLabel}
                     </Text>
-                    <Text style={[styles.listenButtonState, isListening && styles.listenButtonTextActive]}>
+                    <Text
+                      style={[
+                        styles.listenButtonState,
+                        scalesListenButtonStateStyle,
+                        isListening && styles.listenButtonTextActive,
+                      ]}
+                    >
                       {listenToggleStateLabel}
                     </Text>
                   </View>
                 </Pressable>
-                <Text style={styles.listenValue}>{statusText}</Text>
+                <Text style={[styles.listenValue, scalesListenValueStyle]}>{statusText}</Text>
               </View>
               {showDebug && renderToneFollowDebugPanel()}
             </View>
 
-            <View style={styles.resultsList}>
-              <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={styles.resultRow}>
+            <ScrollView
+              testID="scales-results-scroll"
+              style={styles.scalesResultsScroll}
+              contentContainerStyle={styles.resultsList}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={[styles.resultRow, scalesResultRowStyle]}>
                 <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.resultHeader}>
                   <View style={styles.checkboxRow}>
-                    <Text style={styles.checkbox}>{mainSelected ? '☑' : '☐'}</Text>
-                    <Text style={styles.resultTitle}>
+                    <Text style={[styles.checkbox, scalesCheckboxStyle]}>{mainSelected ? '☑' : '☐'}</Text>
+                    <Text style={[styles.resultTitle, scalesResultTitleStyle]}>
                       {formatScaleLabel(scale.rootPc, scale.scaleId, harmonicaKey.preferFlats)}
                     </Text>
                   </View>
                 </Pressable>
                 {!mainSelected ? null : groups.length === 0 ? (
-                  <Text style={styles.resultTabs}>No tabs available.</Text>
+                  <Text style={[styles.resultTabs, scalesResultTabsStyle]}>No tabs available.</Text>
                 ) : (
-                  <View style={styles.tabGroupList}>
+                  <View style={[styles.tabGroupList, scalesTabGroupListStyle]}>
                     {caretPos !== null && (
                       <View
                         testID="main-tab-caret"
@@ -1705,13 +1988,15 @@ export default function App() {
                           onPress={() => {
                             setMainSelected((prev) => !prev);
                           }}
-                          style={[styles.tabGroup, isSmallScreen && styles.tabGroupCompact]}
+                          style={[styles.tabGroup, scalesTabGroupStyle, isSmallScreen && styles.tabGroupCompact]}
                         >
                           <Text
                             style={[
                               styles.resultTabs,
+                              scalesResultTabsStyle,
                               isSmallScreen && styles.resultTabsSmall,
                               option.isRoot && styles.resultTabsRoot,
+                              option.isRoot && scalesResultTabsRootStyle,
                             ]}
                           >
                             {option.tab}
@@ -1722,13 +2007,13 @@ export default function App() {
                   </View>
                 )}
                 {arpeggioSections.length > 0 && (
-                  <View style={styles.arpeggioSection}>
+                  <View style={[styles.arpeggioSection, scalesArpeggioSectionStyle]}>
                     {arpeggioSections.map((section) => (
-                      <View key={`arp:${section.id}`} style={styles.arpeggioBlock}>
-                        <Text style={styles.arpeggioTitle}>{section.title}</Text>
-                        {section.note && <Text style={styles.arpeggioNote}>{section.note}</Text>}
+                      <View key={`arp:${section.id}`} style={[styles.arpeggioBlock, scalesArpeggioBlockStyle]}>
+                        <Text style={[styles.arpeggioTitle, scalesArpeggioTitleStyle]}>{section.title}</Text>
+                        {section.note && <Text style={[styles.arpeggioNote, scalesArpeggioNoteStyle]}>{section.note}</Text>}
                         {section.items.length === 0 ? (
-                          <Text style={styles.arpeggioEmpty}>{section.emptyNote ?? 'None'}</Text>
+                          <Text style={[styles.arpeggioEmpty, scalesArpeggioTabsStyle]}>{section.emptyNote ?? 'None'}</Text>
                         ) : (
                           section.items.map((item) => {
                             const tabGroups = buildTabsForPcSet(item.pcs, item.rootPc, harmonicaKey.pc, notation);
@@ -1775,16 +2060,18 @@ export default function App() {
                                 style={styles.arpeggioRow}
                               >
                                 <View style={styles.checkboxRow}>
-                                  <Text style={styles.checkbox}>{arpeggioItemSelected[item.id] ? '☑' : '☐'}</Text>
-                                  <Text style={styles.arpeggioLabel}>
+                                  <Text style={[styles.checkbox, scalesCheckboxStyle]}>
+                                    {arpeggioItemSelected[item.id] ? '☑' : '☐'}
+                                  </Text>
+                                  <Text style={[styles.arpeggioLabel, scalesArpeggioLabelStyle]}>
                                     {item.label} · {formatNotes(item.orderedPcs, item.rootPc)}
                                   </Text>
                                 </View>
                                 {rowSelected &&
                                   (tabTokens.length === 0 ? (
-                                    <Text style={styles.arpeggioTabs}>No tabs available.</Text>
+                                    <Text style={[styles.arpeggioTabs, scalesArpeggioTabsStyle]}>No tabs available.</Text>
                                   ) : (
-                                    <View style={styles.arpeggioTabList}>
+                                    <View style={[styles.arpeggioTabList, scalesArpeggioTabListStyle]}>
                                       {rowCaretPos !== null && (
                                         <View
                                           style={[
@@ -1812,10 +2099,18 @@ export default function App() {
                                               return next;
                                             });
                                           }}
-                                          style={[styles.arpeggioTabChip, token.isRoot && styles.arpeggioTabChipRoot]}
+                                          style={[
+                                            styles.arpeggioTabChip,
+                                            scalesArpeggioTabChipStyle,
+                                            token.isRoot && styles.arpeggioTabChipRoot,
+                                          ]}
                                         >
                                           <Text
-                                            style={[styles.arpeggioTabValue, token.isRoot && styles.arpeggioTabValueRoot]}
+                                            style={[
+                                              styles.arpeggioTabValue,
+                                              scalesArpeggioTabValueStyle,
+                                              token.isRoot && styles.arpeggioTabValueRoot,
+                                            ]}
                                           >
                                             {token.tab}
                                           </Text>
@@ -1832,6 +2127,7 @@ export default function App() {
                   </View>
                 )}
               </View>
+            </ScrollView>
             </View>
           </View>
         )}
@@ -1864,10 +2160,13 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {isTabsLibraryScreen ? (
+      {isTabsLibraryScreen || isScalesScreen ? (
         <View style={styles.staticContainer}>{renderMainContent()}</View>
       ) : (
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[styles.container, screen === 'scales' && scalesContainerStyle]}
+          keyboardShouldPersistTaps="handled"
+        >
           {renderMainContent()}
         </ScrollView>
       )}
@@ -2051,6 +2350,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  editorDismissButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+  },
+  editorDismissButtonText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
   propertiesCard: {
     borderRadius: 12,
     backgroundColor: '#0b1220',
@@ -2124,6 +2438,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.6,
   },
+  dropdownLabelWide: {
+    fontSize: 14,
+  },
   propertiesNumberInput: {
     borderWidth: 1,
     borderColor: '#1f2937',
@@ -2151,6 +2468,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 10,
   },
+  dropdownTriggerWide: {
+    minHeight: 52,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+  },
   dropdownTriggerOpen: {
     borderColor: '#38bdf8',
   },
@@ -2162,6 +2485,9 @@ const styles = StyleSheet.create({
   dropdownTriggerTextCompact: {
     fontSize: 12,
   },
+  dropdownTriggerTextWide: {
+    fontSize: 16,
+  },
   dropdownCaret: {
     color: '#94a3b8',
     fontWeight: '700',
@@ -2170,6 +2496,10 @@ const styles = StyleSheet.create({
   dropdownCaretCompact: {
     marginLeft: 4,
     fontSize: 11,
+  },
+  dropdownCaretWide: {
+    marginLeft: 8,
+    fontSize: 13,
   },
   dropdownMenu: {
     borderWidth: 1,
@@ -2203,6 +2533,9 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     fontWeight: '600',
   },
+  dropdownItemTextWide: {
+    fontSize: 16,
+  },
   toggleGroup: {
     gap: 6,
   },
@@ -2219,6 +2552,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     backgroundColor: '#0b1220',
   },
+  toggleItemWide: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
   toggleItemSelected: {
     borderColor: '#38bdf8',
     backgroundColor: '#0f172a',
@@ -2227,6 +2564,9 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontWeight: '600',
     fontSize: 12,
+  },
+  toggleItemTextWide: {
+    fontSize: 14,
   },
   toggleItemTextSelected: {
     color: '#f8fafc',
@@ -2276,7 +2616,14 @@ const styles = StyleSheet.create({
   workspaceNavTextActive: {
     color: '#e0f2fe',
   },
+  scalesWorkspaceShell: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+  },
   scalesWorkspace: {
+    flex: 1,
+    minHeight: 0,
     gap: 10,
   },
   pagerShell: {
@@ -2340,6 +2687,10 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     gap: 10,
+  },
+  scalesResultsScroll: {
+    flex: 1,
+    minHeight: 0,
   },
   resultRow: {
     padding: 10,
@@ -2714,6 +3065,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  editorPrimaryActionButton: {
+    flex: 1,
+    minWidth: 120,
+  },
+  editorSecondaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  editorSecondaryLabel: {
+    color: '#94a3b8',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
+  },
+  editorSecondaryButton: {
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+  },
+  editorSecondaryButtonCompact: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  editorSecondaryButtonText: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  editorSecondaryButtonTextCompact: {
+    fontSize: 10,
   },
   savedTabsStatus: {
     color: '#93c5fd',

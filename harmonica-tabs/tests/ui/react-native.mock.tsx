@@ -2,6 +2,7 @@ import React from 'react';
 import { vi } from 'vitest';
 
 export const scrollToSpy = vi.fn();
+let windowDimensions = { width: 400, height: 800, scale: 1, fontScale: 1 };
 
 function createHostComponent(name: string, imperativeHandle?: () => Record<string, unknown>) {
   return React.forwardRef((props: any, ref: React.Ref<unknown>) => {
@@ -12,6 +13,11 @@ function createHostComponent(name: string, imperativeHandle?: () => Record<strin
 
 export function resetReactNativeMocks() {
   scrollToSpy.mockClear();
+  windowDimensions = { width: 400, height: 800, scale: 1, fontScale: 1 };
+}
+
+export function setReactNativeWindowDimensions(nextDimensions: Partial<typeof windowDimensions>) {
+  windowDimensions = { ...windowDimensions, ...nextDimensions };
 }
 
 export const SafeAreaView = createHostComponent('SafeAreaView');
@@ -31,4 +37,4 @@ export const StyleSheet = {
   create: <T,>(styles: T) => styles,
   absoluteFill: {},
 };
-export const useWindowDimensions = () => ({ width: 400, height: 800, scale: 1, fontScale: 1 });
+export const useWindowDimensions = () => windowDimensions;

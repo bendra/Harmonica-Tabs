@@ -19,8 +19,84 @@ export function createWebAudioPitchDetector() {
   let gainNode: any = null;
   let stream: any = null;
   let running = false;
+  let startPromise: Promise<void> | null = null;
+  let generation = 0;
   let emaFrequency: number | null = null;
   let onUpdateRef: PitchUpdateHandler | null = null;
+
+  async function cleanupResources(
+    resources: {
+      audioContext: any;
+      source: any;
+      processor: any;
+      gainNode: any;
+      stream: any;
+    },
+    options: {
+      clearCallback: boolean;
+      resetGlobal: boolean;
+    },
+  ) {
+    const currentProcessor = resources.processor;
+    const currentSource = resources.source;
+    const currentGainNode = resources.gainNode;
+    const currentStream = resources.stream;
+    const currentAudioContext = resources.audioContext;
+    const tracks = currentStream?.getTracks?.() ?? [];
+
+    tracks.forEach((track: any) => {
+      track.onended = null;
+    });
+
+    if (currentProcessor) {
+      currentProcessor.onaudioprocess = null;
+    }
+
+    try {
+      currentProcessor?.disconnect?.();
+    } catch {}
+
+    try {
+      currentSource?.disconnect?.();
+    } catch {}
+
+    try {
+      currentGainNode?.disconnect?.();
+    } catch {}
+
+    tracks.forEach((track: any) => {
+      try {
+        track.stop?.();
+      } catch {}
+    });
+
+    try {
+      await currentAudioContext?.close?.();
+    } catch {}
+
+    if (options.resetGlobal) {
+      if (processor === currentProcessor) {
+        processor = null;
+      }
+      if (source === currentSource) {
+        source = null;
+      }
+      if (gainNode === currentGainNode) {
+        gainNode = null;
+      }
+      if (stream === currentStream) {
+        stream = null;
+      }
+      if (audioContext === currentAudioContext) {
+        audioContext = null;
+      }
+      emaFrequency = null;
+    }
+
+    if (options.clearCallback) {
+      onUpdateRef = null;
+    }
+  }
 
   /**
    * Checks browser support for required media and audio APIs.
@@ -35,73 +111,122 @@ export function createWebAudioPitchDetector() {
    * Starts microphone capture and emits pitch updates.
    */
   async function start(onUpdate: PitchUpdateHandler) {
-    if (running) return;
     onUpdateRef = onUpdate;
+    if (running) return;
+    if (startPromise) {
+      await startPromise;
+      return;
+    }
+
     const mediaDevices = (globalThis as any).navigator?.mediaDevices;
     const AudioContextCtor = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
     if (!mediaDevices?.getUserMedia || !AudioContextCtor) {
       throw new Error('Web audio not supported');
     }
 
-    stream = await mediaDevices.getUserMedia({ audio: true });
-    audioContext = new AudioContextCtor();
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
-    }
-    source = audioContext.createMediaStreamSource(stream);
-    processor = audioContext.createScriptProcessor(2048, 1, 1);
-    gainNode = audioContext.createGain();
-    gainNode.gain.value = 0.001;
-
-    stream.getTracks?.().forEach((track: any) => {
-      track.onended = () => {
-        onUpdateRef?.({ frequency: null, confidence: 0, rms: 0 });
-      };
-    });
-
-    processor.onaudioprocess = (event: any) => {
-      const input = event.inputBuffer?.getChannelData(0);
-      if (!input) return;
-      const result = detectPitch(input, audioContext.sampleRate);
-      if (!result) {
-        const rms = calculateRms(input);
-        onUpdate({ frequency: null, confidence: 0, rms });
-        return;
-      }
-
-      const smoothed =
-        emaFrequency === null ? result.frequency : emaFrequency + 0.2 * (result.frequency - emaFrequency);
-      emaFrequency = smoothed;
-      onUpdate({ frequency: smoothed, confidence: result.confidence, rms: result.rms });
+    const startGeneration = ++generation;
+    const resources = {
+      audioContext: null as any,
+      source: null as any,
+      processor: null as any,
+      gainNode: null as any,
+      stream: null as any,
     };
 
-    source.connect(processor);
-    processor.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    running = true;
+    const pendingStart = (async () => {
+      try {
+        resources.stream = await mediaDevices.getUserMedia({ audio: true });
+        if (generation !== startGeneration) {
+          await cleanupResources(resources, { clearCallback: false, resetGlobal: false });
+          return;
+        }
+
+        resources.audioContext = new AudioContextCtor();
+        if (resources.audioContext.state === 'suspended') {
+          await resources.audioContext.resume();
+        }
+        if (generation !== startGeneration) {
+          await cleanupResources(resources, { clearCallback: false, resetGlobal: false });
+          return;
+        }
+
+        resources.source = resources.audioContext.createMediaStreamSource(resources.stream);
+        resources.processor = resources.audioContext.createScriptProcessor(2048, 1, 1);
+        resources.gainNode = resources.audioContext.createGain();
+        resources.gainNode.gain.value = 0.001;
+
+        resources.stream.getTracks?.().forEach((track: any) => {
+          track.onended = () => {
+            if (generation !== startGeneration || !running) return;
+            onUpdateRef?.({ frequency: null, confidence: 0, rms: 0 });
+          };
+        });
+
+        resources.processor.onaudioprocess = (event: any) => {
+          if (generation !== startGeneration || !running || !resources.audioContext) return;
+          const input = event.inputBuffer?.getChannelData(0);
+          if (!input) return;
+          const result = detectPitch(input, resources.audioContext.sampleRate);
+          if (!result) {
+            const rms = calculateRms(input);
+            onUpdateRef?.({ frequency: null, confidence: 0, rms });
+            return;
+          }
+
+          const smoothed =
+            emaFrequency === null ? result.frequency : emaFrequency + 0.2 * (result.frequency - emaFrequency);
+          emaFrequency = smoothed;
+          onUpdateRef?.({ frequency: smoothed, confidence: result.confidence, rms: result.rms });
+        };
+
+        resources.source.connect(resources.processor);
+        resources.processor.connect(resources.gainNode);
+        resources.gainNode.connect(resources.audioContext.destination);
+
+        if (generation !== startGeneration) {
+          await cleanupResources(resources, { clearCallback: false, resetGlobal: false });
+          return;
+        }
+
+        audioContext = resources.audioContext;
+        source = resources.source;
+        processor = resources.processor;
+        gainNode = resources.gainNode;
+        stream = resources.stream;
+        emaFrequency = null;
+        running = true;
+      } catch (error) {
+        await cleanupResources(resources, { clearCallback: false, resetGlobal: false });
+        throw error;
+      }
+    })();
+
+    startPromise = pendingStart;
+    try {
+      await pendingStart;
+    } finally {
+      if (startPromise === pendingStart) {
+        startPromise = null;
+      }
+    }
   }
 
   /**
    * Stops processing and releases audio resources.
    */
   function stop() {
-    if (!running) return;
-    try {
-      processor?.disconnect();
-      source?.disconnect();
-      gainNode?.disconnect();
-      processor = null;
-      source = null;
-      gainNode = null;
-      emaFrequency = null;
-      stream?.getTracks?.().forEach((track: any) => track.stop());
-      stream = null;
-      audioContext?.close?.();
-      audioContext = null;
-      onUpdateRef = null;
-    } finally {
-      running = false;
-    }
+    generation += 1;
+    running = false;
+    startPromise = null;
+    const resources = { audioContext, source, processor, gainNode, stream };
+    audioContext = null;
+    source = null;
+    processor = null;
+    gainNode = null;
+    stream = null;
+    emaFrequency = null;
+    onUpdateRef = null;
+    void cleanupResources(resources, { clearCallback: false, resetGlobal: false });
   }
 
   return { isSupported, start, stop };
