@@ -2,8 +2,14 @@ import { SCALE_DEFINITIONS } from '../data/scales';
 import { RICHTER_C_LAYOUT, transposeLayout } from '../data/richter';
 import { normalizePc } from '../data/notes';
 
+/**
+ * Output style for overbend notation in tabs.
+ */
 export type OverbendNotation = 'degree' | 'apostrophe';
 
+/**
+ * Selected scale root and scale definition identifier.
+ */
 export type ScaleSelection = {
   rootPc: number;
   scaleId: string;
@@ -19,10 +25,16 @@ type TabCandidate = {
 
 const EXCLUDED_OVERBEND_HOLES = new Set<number>([2, 3, 8]);
 
+/**
+ * Returns the selected scale definition, if available.
+ */
 function getScaleDef(scaleId: string) {
   return SCALE_DEFINITIONS.find((scale) => scale.id === scaleId);
 }
 
+/**
+ * Builds the pitch-class set for a scale rooted at `rootPc`.
+ */
 function getScalePcs(rootPc: number, scaleId: string): Set<number> {
   const def = getScaleDef(scaleId);
   if (!def) {
@@ -31,6 +43,9 @@ function getScalePcs(rootPc: number, scaleId: string): Set<number> {
   return new Set(def.intervals.map((interval) => normalizePc(rootPc + interval)));
 }
 
+/**
+ * Converts an internal note candidate into printable tab notation.
+ */
 function formatTab(candidate: TabCandidate, notation: OverbendNotation): string {
   const prefix = candidate.technique === 'draw' || candidate.technique === 'draw-bend' || candidate.technique === 'overdraw' ? '-' : '';
   if (candidate.technique === 'overblow' || candidate.technique === 'overdraw') {
@@ -45,18 +60,27 @@ function formatTab(candidate: TabCandidate, notation: OverbendNotation): string 
   return `${prefix}${candidate.hole}`;
 }
 
+/**
+ * Allows only practical overblow holes for this app's tab output.
+ */
 function shouldIncludeOverblow(hole: number): boolean {
   if (hole < 1 || hole > 6) return false;
   if (EXCLUDED_OVERBEND_HOLES.has(hole)) return false;
   return true;
 }
 
+/**
+ * Allows only practical overdraw holes for this app's tab output.
+ */
 function shouldIncludeOverdraw(hole: number): boolean {
   if (hole < 7 || hole > 10) return false;
   if (EXCLUDED_OVERBEND_HOLES.has(hole)) return false;
   return true;
 }
 
+/**
+ * Single tab token option that can produce a note.
+ */
 export type TabToken = {
   tab: string;
   pc: number;
@@ -66,6 +90,9 @@ export type TabToken = {
   technique: 'blow' | 'draw' | 'blow-bend' | 'draw-bend' | 'overblow' | 'overdraw';
 };
 
+/**
+ * One pitch in the result list with all playable tab options.
+ */
 export type TabGroup = {
   pc: number;
   midi: number;
@@ -73,6 +100,9 @@ export type TabGroup = {
   options: TabToken[];
 };
 
+/**
+ * Builds playable tab groups for a pitch-class set on a given harmonica key.
+ */
 export function buildTabsForPcSet(
   pcs: Set<number>,
   rootPc: number,
@@ -174,6 +204,9 @@ export function buildTabsForPcSet(
     });
 }
 
+/**
+ * Builds tab groups for a named scale rooted at `selection.rootPc`.
+ */
 export function buildTabsForScale(
   selection: ScaleSelection,
   harmonicaPc: number,
@@ -185,6 +218,9 @@ export function buildTabsForScale(
   return buildTabsForPcSet(scalePcs, selection.rootPc, harmonicaPc, notation);
 }
 
+/**
+ * Sort rank so easier/common techniques appear first in each group.
+ */
 function getTechniqueRank(technique: TabToken['technique']): number {
   switch (technique) {
     case 'draw':

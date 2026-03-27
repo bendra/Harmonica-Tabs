@@ -1,27 +1,99 @@
 # Project State
 
 ## Structure
-- `harmonica-tabs/App.tsx`: Main UI screen (controls + tabs + chords).
+- `harmonica-tabs/App.tsx`: Main UI screen (top-level Scales/Tabs workspaces + Tabs editor overlay + properties/utilities).
 - `harmonica-tabs/src/data/*`: Notes, keys, scales, Richter layout.
 - `harmonica-tabs/src/logic/tabs.ts`: Core tab generation logic.
+- `harmonica-tabs/src/logic/transposer.ts`: Tab text parsing and transposition logic.
+- `harmonica-tabs/src/logic/transposer-follow.ts`: Pure transposer cursor-advance logic driven by detector snapshots.
+- `harmonica-tabs/src/logic/app-storage.ts`: App-owned async string-storage wrapper.
+- `harmonica-tabs/src/logic/saved-tab-library.ts`: Saved-tab record parsing, sorting, title helpers, and persistence service.
 
 ## Key Decisions (Current)
-- Standard 10‑hole Richter tuning only.
+- Standard 10-hole Richter tuning only.
 - Overbends excluded on holes 2, 3, and 8.
 - Overbend notation selectable: `'` or `°`.
 - Note spelling follows harmonica key (flats vs sharps).
 - Tabs default to `-2` instead of `3` when they are the same pitch.
 - Tabs are clickable to toggle alternates (currently only `-2` ↔ `3`).
 - Chords shown separately for Blow and Draw based on adjacent unbent holes.
+- Tone follow is token-based in the transposer: only successfully transposed output tab tokens are followable/clickable.
+- Tone follow reuses the shared listen session; web microphone input is still the only real detector today.
+- Tone follow is automatically on while listening is on, and off while listening is off.
+- Repeated identical output notes require a release before the cursor can advance again.
+- When tone follow matches the last playable transposer note, the cursor wraps back to the first playable note.
+- Saved tabs persist only `inputText` plus library metadata (`id`, `title`, `createdAt`, `updatedAt`).
+- The transposer works only from a selected saved-library tab; unsaved drafts never feed the transposer.
+- The app now has two top-level user-facing workspaces: `Scales` and `Tabs`.
+- The `Scales` workspace keeps its single-column phone flow on larger screens, but now uses compact/regular/wide sizing tiers so controls and tabs scale up on tablets instead of staying phone-sized.
+- The `Scales` workspace keeps its top controls and bottom workspace navigation fixed while the results area scrolls internally when scale/arpeggio content overflows.
+- The `Tabs` workspace owns `Transpose` and `Library` views; entering `Tabs` opens `Transpose` when a source tab is active and `Library` when there is no active source.
+- `Choose Tab` is an explicit reset action: it clears the current transposer source and returns `Tabs` to the library state until another source is opened.
+- The editor is a full-screen overlay within the `Tabs` workspace, not a separate peer workflow.
+- Selecting `Transpose` in the library updates the transposer source tab, switches `Tabs` to the `Transpose` view, and resets the transposer octave offset to zero for the current target; it does not change harmonica key, target position/key, or editor draft state.
+- Editing an existing saved tab happens only in the editor overlay; saving there overwrites that same record unless the user chooses `Save As`.
+- `Save As` always creates a new saved record, even when the editor is currently linked to an existing saved tab.
+- Deleting the currently edited saved tab removes it from the library but keeps the current editor text on screen as an unsaved draft.
+- Deleting the current transposer source tab clears the transposer back to its empty-state prompt.
+- Closing the editor returns to the invoking `Tabs` subview, and closing with unsaved changes prompts with `Cancel`, `Discard`, and `Save`.
+- Successful editor saves always dismiss the editor and return to the invoking `Tabs` subview.
 
 ## UI Summary
-- Top row: Harmonica key dropdown + overbend notation dropdown.
-- Scale selection: Scale key dropdown + scale name dropdown + Add.
-- Selected tabs list: per scale with tab chips, removable.
-- Chords row per scale: Blow and Draw, inline.
+- Top-level workspace switcher exposes `Scales` and `Tabs`.
+- `Scales` contains the former visualizer flow: Harmonica key, Target Position/Key, Scale Name, Arpeggios, listen/debug, and generated tabs/arpeggios.
+- `Scales` now scales spacing, control sizes, card padding, and tab/arpeggio typography across compact, regular, and wide layouts while staying single-column.
+- On wider screens, the `Scales` content can use a centered max-width shell, but compact and regular widths stay aligned with the full workspace width.
+- On `Scales`, only the results list scrolls when content is long; the workspace navigation remains visible.
+- Entering `Tabs` shows `Library` until a source tab is opened; afterward, returning to `Tabs` shows `Transpose` for that active source.
+- `Tabs -> Transpose` contains source actions, octave-shift buttons, shared listen control, clickable transposed tab output, and parser/transpose warnings.
+- The transposer also shows a compact label for the currently displayed saved tab.
+- The transposer includes `Choose Tab` plus `Edit Tab` actions instead of direct text editing; `Choose Tab` clears the active source and returns to the library.
+- `Tabs -> Library` owns saved-tab browsing with `Open`, `Edit`, `Delete`, and `New Tab`.
+- The library keeps the bottom workspace navigation visible; when saved tabs overflow, the list scrolls inside the library card instead of pushing the workspace nav off-screen.
+- The editor is a full-screen overlay within `Tabs` and owns a labeled `Cancel` dismiss action, top-aligned `Save` / `Save As` controls, a secondary `Clean Input` helper, and raw tab entry.
+- The editor now relies entirely on the platform keyboard and normal paste behavior; the custom tab pad has been removed.
+- The transposer now keeps a numeric octave offset relative to the current target result instead of a fixed `down/base/up` candidate trio.
+- `Down` and `Up` step one octave from whatever tab is currently displayed, and can be pressed repeatedly until the next octave becomes unavailable.
+- `Base` is a reset action, not a peer display mode: it returns to the original saved tab in first position.
+- Pressing `Base` also resets the Target Position/Key picker back to first position on the current harmonica key so the controls match the displayed tab.
+- `Down` and `Up` are disabled based on whether one more octave step from the current display would make any note unavailable.
+- Transposer output now preserves render segments while also tracking playable output tokens with MIDI metadata for tone follow.
+- The transposer output auto-scrolls just enough to keep the active token visible during tone follow and manual cursor moves.
+- Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
+- Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
+- The Properties screen also includes tone-follow settings for tolerance, minimum confidence, and hold duration.
+- Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
+- Properties screen is still separate via gear button.
 
 ## Tests
-- `harmonica-tabs/src/logic/tabs.test.ts`
+- `harmonica-tabs/tests/logic/tabs.test.ts`
   - C major output matches requirements.
   - `-2` vs `3` alt handling.
   - Overbend notation and exclusion rules.
+- `harmonica-tabs/tests/logic/transposer.test.ts`
+  - Token parsing (including `+` blow format) and whitespace preservation.
+  - First-position octave selection plus invalid-note warning behavior.
+  - Base-shift resolution plus multi-octave stepping behavior for the transposer UI.
+  - Warning behavior for unrecognized token fragments.
+- `harmonica-tabs/tests/logic/transposer-follow.test.ts`
+  - Hold/confidence/tolerance advancement rules.
+  - Re-arm behavior for repeated identical notes.
+  - End-of-tab wrap back to the first playable token.
+  - Manual cursor resets via state replacement.
+- `harmonica-tabs/tests/logic/transposer-input.test.ts`
+  - Cleanup helpers for pasted mixed content.
+  - Selection-aware insertion, full-token insertion, and backspace behavior for the editor input.
+- `harmonica-tabs/tests/logic/saved-tab-library.test.ts`
+  - Title defaults, malformed-data fallback, save/update behavior, and sort order for persisted saved tabs.
+- `harmonica-tabs/tests/ui/navigation.test.tsx`
+  - Top-level `Scales` / `Tabs` navigation and Tabs editor/library flows work as expected.
+  - The `Scales` workspace scales its main tab sizing across compact, regular, and wide screen sizes, only caps width on wide layouts, and keeps its results list in an inner scroll area.
+  - `Tabs` opens on the library until a transposer source is selected.
+  - Returning to `Tabs` preserves the active transposer source unless `Choose Tab` was used to clear it.
+  - The transposer shows its empty output state until a saved source tab is selected, then exposes clickable output tokens and the shared listen button.
+  - The transposer steps octaves from the current display, and `Base` resets back to saved first position.
+  - `Base` also resets the target picker to first position, and unavailable octave buttons update after each step.
+  - Changing the displayed octave resets the active output token.
+  - The transposer output auto-scrolls to keep the active token visible.
+  - The editor overlay supports save, re-save, save-as branching, return-to-origin behavior after save, and unsaved-close confirmation.
+  - Deleting the current transposer source clears the transposer back to its empty state.

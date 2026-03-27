@@ -1,9 +1,16 @@
+/**
+ * Scale definition relative to a root pitch class.
+ * Intervals are semitone offsets from the root in ascending order.
+ */
 export type ScaleDefinition = {
   id: string;
   name: string;
   intervals: number[];
 };
 
+/**
+ * Built-in scale catalog used by the scale selector and tab generator.
+ */
 export const SCALE_DEFINITIONS: ScaleDefinition[] = [
   { id: 'major', name: 'Major', intervals: [0, 2, 4, 5, 7, 9, 11] },
   { id: 'natural_minor', name: 'Natural Minor', intervals: [0, 2, 3, 5, 7, 8, 10] },

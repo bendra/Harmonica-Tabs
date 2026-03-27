@@ -1,6 +1,25 @@
 # TODO / Next Steps
 
 - Revisit tab ordering and octave handling if alternate tunings are added.
+- Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.
-- Improve UI responsiveness on small screens if needed.
+- Revisit whether the `Scales` screen should add a tablet-only two-column layout after the new size tiers have been user-tested.
+- Validate the new `Scales` / `Tabs` workspace naming after more user testing.
+- Validate whether the editor `Cancel` wording and `Choose Tab` wording are clear enough for first-time users.
+- Re-check whether the editor still needs any in-overlay draft-management action beyond `Save` / `Save As`, or whether library-only draft entry is enough.
 - Revisit `-2` vs `3` toggle behavior for chord visualization.
+- Expand transposer parser support for more legacy tab notations (if needed).
+- Add copy/share actions for transposer output.
+- Consider a compact current-source label on the transposer if users miss the removed source preview card.
+- Add native (iOS/Android) detector producers that feed the same shared detector snapshot used by tone follow.
+- Consolidate repeated UI/runtime default values into shared default-setting constants so input defaults and fallback values stay in sync.
+- Persist tone-follow settings across sessions if they prove useful.
+- Consider a helper hint for the editor `Clean Input` flow if users need more guidance after the custom pad removal.
+- Expand the saved-tab library viewer with search/filter, sort options, larger previews, and future multi-select actions.
+- Consider whether the library screen should grow rename/duplicate entry points in addition to the editor-level `Save As` flow.
+- Consider whether the transposer should remember the last selected source tab across launches.
+- Add library import/export so users can share or back up their saved tabs, likely starting with whole-library JSON export/import.
+- Consider single-tab sharing/export flows after whole-library import/export exists.
+- Consider cross-device sync only after local import/export proves useful.
+- accessibility
+- localization

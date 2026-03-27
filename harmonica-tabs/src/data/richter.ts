@@ -1,5 +1,9 @@
 import { normalizePc } from './notes';
 
+/**
+ * Note mapping for one hole in a diatonic harmonica layout.
+ * Pitch-class values are relative (0-11), while MIDI values include octave.
+ */
 export type HoleMapping = {
   hole: number;
   blow: number;
@@ -16,7 +20,10 @@ export type HoleMapping = {
   overdrawMidi?: number;
 };
 
-// Standard 10-hole Richter layout for a C harmonica.
+/**
+ * Standard 10-hole Richter layout for a C harmonica.
+ * Each object stores base blow/draw notes plus bends and overbends.
+ */
 export const RICHTER_C_LAYOUT: HoleMapping[] = [
   {
     hole: 1,
@@ -150,6 +157,9 @@ export const RICHTER_C_LAYOUT: HoleMapping[] = [
   },
 ];
 
+/**
+ * Transposes a layout by semitones, preserving hole structure.
+ */
 export function transposeLayout(layout: HoleMapping[], semitones: number): HoleMapping[] {
   return layout.map((hole) => ({
     hole: hole.hole,
