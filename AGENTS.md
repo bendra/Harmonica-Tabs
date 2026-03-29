@@ -11,3 +11,4 @@
 - Plan first before implementing new features.
 - If work becomes unexpectedly difficult or unclear, pause implementation and return to planning.
 - Before starting any new task, read the project docs first, especially `docs/UI_MAP.md`.
+- In Plan Mode, DO NOT prompt me to implement a plan. I will tell you when I am ready to switch to default/implementation mode and write code

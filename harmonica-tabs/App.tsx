@@ -205,10 +205,15 @@ type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 type AppScreen = 'scales' | 'tabs' | 'properties' | 'tab-symbols';
 type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_open' | 'save_then_close';
 type TabsSubview = 'transpose' | 'library';
+type LayoutRect = { x: number; y: number; width: number; height: number };
 const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
 const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
 const savedTabLibraryService = createSavedTabLibraryService();
+
+function sameLayoutRect(a: LayoutRect | undefined, b: LayoutRect) {
+  return !!a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
 
 function sanitizeDecimalInput(value: string): string {
   let sawDot = false;
@@ -467,6 +472,19 @@ export default function App() {
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
   const isMountedRef = useRef(true);
   const listenSessionRef = useRef(0);
+  const renderCountRef = useRef(0);
+  const arpeggioLayoutLogCountRef = useRef(0);
+  const lastCaretVisibleRef = useRef(false);
+
+  renderCountRef.current += 1;
+  console.log('[render]', renderCountRef.current, {
+    screen,
+    tabsSubview,
+    tabsEditorVisible,
+    saveTabModalVisible,
+    pendingOpenRecordVisible: pendingOpenRecord !== null,
+    closeEditorModalVisible,
+  });
 
   useEffect(() => {
     detectorRef.current = createWebAudioPitchDetector();
@@ -495,6 +513,24 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    console.log('[state]', {
+      screen,
+      tabsSubview,
+      tabsEditorVisible,
+      saveTabModalVisible,
+      pendingOpenRecordId: pendingOpenRecord?.id ?? null,
+      closeEditorModalVisible,
+    });
+  }, [
+    screen,
+    tabsSubview,
+    tabsEditorVisible,
+    saveTabModalVisible,
+    pendingOpenRecord,
+    closeEditorModalVisible,
+  ]);
 
   const scale = useMemo(
     () => ({ rootPc: noteToPc(scaleRoot), scaleId } satisfies ScaleSelection),
@@ -826,6 +862,12 @@ export default function App() {
   }
 
   function openTabsWorkspace() {
+    console.log('[press] workspace-tabs-button', {
+      screen,
+      tabsSubview,
+      tabsEditorVisible,
+      transposerSourceTabId,
+    });
     setTabsEditorVisible(false);
     setTabsSubview(transposerSourceTabId ? 'transpose' : 'library');
     setScreen('tabs');
@@ -1152,6 +1194,17 @@ export default function App() {
   const isScalesScreen = screen === 'scales' && !tabsEditorVisible;
 
   useEffect(() => {
+    const caretVisible = caretPos !== null;
+    if (lastCaretVisibleRef.current === caretVisible) return;
+    lastCaretVisibleRef.current = caretVisible;
+    console.log('[caret]', {
+      visible: caretVisible,
+      mainSelected,
+      isListening,
+    });
+  }, [caretPos, isListening, mainSelected]);
+
+  useEffect(() => {
     const nextState = transposerFollowEvaluation.state;
     if (
       nextState.activeTokenIndex === transposerFollowState.activeTokenIndex &&
@@ -1252,6 +1305,10 @@ export default function App() {
   const showWorkspaceSwitcher = (screen === 'scales' || screen === 'tabs') && !tabsEditorVisible;
 
   function handleHeaderButtonPress() {
+    console.log('[press] header-button', {
+      screen,
+      showBackButton,
+    });
     if (screen === 'properties') {
       setScreen(propertiesReturnTo);
       return;
@@ -1949,7 +2006,17 @@ export default function App() {
               nestedScrollEnabled
             >
               <View key={`result:${scale.rootPc}:${scale.scaleId}`} style={[styles.resultRow, scalesResultRowStyle]}>
-                <Pressable onPress={() => setMainSelected((prev) => !prev)} style={styles.resultHeader}>
+                <Pressable
+                  onPress={() => {
+                    console.log('[press] main-result-header', {
+                      scaleRoot,
+                      scaleId,
+                      mainSelected,
+                    });
+                    setMainSelected((prev) => !prev);
+                  }}
+                  style={styles.resultHeader}
+                >
                   <View style={styles.checkboxRow}>
                     <Text style={[styles.checkbox, scalesCheckboxStyle]}>{mainSelected ? '☑' : '☐'}</Text>
                     <Text style={[styles.resultTitle, scalesResultTitleStyle]}>
@@ -1978,10 +2045,18 @@ export default function App() {
                           key={`${scale.rootPc}:${scale.scaleId}:${group.midi}`}
                           testID={`main-tab-group:${index}`}
                           onLayout={(event) => {
-                            const { x, y, width, height } = event.nativeEvent.layout;
+                            const nextLayout = event.nativeEvent.layout as LayoutRect;
                             setTabLayouts((prev) => {
+                              const previous = prev[index];
+                              const changed = !sameLayoutRect(previous, nextLayout);
+                              console.log('[layout main]', {
+                                index,
+                                changed,
+                                prev: previous ?? null,
+                                next: nextLayout,
+                              });
                               const next = [...prev];
-                              next[index] = { x, y, width, height };
+                              next[index] = nextLayout;
                               return next;
                             });
                           }}
@@ -2090,11 +2165,23 @@ export default function App() {
                                         <View
                                           key={`${item.id}:tab:${index}`}
                                           onLayout={(event) => {
-                                            const { x, y, width, height } = event.nativeEvent.layout;
+                                            const nextLayout = event.nativeEvent.layout as LayoutRect;
                                             setArpeggioLayouts((prev) => {
+                                              const previous = prev[item.id]?.[index];
+                                              const changed = !sameLayoutRect(previous, nextLayout);
+                                              if (arpeggioLayoutLogCountRef.current < 20) {
+                                                arpeggioLayoutLogCountRef.current += 1;
+                                                console.log('[layout arp]', {
+                                                  itemId: item.id,
+                                                  index,
+                                                  changed,
+                                                  prev: previous ?? null,
+                                                  next: nextLayout,
+                                                });
+                                              }
                                               const next = { ...prev };
                                               const row = [...(next[item.id] ?? [])];
-                                              row[index] = { x, y, width, height };
+                                              row[index] = nextLayout;
                                               next[item.id] = row;
                                               return next;
                                             });
@@ -2136,6 +2223,11 @@ export default function App() {
             <Pressable
               testID="workspace-scales-button"
               onPress={() => {
+                console.log('[press] workspace-scales-button', {
+                  screen,
+                  tabsSubview,
+                  tabsEditorVisible,
+                });
                 setTabsEditorVisible(false);
                 setScreen('scales');
               }}
