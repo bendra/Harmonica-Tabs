@@ -8,22 +8,16 @@ import { buildTabsForScale } from '../../src/logic/tabs';
 
 const { asyncStorageMock, asyncStorageValues } = vi.hoisted(() => {
   const values = new Map<string, string>();
-  return {
-    asyncStorageValues: values,
-    asyncStorageMock: {
-      getItem: vi.fn(async (key: string) => values.get(key) ?? null),
-      setItem: vi.fn(async (key: string, value: string) => {
-        values.set(key, value);
-      }),
-      removeItem: vi.fn(async (key: string) => {
-        values.delete(key);
-      }),
-    },
+  const mock = {
+    getItem: vi.fn(async (key: string) => values.get(key) ?? null),
+    setItem: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
+    removeItem: vi.fn(async (key: string) => { values.delete(key); }),
   };
+  return { asyncStorageValues: values, asyncStorageMock: mock };
 });
 
-vi.mock('@react-native-async-storage/async-storage', () => ({
-  default: asyncStorageMock,
+vi.mock('../../src/logic/app-storage', () => ({
+  appStorage: asyncStorageMock,
 }));
 
 const { default: App } = await import('../../App');

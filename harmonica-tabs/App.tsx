@@ -3,6 +3,7 @@ import {
   SafeAreaView,
   ScrollView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -10,22 +11,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { pcToNote } from './src/data/notes';
 import { HARMONICA_KEYS } from './src/data/keys';
-import { SCALE_DEFINITIONS } from './src/data/scales';
-import { normalizePc, noteToPc, pcToNote, NoteName } from './src/data/notes';
-import { buildArpeggioSections } from './src/logic/arpeggios';
-import { buildTabsForPcSet, buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from './src/logic/tabs';
+import { buildTabsForPcSet } from './src/logic/tabs';
+import { useMusicalSelection, DropdownOption, ScaleKeyOption, formatScaleLabel, getPreferredTabOption } from './src/hooks/use-musical-selection';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
-import {
-  resolveTransposerBaseShift,
-  transposeTabTextAtShift,
-} from './src/logic/transposer';
-import {
-  createTransposerFollowState,
-  DetectorSnapshot,
-  evaluateTransposerFollow,
-  TransposerFollowState,
-} from './src/logic/transposer-follow';
 import {
   cleanupTransposerInput,
   normalizeTransposerEditInput,
@@ -33,44 +23,13 @@ import {
 } from './src/logic/transposer-input';
 import {
   buildSavedTabTitleCandidate,
-  createSavedTabLibraryService,
   formatSavedTabPreview,
   SavedTabRecord,
 } from './src/logic/saved-tab-library';
-import { createWebAudioPitchDetector } from './src/logic/web-audio';
-
-/**
- * Human-readable label for the active scale selection.
- */
-function formatScaleLabel(rootPc: number, scaleId: string, preferFlats: boolean): string {
-  const scale = SCALE_DEFINITIONS.find((item) => item.id === scaleId);
-  const rootName = pcToNote(rootPc, preferFlats);
-  return `${rootName} ${scale ? scale.name : 'Scale'}`;
-}
-
-/**
- * Key option metadata derived from harmonica position playing.
- */
-type ScaleKeyOption = {
-  position: number;
-  note: NoteName;
-};
-
-function formatOrdinal(value: number) {
-  const mod100 = value % 100;
-  if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
-
-  switch (value % 10) {
-    case 1:
-      return `${value}st`;
-    case 2:
-      return `${value}nd`;
-    case 3:
-      return `${value}rd`;
-    default:
-      return `${value}th`;
-  }
-}
+import { useSavedTabLibrary, savedTabLibraryService } from './src/hooks/use-saved-tab-library';
+import { useAudioSettings } from './src/hooks/use-audio-settings';
+import { useAudioListening } from './src/hooks/use-audio-listening';
+import { useTransposerSession } from './src/hooks/use-transposer-session';
 
 function getLayoutTier(shortEdge: number): LayoutTier {
   if (shortEdge < 420) return 'compact';
@@ -174,24 +133,6 @@ function getScalesLayoutMetrics(layoutTier: LayoutTier) {
   }
 }
 
-/**
- * Builds the 12 position-playing key options for the selected harmonica.
- */
-function buildScaleKeyOptions(harmonicaPc: number, preferFlats: boolean): ScaleKeyOption[] {
-  return Array.from({ length: 12 }, (_, index) => {
-    const position = index + 1;
-    const rootPc = (harmonicaPc + index * 7) % 12;
-    return {
-      position,
-      note: pcToNote(rootPc, preferFlats),
-    };
-  });
-}
-
-type DropdownOption<T> = {
-  label: string;
-  value: T;
-};
 
 type LayoutTier = 'compact' | 'regular' | 'wide';
 type ResponsiveControlSize = 'compact' | 'regular' | 'wide';
@@ -201,49 +142,16 @@ type SingleSelectOption<T extends string> = {
   value: T;
 };
 
-type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 type AppScreen = 'scales' | 'tabs' | 'properties' | 'tab-symbols';
 type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_open' | 'save_then_close';
 type TabsSubview = 'transpose' | 'library';
 type LayoutRect = { x: number; y: number; width: number; height: number };
-const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
-const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
-const savedTabLibraryService = createSavedTabLibraryService();
 
 function sameLayoutRect(a: LayoutRect | undefined, b: LayoutRect) {
   return !!a && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
-function sanitizeDecimalInput(value: string): string {
-  let sawDot = false;
-  let result = '';
-
-  for (const char of value) {
-    if (/[0-9]/.test(char)) {
-      result += char;
-      continue;
-    }
-    if (char === '.' && !sawDot) {
-      sawDot = true;
-      result += char;
-    }
-  }
-
-  return result;
-}
-
-function parseBoundedNumber(value: string, fallback: number, min: number, max: number): number {
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, parsed));
-}
-
-function parseBoundedInteger(value: string, fallback: number, min: number, max: number): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, parsed));
-}
 
 function formatSavedTabTimestamp(value: string) {
   const date = new Date(value);
@@ -418,28 +326,105 @@ export default function App() {
   const [tabsSubview, setTabsSubview] = useState<TabsSubview>('library');
   const [tabsEditorVisible, setTabsEditorVisible] = useState(false);
   const [propertiesReturnTo, setPropertiesReturnTo] = useState<'scales' | 'tabs'>('scales');
-  const [harmonicaKey, setHarmonicaKey] = useState(HARMONICA_KEYS[0]);
-  const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
-  const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
-  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>('-2');
-  const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(null);
-  const [scaleRoot, setScaleRoot] = useState<NoteName>('C');
-  const [scaleId, setScaleId] = useState<string>(SCALE_DEFINITIONS[0].id);
-  const [isListening, setIsListening] = useState(false);
-  const [simFrequency, setSimFrequency] = useState('440');
-  const [detectedFrequency, setDetectedFrequency] = useState<number | null>(null);
-  const [detectedConfidence, setDetectedConfidence] = useState(0);
-  const [detectedRms, setDetectedRms] = useState(0);
-  const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
+  const {
+    harmonicaKey,
+    setHarmonicaKey,
+    notation,
+    setNotation,
+    positionKeyFilter,
+    setPositionKeyFilter,
+    gAltPreference,
+    setGAltPreference,
+    arpeggioSelection,
+    setArpeggioSelection,
+    scaleRoot,
+    setScaleRoot,
+    scaleId,
+    setScaleId,
+    scale,
+    groups,
+    selectedTabs,
+    arpeggioSections,
+    scaleKeyOptions,
+    visibleScaleKeyOptions,
+    scaleKeyDropdownOptions,
+    scaleNameDropdownOptions,
+    firstPositionRoot,
+  } = useMusicalSelection();
+  const {
+    showDebug,
+    setShowDebug,
+    toneToleranceInput,
+    setToneToleranceInput,
+    toneFollowMinConfidenceInput,
+    setToneFollowMinConfidenceInput,
+    toneFollowHoldDurationInput,
+    setToneFollowHoldDurationInput,
+    simFrequency,
+    setSimFrequency,
+    toneToleranceCents,
+    toneFollowMinConfidence,
+    toneFollowHoldDurationMs,
+    simHz,
+  } = useAudioSettings();
+  const {
+    isListening,
+    listenError,
+    listenSource,
+    detectedFrequency,
+    detectedConfidence,
+    detectedRms,
+    lastDetectedAt,
+    audioSnapshot,
+    startListening,
+    stopListening,
+  } = useAudioListening({ simHz });
+  const {
+    savedTabs,
+    setSavedTabs,
+    savedTabsStatus,
+    setSavedTabsStatus,
+    deleteSavedTab,
+  } = useSavedTabLibrary();
+  const {
+    transposerSourceTabId,
+    setTransposerSourceTabId,
+    transposerOctaveOffset,
+    setTransposerOctaveOffset,
+    transposerFollowState,
+    transposerOutputViewportHeight,
+    setTransposerOutputViewportHeight,
+    transposerOutputTokenLayouts,
+    setTransposerOutputTokenLayouts,
+    transposerOutputScrollRef,
+    transposerOutputScrollYRef,
+    transposerSourceTab,
+    transposerBaseShift,
+    transposerResult,
+    transposerNextDownResult,
+    transposerNextUpResult,
+    transposerDisplayShift,
+    canStepTransposerDown,
+    canStepTransposerUp,
+    isTransposerBaseResetState,
+    transposerFollowEvaluation,
+    moveTransposerCursor,
+  } = useTransposerSession({
+    savedTabs,
+    harmonicaPc: harmonicaKey.pc,
+    targetRootPc: scale.rootPc,
+    notation,
+    gAltPreference,
+    audioSnapshot,
+    toneToleranceCents,
+    toneFollowMinConfidence,
+    toneFollowHoldDurationMs,
+    isListening,
+  });
   const [editorInput, setEditorInput] = useState('');
   const [editorSelection, setEditorSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [editorSavedTabId, setEditorSavedTabId] = useState<string | null>(null);
   const [editorReturnTo, setEditorReturnTo] = useState<TabsSubview>('library');
-  const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(null);
-  const [transposerOctaveOffset, setTransposerOctaveOffset] = useState(0);
-  const [savedTabs, setSavedTabs] = useState<SavedTabRecord[]>([]);
-  const [savedTabsStatus, setSavedTabsStatus] = useState<string | null>(null);
   const [saveTabModalVisible, setSaveTabModalVisible] = useState(false);
   const [saveTabMode, setSaveTabMode] = useState<SaveTabMode>('overwrite');
   const [saveTabTitleInput, setSaveTabTitleInput] = useState('');
@@ -447,31 +432,13 @@ export default function App() {
   const [pendingOpenRecord, setPendingOpenRecord] = useState<SavedTabRecord | null>(null);
   const [openAfterSaveRecordId, setOpenAfterSaveRecordId] = useState<string | null>(null);
   const [closeEditorModalVisible, setCloseEditorModalVisible] = useState(false);
-  const [toneToleranceInput, setToneToleranceInput] = useState('60');
-  const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
-  const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
-  const [listenError, setListenError] = useState<string | null>(null);
-  const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
-  const [transposerFollowState, setTransposerFollowState] = useState<TransposerFollowState>(
-    createTransposerFollowState(null),
-  );
-  const [toneFollowTick, setToneFollowTick] = useState(0);
-  const [transposerOutputViewportHeight, setTransposerOutputViewportHeight] = useState(0);
-  const [transposerOutputTokenLayouts, setTransposerOutputTokenLayouts] = useState<
-    Record<number, { y: number; height: number }>
-  >({});
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
   const [arpeggioLayouts, setArpeggioLayouts] = useState<
     Record<string, Array<{ x: number; y: number; width: number; height: number }>>
   >({});
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
-  const transposerOutputScrollRef = useRef<ScrollView>(null);
-  const transposerOutputScrollYRef = useRef(0);
   const editorInputRef = useRef<TextInput>(null);
-  const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
-  const isMountedRef = useRef(true);
-  const listenSessionRef = useRef(0);
   const renderCountRef = useRef(0);
   const arpeggioLayoutLogCountRef = useRef(0);
   const lastCaretVisibleRef = useRef(false);
@@ -486,33 +453,6 @@ export default function App() {
     closeEditorModalVisible,
   });
 
-  useEffect(() => {
-    detectorRef.current = createWebAudioPitchDetector();
-    return () => {
-      isMountedRef.current = false;
-      listenSessionRef.current += 1;
-      detectorRef.current?.stop();
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    savedTabLibraryService
-      .listTabs()
-      .then((tabs) => {
-        if (cancelled) return;
-        setSavedTabs(tabs);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setSavedTabsStatus('Saved tabs could not be loaded.');
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     console.log('[state]', {
@@ -532,164 +472,6 @@ export default function App() {
     closeEditorModalVisible,
   ]);
 
-  const scale = useMemo(
-    () => ({ rootPc: noteToPc(scaleRoot), scaleId } satisfies ScaleSelection),
-    [scaleRoot, scaleId],
-  );
-
-  const groups = useMemo(
-    () => buildTabsForScale(scale, harmonicaKey.pc, notation),
-    [scale, harmonicaKey.pc, notation],
-  );
-
-  const selectedTabs = useMemo(() => {
-    return groups.map((group) => getPreferredTabOption(group));
-  }, [groups, gAltPreference]);
-
-  const arpeggioSections = useMemo(
-    () =>
-      buildArpeggioSections(
-        scale.rootPc,
-        scale.scaleId,
-        arpeggioSelection ? [arpeggioSelection] : [],
-      ),
-    [scale, arpeggioSelection],
-  );
-
-  useEffect(() => {
-    setTabLayouts([]);
-    setArpeggioLayouts({});
-  }, [scale.rootPc, scale.scaleId, harmonicaKey.label, notation, groups.length]);
-
-  const scaleKeyOptions = useMemo(
-    () => buildScaleKeyOptions(harmonicaKey.pc, harmonicaKey.preferFlats),
-    [harmonicaKey.pc, harmonicaKey.preferFlats],
-  );
-
-  const visibleScaleKeyOptions = useMemo(() => {
-    if (positionKeyFilter === 'all') return scaleKeyOptions;
-    if (positionKeyFilter === '1-2-3') {
-      return scaleKeyOptions.filter((option) => option.position <= 3);
-    }
-    return scaleKeyOptions.filter((option) => option.position <= 3 || option.position === 5);
-  }, [scaleKeyOptions, positionKeyFilter]);
-
-  const scaleKeyDropdownOptions = useMemo<DropdownOption<NoteName>[]>(
-    () =>
-      visibleScaleKeyOptions.map(({ position, note }) => ({
-        label: `${formatOrdinal(position)} / ${note}`,
-        value: note,
-      })),
-    [visibleScaleKeyOptions],
-  );
-
-  const scaleNameDropdownOptions = useMemo<DropdownOption<string>[]>(
-    () => SCALE_DEFINITIONS.map((scale) => ({ label: scale.name, value: scale.id })),
-    [],
-  );
-  const firstPositionRoot = useMemo(
-    () => pcToNote(harmonicaKey.pc, harmonicaKey.preferFlats),
-    [harmonicaKey.pc, harmonicaKey.preferFlats],
-  );
-  const transposerSourceTab = useMemo(
-    () => savedTabs.find((tab) => tab.id === transposerSourceTabId) ?? null,
-    [savedTabs, transposerSourceTabId],
-  );
-
-  const transposerSourceInput = transposerSourceTab?.inputText ?? '';
-  const transposerBaseShift = useMemo(
-    () =>
-      resolveTransposerBaseShift({
-        input: transposerSourceInput,
-        sourceHarmonicaPc: harmonicaKey.pc,
-        targetRootPc: scale.rootPc,
-        notation,
-        altPreference: gAltPreference,
-      }),
-    [transposerSourceInput, harmonicaKey.pc, scale.rootPc, notation, gAltPreference],
-  );
-  const transposerDisplayShift = transposerBaseShift.semitoneShift + transposerOctaveOffset * 12;
-  const transposerResult = useMemo(
-    () =>
-      transposeTabTextAtShift({
-        input: transposerSourceInput,
-        sourceHarmonicaPc: harmonicaKey.pc,
-        targetRootPc: scale.rootPc,
-        notation,
-        altPreference: gAltPreference,
-        semitoneShift: transposerDisplayShift,
-        baseSemitoneShift: transposerBaseShift.semitoneShift,
-        baseAppliedDirection: transposerBaseShift.appliedDirection,
-      }),
-    [
-      transposerSourceInput,
-      harmonicaKey.pc,
-      scale.rootPc,
-      notation,
-      gAltPreference,
-      transposerDisplayShift,
-      transposerBaseShift.semitoneShift,
-      transposerBaseShift.appliedDirection,
-    ],
-  );
-  const transposerNextDownResult = useMemo(
-    () =>
-      transposeTabTextAtShift({
-        input: transposerSourceInput,
-        sourceHarmonicaPc: harmonicaKey.pc,
-        targetRootPc: scale.rootPc,
-        notation,
-        altPreference: gAltPreference,
-        semitoneShift: transposerDisplayShift - 12,
-        baseSemitoneShift: transposerBaseShift.semitoneShift,
-        baseAppliedDirection: transposerBaseShift.appliedDirection,
-      }),
-    [
-      transposerSourceInput,
-      harmonicaKey.pc,
-      scale.rootPc,
-      notation,
-      gAltPreference,
-      transposerDisplayShift,
-      transposerBaseShift.semitoneShift,
-      transposerBaseShift.appliedDirection,
-    ],
-  );
-  const transposerNextUpResult = useMemo(
-    () =>
-      transposeTabTextAtShift({
-        input: transposerSourceInput,
-        sourceHarmonicaPc: harmonicaKey.pc,
-        targetRootPc: scale.rootPc,
-        notation,
-        altPreference: gAltPreference,
-        semitoneShift: transposerDisplayShift + 12,
-        baseSemitoneShift: transposerBaseShift.semitoneShift,
-        baseAppliedDirection: transposerBaseShift.appliedDirection,
-      }),
-    [
-      transposerSourceInput,
-      harmonicaKey.pc,
-      scale.rootPc,
-      notation,
-      gAltPreference,
-      transposerDisplayShift,
-      transposerBaseShift.semitoneShift,
-      transposerBaseShift.appliedDirection,
-    ],
-  );
-  const canStepTransposerDown = transposerSourceTab !== null && transposerNextDownResult.unavailableCount === 0;
-  const canStepTransposerUp = transposerSourceTab !== null && transposerNextUpResult.unavailableCount === 0;
-  const isTransposerBaseResetState =
-    transposerSourceTab !== null && normalizePc(scale.rootPc - harmonicaKey.pc) === 0 && transposerOctaveOffset === 0;
-
-  useEffect(() => {
-    if (scaleKeyDropdownOptions.some((option) => option.value === scaleRoot)) return;
-    const nextOption = scaleKeyDropdownOptions[0];
-    if (nextOption) {
-      setScaleRoot(nextOption.value);
-    }
-  }, [scaleKeyDropdownOptions, scaleRoot]);
   const editorSavedTab = useMemo(
     () => savedTabs.find((tab) => tab.id === editorSavedTabId) ?? null,
     [editorSavedTabId, savedTabs],
@@ -698,37 +480,6 @@ export default function App() {
   const hasUnsavedEditorChanges = editorSavedTab
     ? editorInput !== editorSavedTab.inputText
     : editorInput.trim().length > 0;
-  const toneToleranceCents = useMemo(
-    () => parseBoundedNumber(toneToleranceInput, 60, 1, 120),
-    [toneToleranceInput],
-  );
-  const toneFollowMinConfidence = useMemo(
-    () => parseBoundedNumber(toneFollowMinConfidenceInput, 0.35, 0, 1),
-    [toneFollowMinConfidenceInput],
-  );
-  const toneFollowHoldDurationMs = useMemo(
-    () => parseBoundedInteger(toneFollowHoldDurationInput, 400, 1, 5000),
-    [toneFollowHoldDurationInput],
-  );
-
-  useEffect(() => {
-    const nextActiveIndex = transposerResult.playableTokens.length > 0 ? 0 : null;
-    setTransposerFollowState(createTransposerFollowState(nextActiveIndex));
-    setTransposerOutputTokenLayouts({});
-  }, [transposerResult.playableTokens]);
-
-  useEffect(() => {
-    setTransposerOctaveOffset(0);
-  }, [transposerSourceTabId, harmonicaKey.pc, scale.rootPc]);
-
-  useEffect(() => {
-    if (!isListening || transposerResult.playableTokens.length === 0) return;
-    const intervalId = setInterval(() => {
-      setToneFollowTick((prev) => prev + 1);
-    }, 50);
-
-    return () => clearInterval(intervalId);
-  }, [isListening, transposerResult.playableTokens.length]);
 
   function renderToneFollowDebugPanel() {
     return (
@@ -764,18 +515,6 @@ export default function App() {
         </View>
       </View>
     );
-  }
-
-  /**
-   * Applies the global -2/3 preference when both choices exist for a tab group.
-   */
-  function getPreferredTabOption(group: TabGroup) {
-    const hasMinusTwo = group.options.some((token) => token.tab === '-2');
-    const hasThree = group.options.some((token) => token.tab === '3');
-    if (hasMinusTwo && hasThree) {
-      return group.options.find((token) => token.tab === gAltPreference) ?? group.options[0];
-    }
-    return group.options[0];
   }
 
   /**
@@ -970,8 +709,7 @@ export default function App() {
 
   async function handleDeleteSavedTab(record: SavedTabRecord) {
     try {
-      const nextTabs = await savedTabLibraryService.deleteTab(record.id);
-      setSavedTabs(nextTabs);
+      await deleteSavedTab(record);
       setPendingOpenRecord((prev) => (prev?.id === record.id ? null : prev));
       if (editorSavedTabId === record.id) {
         setEditorSavedTabId(null);
@@ -983,38 +721,6 @@ export default function App() {
     } catch {
       setSavedTabsStatus('Could not delete that saved tab.');
     }
-  }
-
-  function moveTransposerCursor(tokenIndex: number) {
-    setTransposerFollowState(createTransposerFollowState(tokenIndex));
-  }
-
-  function ensureActiveTransposerTokenVisible(params: {
-    activeTokenIndex: number | null;
-    layouts: Record<number, { y: number; height: number }>;
-    scrollY: number;
-    viewportHeight: number;
-  }) {
-    const { activeTokenIndex, layouts, scrollY, viewportHeight } = params;
-    if (activeTokenIndex === null || viewportHeight <= 0) return null;
-
-    const layout = layouts[activeTokenIndex];
-    if (!layout) return null;
-
-    const visibleTop = scrollY + TRANSPOSER_OUTPUT_SCROLL_PADDING;
-    const visibleBottom = scrollY + viewportHeight - TRANSPOSER_OUTPUT_SCROLL_PADDING;
-    const tokenTop = layout.y;
-    const tokenBottom = layout.y + layout.height;
-
-    if (tokenTop < visibleTop) {
-      return Math.max(0, tokenTop - TRANSPOSER_OUTPUT_SCROLL_PADDING);
-    }
-
-    if (tokenBottom > visibleBottom) {
-      return Math.max(0, tokenBottom - viewportHeight + TRANSPOSER_OUTPUT_SCROLL_PADDING);
-    }
-
-    return null;
   }
 
   const caretSize = 18;
@@ -1050,26 +756,7 @@ export default function App() {
     };
   }
 
-  const parsedFrequency = Number.parseFloat(simFrequency);
-  const simHz = Number.isFinite(parsedFrequency) ? parsedFrequency : null;
   const now = Date.now();
-  const hasHold = lastDetectedAt !== null && now - lastDetectedAt < AUDIO_SIGNAL_HOLD_MS;
-  const effectiveWebFrequency =
-    detectedConfidence >= AUDIO_CONFIDENCE_GATE && detectedFrequency
-      ? detectedFrequency
-      : hasHold
-        ? detectedFrequency
-        : null;
-  const audioSnapshot = useMemo<DetectorSnapshot>(
-    () => ({
-      frequency: !isListening ? null : listenSource === 'web' ? effectiveWebFrequency : simHz,
-      confidence: !isListening ? 0 : listenSource === 'web' ? detectedConfidence : simHz ? 1 : 0,
-      rms: detectedRms,
-      source: isListening ? listenSource : null,
-      lastDetectedAt,
-    }),
-    [detectedConfidence, detectedRms, effectiveWebFrequency, isListening, lastDetectedAt, listenSource, simHz],
-  );
   const frequency = audioSnapshot.frequency;
   const midis = groups.map((group) => group.midi);
   const pitchMatch = isListening && frequency ? matchFrequencyToTabs(midis, frequency, 25) : null;
@@ -1077,16 +764,6 @@ export default function App() {
   const mainInTune = pitchMatch !== null && Math.abs(pitchMatch.centsOffset) <= toneToleranceCents;
   const activeTab = pitchMatch ? selectedTabs[pitchMatch.activeIndex] : null;
   const effectiveConfidence = audioSnapshot.confidence;
-  const transposerFollowEvaluation = evaluateTransposerFollow({
-    enabled: isListening,
-    tokens: transposerResult.playableTokens,
-    state: transposerFollowState,
-    detector: audioSnapshot,
-    toneToleranceCents,
-    minConfidence: toneFollowMinConfidence,
-    holdDurationMs: toneFollowHoldDurationMs,
-    now: toneFollowTick > 0 ? Date.now() : now,
-  });
   const statusText = isListening
     ? listenError
       ? listenError
@@ -1204,95 +881,6 @@ export default function App() {
     });
   }, [caretPos, isListening, mainSelected]);
 
-  useEffect(() => {
-    const nextState = transposerFollowEvaluation.state;
-    if (
-      nextState.activeTokenIndex === transposerFollowState.activeTokenIndex &&
-      nextState.matchedSince === transposerFollowState.matchedSince &&
-      nextState.waitingForRelease === transposerFollowState.waitingForRelease
-    ) {
-      return;
-    }
-
-    setTransposerFollowState(nextState);
-  }, [transposerFollowEvaluation.state, transposerFollowState]);
-
-  useEffect(() => {
-    const nextScrollY = ensureActiveTransposerTokenVisible({
-      activeTokenIndex: transposerFollowState.activeTokenIndex,
-      layouts: transposerOutputTokenLayouts,
-      scrollY: transposerOutputScrollYRef.current,
-      viewportHeight: transposerOutputViewportHeight,
-    });
-    if (nextScrollY === null || nextScrollY === transposerOutputScrollYRef.current) return;
-
-    transposerOutputScrollRef.current?.scrollTo({ y: nextScrollY, animated: true });
-    transposerOutputScrollYRef.current = nextScrollY;
-  }, [
-    transposerFollowState.activeTokenIndex,
-    transposerOutputTokenLayouts,
-    transposerOutputViewportHeight,
-  ]);
-
-  /**
-   * Starts microphone/sim listening and wires detector updates into state.
-   */
-  async function startListening() {
-    const listenSession = listenSessionRef.current + 1;
-    listenSessionRef.current = listenSession;
-    setListenError(null);
-    setDetectedFrequency(null);
-    setDetectedConfidence(0);
-    setDetectedRms(0);
-    setLastDetectedAt(null);
-
-    function isCurrentListenSession() {
-      return isMountedRef.current && listenSessionRef.current === listenSession;
-    }
-
-    const detector = detectorRef.current;
-    if (detector?.isSupported()) {
-      try {
-        await detector.start((update) => {
-          if (!isCurrentListenSession()) return;
-          setDetectedFrequency(update.frequency);
-          setDetectedConfidence(update.confidence);
-          setDetectedRms(update.rms);
-          if (update.frequency && update.confidence >= AUDIO_CONFIDENCE_GATE) {
-            setLastDetectedAt(Date.now());
-          }
-        });
-        if (!isCurrentListenSession()) return;
-        setListenSource('web');
-      } catch (error) {
-        if (!isCurrentListenSession()) return;
-        setListenError('Mic blocked or unavailable (using sim)');
-        setListenSource('sim');
-      }
-    } else {
-      if (!isCurrentListenSession()) return;
-      setListenError('Mic not supported in this browser (using sim)');
-      setListenSource('sim');
-    }
-
-    if (!isCurrentListenSession()) return;
-    setIsListening(true);
-  }
-
-  /**
-   * Stops listening and clears detector-related state.
-   */
-  function stopListening() {
-    listenSessionRef.current += 1;
-    detectorRef.current?.stop();
-    setIsListening(false);
-    setListenSource(null);
-    setDetectedFrequency(null);
-    setDetectedConfidence(0);
-    setDetectedRms(0);
-    setLastDetectedAt(null);
-  }
-
   const headerTitle =
     screen === 'properties'
       ? 'Properties'
@@ -1323,105 +911,214 @@ export default function App() {
 
   function renderEditorOverlay() {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>Tab Editor</Text>
-          </View>
-          <View style={[styles.transposerCard, styles.transposerCardGrow]}>
-            <Text style={styles.transposerTitle}>
-              {editorSavedTab ? `Editing: ${editorSavedTab.title}` : 'New Tab Draft'}
-            </Text>
-            <Text style={styles.transposerMeta}>
-              Type or paste source tabs here. This is the only place raw tab text can be edited.
-            </Text>
-            <View style={styles.editorPrimaryRow}>
-              <Pressable
-                testID="editor-close-button"
-                onPress={handleEditorCloseRequest}
-                style={[
-                  styles.editorDismissButton,
-                  styles.editorPrimaryActionButton,
-                  isSmallScreen && styles.transposerActionButtonCompact,
-                ]}
-              >
-                <Text style={styles.editorDismissButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                testID="editor-save-button"
-                onPress={() => openSaveTabModal('overwrite')}
-                style={[
-                  styles.transposerActionButton,
-                  styles.editorPrimaryActionButton,
-                  isSmallScreen && styles.transposerActionButtonCompact,
-                ]}
-              >
-                <Text
+      <View style={{ flex: 1 }}>
+        <SafeAreaView style={styles.safeArea}>
+          <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Tab Editor</Text>
+            </View>
+            <View style={[styles.transposerCard, styles.transposerCardGrow]}>
+              <Text style={styles.transposerTitle}>
+                {editorSavedTab ? `Editing: ${editorSavedTab.title}` : 'New Tab Draft'}
+              </Text>
+              <Text style={styles.transposerMeta}>
+                Type or paste source tabs here. This is the only place raw tab text can be edited.
+              </Text>
+              <View style={styles.editorPrimaryRow}>
+                <Pressable
+                  testID="editor-close-button"
+                  onPress={handleEditorCloseRequest}
                   style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                    styles.editorDismissButton,
+                    styles.editorPrimaryActionButton,
+                    isSmallScreen && styles.transposerActionButtonCompact,
                   ]}
                 >
-                  {editorSavedTabId ? 'Re-save' : 'Save'}
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="editor-save-as-button"
-                onPress={() => openSaveTabModal('create_new')}
-                style={[
-                  styles.transposerActionButton,
-                  styles.editorPrimaryActionButton,
-                  isSmallScreen && styles.transposerActionButtonCompact,
-                ]}
-              >
-                <Text
+                  <Text style={styles.editorDismissButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  testID="editor-save-button"
+                  onPress={() => openSaveTabModal('overwrite')}
                   style={[
-                    styles.transposerActionButtonText,
-                    isSmallScreen && styles.transposerActionButtonTextCompact,
+                    styles.transposerActionButton,
+                    styles.editorPrimaryActionButton,
+                    isSmallScreen && styles.transposerActionButtonCompact,
                   ]}
                 >
-                  Save As
-                </Text>
-              </Pressable>
+                  <Text
+                    style={[
+                      styles.transposerActionButtonText,
+                      isSmallScreen && styles.transposerActionButtonTextCompact,
+                    ]}
+                  >
+                    {editorSavedTabId ? 'Re-save' : 'Save'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  testID="editor-save-as-button"
+                  onPress={() => openSaveTabModal('create_new')}
+                  style={[
+                    styles.transposerActionButton,
+                    styles.editorPrimaryActionButton,
+                    isSmallScreen && styles.transposerActionButtonCompact,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.transposerActionButtonText,
+                      isSmallScreen && styles.transposerActionButtonTextCompact,
+                    ]}
+                  >
+                    Save As
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.editorSecondaryRow}>
+                <Text style={styles.editorSecondaryLabel}>Helpers</Text>
+                <Pressable
+                  testID="editor-clean-button"
+                  onPress={handleCleanEditorInput}
+                  style={[
+                    styles.editorSecondaryButton,
+                    isSmallScreen && styles.editorSecondaryButtonCompact,
+                  ]}
+                >
+                  <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
+                    Clean Input
+                  </Text>
+                </Pressable>
+              </View>
+              <TextInput
+                ref={editorInputRef}
+                style={[styles.transposerInput, styles.transposerInputGrow]}
+                multiline
+                value={editorInput}
+                onChangeText={handleEditorInputChange}
+                onSelectionChange={(event) => {
+                  const selection = event.nativeEvent.selection;
+                  setEditorSelection(selection);
+                }}
+                selection={editorSelection}
+                keyboardType="default"
+                inputMode="text"
+                autoCorrect={false}
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
+                placeholderTextColor="#64748b"
+                textAlignVertical="top"
+              />
             </View>
-            <View style={styles.editorSecondaryRow}>
-              <Text style={styles.editorSecondaryLabel}>Helpers</Text>
-              <Pressable
-                testID="editor-clean-button"
-                onPress={handleCleanEditorInput}
-                style={[
-                  styles.editorSecondaryButton,
-                  isSmallScreen && styles.editorSecondaryButtonCompact,
-                ]}
-              >
-                <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
-                  Clean Input
-                </Text>
-              </Pressable>
+          </ScrollView>
+        </SafeAreaView>
+        {saveTabModalVisible && (
+          <View testID="save-tab-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeSaveTabModal} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, editorSavedTab !== null)}</Text>
+              <Text style={styles.helperText}>Titles help users find a saved tab later.</Text>
+              <TextInput
+                testID="save-tab-title-input"
+                value={saveTabTitleInput}
+                onChangeText={(value) => {
+                  setSaveTabTitleInput(value);
+                  if (saveTabTitleError) {
+                    setSaveTabTitleError(null);
+                  }
+                }}
+                style={styles.dialogInput}
+                placeholder="Saved tab title"
+                placeholderTextColor="#64748b"
+                autoCorrect={false}
+                autoCapitalize="sentences"
+                spellCheck={false}
+              />
+              {saveTabTitleError && <Text style={styles.dialogErrorText}>{saveTabTitleError}</Text>}
+              <View style={styles.dialogActionRow}>
+                <Pressable onPress={closeSaveTabModal} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  testID="save-tab-confirm-button"
+                  onPress={handleSaveTabConfirm}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>
+                    {getSaveDialogConfirmLabel(saveTabMode)}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
-            <TextInput
-              ref={editorInputRef}
-              style={[styles.transposerInput, styles.transposerInputGrow]}
-              multiline
-              value={editorInput}
-              onChangeText={handleEditorInputChange}
-              onSelectionChange={(event) => {
-                const selection = event.nativeEvent.selection;
-                setEditorSelection(selection);
-              }}
-              selection={editorSelection}
-              keyboardType="default"
-              inputMode="text"
-              autoCorrect={false}
-              autoCapitalize="none"
-              spellCheck={false}
-              placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
-              placeholderTextColor="#64748b"
-              textAlignVertical="top"
-            />
           </View>
-        </ScrollView>
-      </SafeAreaView>
+        )}
+        {pendingOpenRecord !== null && (
+          <View testID="pending-open-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>Unsaved changes</Text>
+              <Text style={styles.helperText}>
+                Opening "{pendingOpenRecord?.title ?? 'this tab'}" will replace the current editor text.
+              </Text>
+              <View style={styles.dialogActionColumn}>
+                <Pressable onPress={() => setPendingOpenRecord(null)} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (pendingOpenRecord) {
+                      openSavedTabInEditor(pendingOpenRecord, 'library');
+                    }
+                  }}
+                  style={styles.dialogButton}
+                >
+                  <Text style={styles.dialogButtonText}>Open Anyway</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (!pendingOpenRecord) return;
+                    openSaveTabModal('save_then_open', pendingOpenRecord.id);
+                    setPendingOpenRecord(null);
+                  }}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Open</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        )}
+        {closeEditorModalVisible && (
+          <View testID="editor-close-confirm-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setCloseEditorModalVisible(false)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>Unsaved changes</Text>
+              <Text style={styles.helperText}>Closing the editor will discard the current unsaved changes.</Text>
+              <View style={styles.dialogActionColumn}>
+                <Pressable onPress={() => setCloseEditorModalVisible(false)} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  testID="editor-close-discard-button"
+                  onPress={finishClosingEditor}
+                  style={styles.dialogButton}
+                >
+                  <Text style={styles.dialogButtonText}>Discard</Text>
+                </Pressable>
+                <Pressable
+                  testID="editor-close-save-button"
+                  onPress={() => {
+                    openSaveTabModal('save_then_close');
+                    setCloseEditorModalVisible(false);
+                  }}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
     );
   }
 
@@ -1491,7 +1188,7 @@ export default function App() {
                 <Text style={styles.dropdownLabel}>Tolerance</Text>
                 <TextInput
                   value={toneToleranceInput}
-                  onChangeText={(value) => setToneToleranceInput(sanitizeDecimalInput(value))}
+                  onChangeText={setToneToleranceInput}
                   keyboardType="decimal-pad"
                   inputMode="decimal"
                   autoCorrect={false}
@@ -1506,7 +1203,7 @@ export default function App() {
                 <Text style={styles.dropdownLabel}>Confidence</Text>
                 <TextInput
                   value={toneFollowMinConfidenceInput}
-                  onChangeText={(value) => setToneFollowMinConfidenceInput(sanitizeDecimalInput(value))}
+                  onChangeText={setToneFollowMinConfidenceInput}
                   keyboardType="decimal-pad"
                   inputMode="decimal"
                   autoCorrect={false}
@@ -1521,7 +1218,7 @@ export default function App() {
                 <Text style={styles.dropdownLabel}>Hold ms</Text>
                 <TextInput
                   value={toneFollowHoldDurationInput}
-                  onChangeText={(value) => setToneFollowHoldDurationInput(value.replace(/[^0-9]/g, ''))}
+                  onChangeText={setToneFollowHoldDurationInput}
                   keyboardType="number-pad"
                   inputMode="numeric"
                   autoCorrect={false}
@@ -1800,7 +1497,7 @@ export default function App() {
                             transposerSourceTab === null && styles.transposerDirectionTextDisabled,
                           ]}
                         >
-                          Base
+                          Reset
                         </Text>
                       </Pressable>
                       <Pressable
@@ -2094,7 +1791,7 @@ export default function App() {
                             const tabGroups = buildTabsForPcSet(item.pcs, item.rootPc, harmonicaKey.pc, notation);
                             const tabTokens = tabGroups
                               .map((group) => {
-                                const option = getPreferredTabOption(group);
+                                const option = getPreferredTabOption(group, gAltPreference);
                                 return option
                                   ? {
                                       tab: option.tab,
@@ -2266,128 +1963,9 @@ export default function App() {
         testID="editor-overlay-modal"
         visible={screen === 'tabs' && tabsEditorVisible}
         animationType="slide"
-        onRequestClose={handleEditorCloseRequest}
+        onRequestClose={Platform.OS === 'android' ? handleEditorCloseRequest : undefined}
       >
         {renderEditorOverlay()}
-      </Modal>
-      <Modal transparent visible={saveTabModalVisible} animationType="fade" onRequestClose={closeSaveTabModal}>
-          <View testID="save-tab-modal" style={styles.dialogOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeSaveTabModal} />
-            <View style={styles.dialogCard}>
-              <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, editorSavedTab !== null)}</Text>
-              <Text style={styles.helperText}>Titles help users find a saved tab later.</Text>
-              <TextInput
-                testID="save-tab-title-input"
-                value={saveTabTitleInput}
-                onChangeText={(value) => {
-                  setSaveTabTitleInput(value);
-                  if (saveTabTitleError) {
-                    setSaveTabTitleError(null);
-                  }
-                }}
-                style={styles.dialogInput}
-                placeholder="Saved tab title"
-                placeholderTextColor="#64748b"
-                autoCorrect={false}
-                autoCapitalize="sentences"
-                spellCheck={false}
-              />
-              {saveTabTitleError && <Text style={styles.dialogErrorText}>{saveTabTitleError}</Text>}
-              <View style={styles.dialogActionRow}>
-                <Pressable onPress={closeSaveTabModal} style={styles.dialogButton}>
-                  <Text style={styles.dialogButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  testID="save-tab-confirm-button"
-                  onPress={handleSaveTabConfirm}
-                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
-                >
-                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>
-                    {getSaveDialogConfirmLabel(saveTabMode)}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-      </Modal>
-      <Modal
-        testID="pending-open-modal"
-        transparent
-        visible={pendingOpenRecord !== null}
-        animationType="fade"
-        onRequestClose={() => setPendingOpenRecord(null)}
-      >
-        <View style={styles.dialogOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Unsaved changes</Text>
-            <Text style={styles.helperText}>
-              Opening "{pendingOpenRecord?.title ?? 'this tab'}" will replace the current editor text.
-            </Text>
-            <View style={styles.dialogActionColumn}>
-              <Pressable onPress={() => setPendingOpenRecord(null)} style={styles.dialogButton}>
-                <Text style={styles.dialogButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  if (pendingOpenRecord) {
-                    openSavedTabInEditor(pendingOpenRecord, 'library');
-                  }
-                }}
-                style={styles.dialogButton}
-              >
-                <Text style={styles.dialogButtonText}>Open Anyway</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  if (!pendingOpenRecord) return;
-                  openSaveTabModal('save_then_open', pendingOpenRecord.id);
-                  setPendingOpenRecord(null);
-                }}
-                style={[styles.dialogButton, styles.dialogPrimaryButton]}
-              >
-                <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save Then Open</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      <Modal
-        testID="editor-close-confirm-modal"
-        transparent
-        visible={closeEditorModalVisible}
-        animationType="fade"
-        onRequestClose={() => setCloseEditorModalVisible(false)}
-      >
-        <View style={styles.dialogOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setCloseEditorModalVisible(false)} />
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Unsaved changes</Text>
-            <Text style={styles.helperText}>Closing the editor will discard the current unsaved changes.</Text>
-            <View style={styles.dialogActionColumn}>
-              <Pressable onPress={() => setCloseEditorModalVisible(false)} style={styles.dialogButton}>
-                <Text style={styles.dialogButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                testID="editor-close-discard-button"
-                onPress={finishClosingEditor}
-                style={styles.dialogButton}
-              >
-                <Text style={styles.dialogButtonText}>Discard</Text>
-              </Pressable>
-              <Pressable
-                testID="editor-close-save-button"
-                onPress={() => {
-                  openSaveTabModal('save_then_close');
-                  setCloseEditorModalVisible(false);
-                }}
-                style={[styles.dialogButton, styles.dialogPrimaryButton]}
-              >
-                <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>Save</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
       </Modal>
     </SafeAreaView>
   );

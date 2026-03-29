@@ -20,12 +20,8 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState } = vi.hoisted((
     asyncStorageValues: values,
     asyncStorageMock: {
       getItem: vi.fn(async (key: string) => values.get(key) ?? null),
-      setItem: vi.fn(async (key: string, value: string) => {
-        values.set(key, value);
-      }),
-      removeItem: vi.fn(async (key: string) => {
-        values.delete(key);
-      }),
+      setItem: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
+      removeItem: vi.fn(async (key: string) => { values.delete(key); }),
     },
     detectorMockState: {
       isSupported: false,
@@ -37,8 +33,8 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState } = vi.hoisted((
   };
 });
 
-vi.mock('@react-native-async-storage/async-storage', () => ({
-  default: asyncStorageMock,
+vi.mock('../../src/logic/app-storage', () => ({
+  appStorage: asyncStorageMock,
 }));
 
 vi.mock('../../src/logic/web-audio', () => ({

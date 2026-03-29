@@ -1,0 +1,157 @@
+import { useState, useEffect, useMemo } from 'react';
+import { HARMONICA_KEYS, HarmonicaKey } from '../data/keys';
+import { SCALE_DEFINITIONS } from '../data/scales';
+import { noteToPc, pcToNote, NoteName } from '../data/notes';
+import { buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from '../logic/tabs';
+import { buildArpeggioSections } from '../logic/arpeggios';
+
+export function formatScaleLabel(rootPc: number, scaleId: string, preferFlats: boolean): string {
+  const scaleDef = SCALE_DEFINITIONS.find((item) => item.id === scaleId);
+  const rootName = pcToNote(rootPc, preferFlats);
+  return `${rootName} ${scaleDef ? scaleDef.name : 'Scale'}`;
+}
+
+export type ScaleKeyOption = {
+  position: number;
+  note: NoteName;
+};
+
+export type DropdownOption<T> = {
+  label: string;
+  value: T;
+};
+
+function formatOrdinal(value: number) {
+  const mod100 = value % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
+
+  switch (value % 10) {
+    case 1:
+      return `${value}st`;
+    case 2:
+      return `${value}nd`;
+    case 3:
+      return `${value}rd`;
+    default:
+      return `${value}th`;
+  }
+}
+
+function buildScaleKeyOptions(harmonicaPc: number, preferFlats: boolean): ScaleKeyOption[] {
+  return Array.from({ length: 12 }, (_, index) => {
+    const position = index + 1;
+    const rootPc = (harmonicaPc + index * 7) % 12;
+    return {
+      position,
+      note: pcToNote(rootPc, preferFlats),
+    };
+  });
+}
+
+export function getPreferredTabOption(group: TabGroup, gAltPreference: '-2' | '3') {
+  const hasMinusTwo = group.options.some((token) => token.tab === '-2');
+  const hasThree = group.options.some((token) => token.tab === '3');
+  if (hasMinusTwo && hasThree) {
+    return group.options.find((token) => token.tab === gAltPreference) ?? group.options[0];
+  }
+  return group.options[0];
+}
+
+type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
+
+export function useMusicalSelection() {
+  const [harmonicaKey, setHarmonicaKey] = useState<HarmonicaKey>(HARMONICA_KEYS[0]);
+  const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
+  const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
+  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>('-2');
+  const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(null);
+  const [scaleRoot, setScaleRoot] = useState<NoteName>('C');
+  const [scaleId, setScaleId] = useState<string>(SCALE_DEFINITIONS[0].id);
+
+  const scale = useMemo(
+    () => ({ rootPc: noteToPc(scaleRoot), scaleId } satisfies ScaleSelection),
+    [scaleRoot, scaleId],
+  );
+
+  const groups = useMemo(
+    () => buildTabsForScale(scale, harmonicaKey.pc, notation),
+    [scale, harmonicaKey.pc, notation],
+  );
+
+  const selectedTabs = useMemo(
+    () => groups.map((group) => getPreferredTabOption(group, gAltPreference)),
+    [groups, gAltPreference],
+  );
+
+  const arpeggioSections = useMemo(
+    () => buildArpeggioSections(scale.rootPc, scale.scaleId, arpeggioSelection ? [arpeggioSelection] : []),
+    [scale, arpeggioSelection],
+  );
+
+  const scaleKeyOptions = useMemo(
+    () => buildScaleKeyOptions(harmonicaKey.pc, harmonicaKey.preferFlats),
+    [harmonicaKey.pc, harmonicaKey.preferFlats],
+  );
+
+  const visibleScaleKeyOptions = useMemo(() => {
+    if (positionKeyFilter === 'all') return scaleKeyOptions;
+    if (positionKeyFilter === '1-2-3') {
+      return scaleKeyOptions.filter((option) => option.position <= 3);
+    }
+    return scaleKeyOptions.filter((option) => option.position <= 3 || option.position === 5);
+  }, [scaleKeyOptions, positionKeyFilter]);
+
+  const scaleKeyDropdownOptions = useMemo<DropdownOption<NoteName>[]>(
+    () =>
+      visibleScaleKeyOptions.map(({ position, note }) => ({
+        label: `${formatOrdinal(position)} / ${note}`,
+        value: note,
+      })),
+    [visibleScaleKeyOptions],
+  );
+
+  const scaleNameDropdownOptions = useMemo<DropdownOption<string>[]>(
+    () => SCALE_DEFINITIONS.map((s) => ({ label: s.name, value: s.id })),
+    [],
+  );
+
+  const firstPositionRoot = useMemo(
+    () => pcToNote(harmonicaKey.pc, harmonicaKey.preferFlats),
+    [harmonicaKey.pc, harmonicaKey.preferFlats],
+  );
+
+  // Auto-correct scaleRoot if it is no longer visible under the current position filter.
+  useEffect(() => {
+    if (scaleKeyDropdownOptions.some((option) => option.value === scaleRoot)) return;
+    const nextOption = scaleKeyDropdownOptions[0];
+    if (nextOption) {
+      setScaleRoot(nextOption.value);
+    }
+  }, [scaleKeyDropdownOptions, scaleRoot]);
+
+  return {
+    harmonicaKey,
+    setHarmonicaKey,
+    notation,
+    setNotation,
+    positionKeyFilter,
+    setPositionKeyFilter,
+    gAltPreference,
+    setGAltPreference,
+    arpeggioSelection,
+    setArpeggioSelection,
+    scaleRoot,
+    setScaleRoot,
+    scaleId,
+    setScaleId,
+    scale,
+    groups,
+    selectedTabs,
+    arpeggioSections,
+    scaleKeyOptions,
+    visibleScaleKeyOptions,
+    scaleKeyDropdownOptions,
+    scaleNameDropdownOptions,
+    firstPositionRoot,
+  };
+}
