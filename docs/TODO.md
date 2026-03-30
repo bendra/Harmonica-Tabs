@@ -24,6 +24,6 @@
 - Add a performance mode: a single toggle that enlarges the Main Tab Row chips and increases contrast for on-stage use, without affecting controls or arpeggios — scoped to the existing layout tier system rather than a general font-size preference
 - Optionally save harmonica key + target position with a saved tab: add a nullable position field to SavedTabRecord (null = no context, so no migration needed for existing records); expose an opt-in "Save with key/position context" toggle in the Editor Secondary Helper Row (defaults off, since most web tabs are key-agnostic); when a tab with saved context is opened and it mismatches the current selection, prompt with three options: switch to the saved harp+position, stay on current harp at the equivalent position (showing the resolved key name), or keep current selection and just load — when this ships, migrate saved-tab-library from the JSON blob to a proper SQLite schema with typed columns (id, title, inputText, harmonica_pc, position_number, etc.)
 - Set up a Puppeteer or Playwright MCP server for live browser observation (useful for debugging resource leaks, audio lifecycle, and runtime behavior without relying on manual screenshots)
-- Extract `useTabEditor` from App.tsx (Step 6 of hook extraction plan — the remaining hook covering editor input, save modal, and library-edit handlers)
+- Consider extracting remaining App.tsx layout/caret tracking into a `useScaleLayoutTracking` hook if that section grows unwieldy
 - accessibility
 - localization

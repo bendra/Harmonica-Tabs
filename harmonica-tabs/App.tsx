@@ -24,19 +24,14 @@ import {
 } from './src/hooks/use-musical-selection';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import {
-  cleanupTransposerInput,
-  normalizeTransposerEditInput,
-  TextSelection,
-} from './src/logic/transposer-input';
-import {
-  buildSavedTabTitleCandidate,
   formatSavedTabPreview,
   SavedTabRecord,
 } from './src/logic/saved-tab-library';
-import { useSavedTabLibrary, savedTabLibraryService } from './src/hooks/use-saved-tab-library';
+import { useSavedTabLibrary } from './src/hooks/use-saved-tab-library';
 import { useAudioSettings } from './src/hooks/use-audio-settings';
 import { useAudioListening } from './src/hooks/use-audio-listening';
 import { useTransposerSession } from './src/hooks/use-transposer-session';
+import { useTabEditor, SaveTabMode, TabsSubview } from './src/hooks/use-tab-editor';
 
 function getLayoutTier(shortEdge: number): LayoutTier {
   if (shortEdge < 420) return 'compact';
@@ -150,8 +145,6 @@ type SingleSelectOption<T extends string> = {
 };
 
 type AppScreen = 'scales' | 'tabs' | 'properties' | 'tab-symbols';
-type SaveTabMode = 'overwrite' | 'create_new' | 'save_then_open' | 'save_then_close';
-type TabsSubview = 'transpose' | 'library';
 type LayoutRect = { x: number; y: number; width: number; height: number };
 const AUDIO_CONFIDENCE_GATE = 0.2;
 
@@ -434,24 +427,54 @@ export default function App() {
     toneFollowHoldDurationMs,
     isListening,
   });
-  const [editorInput, setEditorInput] = useState('');
-  const [editorSelection, setEditorSelection] = useState<TextSelection>({ start: 0, end: 0 });
-  const [editorSavedTabId, setEditorSavedTabId] = useState<string | null>(null);
-  const [editorReturnTo, setEditorReturnTo] = useState<TabsSubview>('library');
-  const [saveTabModalVisible, setSaveTabModalVisible] = useState(false);
-  const [saveTabMode, setSaveTabMode] = useState<SaveTabMode>('overwrite');
-  const [saveTabTitleInput, setSaveTabTitleInput] = useState('');
-  const [saveTabTitleError, setSaveTabTitleError] = useState<string | null>(null);
-  const [pendingOpenRecord, setPendingOpenRecord] = useState<SavedTabRecord | null>(null);
-  const [openAfterSaveRecordId, setOpenAfterSaveRecordId] = useState<string | null>(null);
-  const [closeEditorModalVisible, setCloseEditorModalVisible] = useState(false);
+  const {
+    editorInput,
+    setEditorInput,
+    editorSelection,
+    setEditorSelection,
+    editorSavedTabId,
+    editorReturnTo,
+    saveTabModalVisible,
+    saveTabMode,
+    saveTabTitleInput,
+    setSaveTabTitleInput,
+    saveTabTitleError,
+    setSaveTabTitleError,
+    pendingOpenRecord,
+    setPendingOpenRecord,
+    closeEditorModalVisible,
+    setCloseEditorModalVisible,
+    editorSavedTab,
+    hasUnsavedEditorChanges,
+    editorInputRef,
+    handleEditorInputChange,
+    handleCleanEditorInput,
+    closeSaveTabModal,
+    openSaveTabModal,
+    finishClosingEditor,
+    handleEditorCloseRequest,
+    openSavedTabInEditor,
+    openEditorForNewDraft,
+    handleSaveTabConfirm,
+    handleSavedTabEditPress,
+    handleSavedTabTransposePress,
+    handleDeleteSavedTab,
+  } = useTabEditor({
+    savedTabs,
+    setSavedTabs,
+    setSavedTabsStatus,
+    setTransposerSourceTabId,
+    setTabsSubview,
+    setTabsEditorVisible,
+    setScreen,
+    deleteSavedTab,
+  });
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
   const [arpeggioLayouts, setArpeggioLayouts] = useState<
     Record<string, Array<{ x: number; y: number; width: number; height: number }>>
   >({});
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
-  const editorInputRef = useRef<TextInput>(null);
   const renderCountRef = useRef(0);
   const arpeggioLayoutLogCountRef = useRef(0);
   const lastCaretVisibleRef = useRef(false);
@@ -485,14 +508,7 @@ export default function App() {
     closeEditorModalVisible,
   ]);
 
-  const editorSavedTab = useMemo(
-    () => savedTabs.find((tab) => tab.id === editorSavedTabId) ?? null,
-    [editorSavedTabId, savedTabs],
-  );
   const savedTabsStatusIsError = isSavedTabsErrorStatus(savedTabsStatus);
-  const hasUnsavedEditorChanges = editorSavedTab
-    ? editorInput !== editorSavedTab.inputText
-    : editorInput.trim().length > 0;
 
   function renderToneFollowDebugPanel() {
     return (
@@ -541,78 +557,6 @@ export default function App() {
     ));
   }
 
-  function handleEditorInputChange(value: string) {
-    setEditorInput(normalizeTransposerEditInput(value));
-  }
-
-  function handleCleanEditorInput() {
-    const cleaned = cleanupTransposerInput(editorInput, {
-      stripInvalidContent: true,
-      removeExcessWhitespace: true,
-    });
-    setEditorInput(cleaned);
-    setEditorSelection((prev) => ({
-      start: Math.min(prev.start, cleaned.length),
-      end: Math.min(prev.end, cleaned.length),
-    }));
-  }
-
-  function closeSaveTabModal() {
-    setSaveTabModalVisible(false);
-    setSaveTabMode('overwrite');
-    setSaveTabTitleInput('');
-    setSaveTabTitleError(null);
-    setOpenAfterSaveRecordId(null);
-  }
-
-  function resetEditorDialogState() {
-    closeSaveTabModal();
-    setCloseEditorModalVisible(false);
-    setPendingOpenRecord(null);
-  }
-
-  function openSaveTabModal(mode: SaveTabMode = 'overwrite', nextOpenRecordId: string | null = null) {
-    if (editorInput.trim().length === 0) {
-      setSavedTabsStatus('Enter some tab text before saving.');
-      return;
-    }
-
-    const defaultTitle = editorSavedTab?.title ?? buildSavedTabTitleCandidate(editorInput);
-
-    setSaveTabMode(mode);
-    setSaveTabTitleInput(defaultTitle);
-    setSaveTabTitleError(null);
-    setOpenAfterSaveRecordId(nextOpenRecordId);
-    setSaveTabModalVisible(true);
-    setSavedTabsStatus(null);
-  }
-
-  function startNewDraft() {
-    setEditorInput('');
-    setEditorSelection({ start: 0, end: 0 });
-    setEditorSavedTabId(null);
-    setPendingOpenRecord(null);
-    setSavedTabsStatus('Started a new tab.');
-    requestAnimationFrame(() => {
-      editorInputRef.current?.focus();
-    });
-  }
-
-  function finishClosingEditor() {
-    resetEditorDialogState();
-    setTabsEditorVisible(false);
-    setTabsSubview(editorReturnTo);
-  }
-
-  function handleEditorCloseRequest() {
-    if (hasUnsavedEditorChanges) {
-      setCloseEditorModalVisible(true);
-      return;
-    }
-
-    finishClosingEditor();
-  }
-
   function openTabsWorkspace() {
     console.log('[press] workspace-tabs-button', {
       screen,
@@ -629,111 +573,6 @@ export default function App() {
     setTabsEditorVisible(false);
     setTabsSubview(nextSubview);
     setScreen('tabs');
-  }
-
-  function openSavedTabInEditor(record: SavedTabRecord, returnTo: TabsSubview = 'library') {
-    setEditorInput(record.inputText);
-    setEditorSelection({ start: 0, end: 0 });
-    setEditorSavedTabId(record.id);
-    setEditorReturnTo(returnTo);
-    setPendingOpenRecord(null);
-    setTabsSubview(returnTo);
-    setTabsEditorVisible(true);
-    setScreen('tabs');
-    setSavedTabsStatus(`Opened "${record.title}" in the editor.`);
-    requestAnimationFrame(() => {
-      editorInputRef.current?.focus();
-    });
-  }
-
-  function openEditorForNewDraft(returnTo: TabsSubview) {
-    startNewDraft();
-    setEditorReturnTo(returnTo);
-    setTabsSubview(returnTo);
-    setTabsEditorVisible(true);
-    setScreen('tabs');
-    setSavedTabsStatus(null);
-  }
-
-  async function handleSaveTabConfirm() {
-    const nextTitle = saveTabTitleInput.trim();
-    if (nextTitle.length === 0) {
-      setSaveTabTitleError('Title is required.');
-      return;
-    }
-
-    try {
-      const nextSaveMode = saveTabMode;
-      const nextOpenRecordId = openAfterSaveRecordId;
-      const saveTargetId = nextSaveMode === 'create_new' ? null : editorSavedTabId;
-      const result = await savedTabLibraryService.saveTab({
-        id: saveTargetId,
-        title: nextTitle,
-        inputText: editorInput,
-      });
-      setSavedTabs(result.tabs);
-      setEditorSavedTabId(result.savedTab.id);
-      setSavedTabsStatus(`Saved "${result.savedTab.title}".`);
-      closeSaveTabModal();
-
-      if (nextSaveMode === 'save_then_close') {
-        finishClosingEditor();
-        return;
-      }
-
-      if (nextOpenRecordId) {
-        const nextRecord = result.tabs.find((tab) => tab.id === nextOpenRecordId) ?? null;
-        if (nextRecord) {
-          openSavedTabInEditor(nextRecord, 'library');
-        }
-        return;
-      }
-
-      finishClosingEditor();
-    } catch (error) {
-      const nextMessage = error instanceof Error && error.message ? error.message : 'Could not save this tab.';
-      setSaveTabTitleError(nextMessage);
-    }
-  }
-
-  function handleSavedTabEditPress(record: SavedTabRecord) {
-    if (!hasUnsavedEditorChanges) {
-      openSavedTabInEditor(record, 'library');
-      return;
-    }
-
-    const wouldReplaceCurrentInput = editorSavedTabId !== record.id || editorInput !== record.inputText;
-
-    if (!wouldReplaceCurrentInput) {
-      openSavedTabInEditor(record, 'library');
-      return;
-    }
-
-    setPendingOpenRecord(record);
-  }
-
-  function handleSavedTabTransposePress(record: SavedTabRecord) {
-    setTransposerSourceTabId(record.id);
-    setSavedTabsStatus(`Selected "${record.title}" for transposing.`);
-    setTabsEditorVisible(false);
-    setTabsSubview('transpose');
-    setScreen('tabs');
-  }
-
-  async function handleDeleteSavedTab(record: SavedTabRecord) {
-    try {
-      await deleteSavedTab(record);
-      setPendingOpenRecord((prev) => (prev?.id === record.id ? null : prev));
-      if (editorSavedTabId === record.id) {
-        setEditorSavedTabId(null);
-      }
-      if (transposerSourceTabId === record.id) {
-        setTransposerSourceTabId(null);
-      }
-      setSavedTabsStatus(`Deleted "${record.title}".`);
-    } catch {
-      setSavedTabsStatus('Could not delete that saved tab.');
-    }
   }
 
   const caretSize = 18;
