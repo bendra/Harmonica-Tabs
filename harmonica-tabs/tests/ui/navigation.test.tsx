@@ -194,6 +194,12 @@ function chooseTargetPosition(root: any, label: string) {
   });
 }
 
+function chooseHarmonicaKey(root: any, pc: number) {
+  act(() => {
+    findDropdownByLabel(root, 'Harmonica key').props.onChange(pc);
+  });
+}
+
 async function editLibraryTab(root: any, id: string) {
   await act(async () => {
     findByTestId(root, `saved-tab-edit:${id}`).props.onPress();
@@ -342,6 +348,65 @@ describe('App navigation', () => {
     expect(readStyleNumber(findTransposerOutputTextNode(compactRoot).props.style, 'fontSize')).toBe(14);
     expect(readStyleNumber(findTransposerOutputTextNode(regularRoot).props.style, 'fontSize')).toBe(16);
     expect(readStyleNumber(findTransposerOutputTextNode(wideRoot).props.style, 'fontSize')).toBe(18);
+  });
+
+  it('shows flat spellings by default for harmonica and target key dropdowns', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    chooseHarmonicaKey(root, 11);
+
+    expect(findDropdownByLabel(root, 'Harmonica key').props.options).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'Db' })]),
+    );
+    expect(findDropdownByLabel(root, 'Harmonica key').props.options).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'C#' })]),
+    );
+    expect(findDropdownByLabel(root, 'Target Position/Key').props.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: '2nd / Gb' }),
+        expect.objectContaining({ label: '3rd / Db' }),
+      ]),
+    );
+  });
+
+  it('lets properties switch harmonica and target dropdown spellings to sharps', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    chooseHarmonicaKey(root, 11);
+    chooseTargetPosition(root, '2nd / Gb');
+
+    act(() => {
+      findPressableByText(root, '⚙').props.onPress();
+    });
+
+    act(() => {
+      findDropdownByLabel(root, 'Harp keys').props.onChange('sharp');
+      findDropdownByLabel(root, 'Target keys').props.onChange('sharp');
+    });
+
+    act(() => {
+      findPressableByText(root, '←').props.onPress();
+    });
+
+    expect(findDropdownByLabel(root, 'Harmonica key').props.options).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'C#' })]),
+    );
+    expect(findDropdownByLabel(root, 'Harmonica key').props.options).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'Db' })]),
+    );
+    expect(findDropdownByLabel(root, 'Target Position/Key').props.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: '2nd / F#' }),
+        expect.objectContaining({ label: '3rd / C#' }),
+      ]),
+    );
+    expect(findDropdownByLabel(root, 'Target Position/Key').props.value).toBe('F#');
   });
 
   it('keeps the workspace nav visible while the library list scrolls internally', async () => {

@@ -13,7 +13,7 @@
 - Standard 10-hole Richter tuning only.
 - Overbends excluded on holes 2, 3, and 8.
 - Overbend notation selectable: `'` or `°`.
-- Note spelling follows harmonica key (flats vs sharps).
+- Harmonica-key labels and target/scale note labels each have a user-selectable flat/sharp display style; both default to flats.
 - Tabs default to `-2` instead of `3` when they are the same pitch.
 - Tabs are clickable to toggle alternates (currently only `-2` ↔ `3`).
 - Chords shown separately for Blow and Draw based on adjacent unbent holes.
@@ -62,7 +62,7 @@
 - The transposer output auto-scrolls just enough to keep the active token visible during tone follow and manual cursor moves.
 - Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
-- The Properties screen also includes tone-follow settings for tolerance, minimum confidence, and hold duration.
+- The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling, target-key spelling, and tone-follow settings for tolerance, minimum confidence, and hold duration.
 - Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
 - Properties screen is still separate via gear button.
 

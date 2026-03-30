@@ -25,7 +25,7 @@ Out of scope today:
 
 ### Data layer (`harmonica-tabs/src/data`)
 - `notes.ts`: pitch-class utilities (`noteToPc`, `pcToNote`, `normalizePc`).
-- `keys.ts`: harmonica key catalog (`HARMONICA_KEYS`) and flat/sharp preference.
+- `keys.ts`: harmonica key catalog (`HARMONICA_KEYS`) used by the harmonica selector.
 - `scales.ts`: static scale interval definitions.
 - `richter.ts`: canonical C Richter layout + transposition helper.
 
@@ -109,7 +109,7 @@ Derived values (`useMemo`) drive most rendering:
 - Standard 10-hole Richter only.
 - Overbends are excluded on holes `2`, `3`, and `8` (`tabs.ts`).
 - Overbend notation is user-selectable (`'` vs `°`).
-- Enharmonic spelling follows harmonica key flat/sharp preference.
+- Harmonica-key labels and target/scale-note labels have separate flat/sharp display preferences, both defaulting to flats.
 - Alternate selection is currently most visible for G (`-2` vs `3`) where both exist at the same MIDI pitch.
 - Saved tabs intentionally exclude harmonica key, position/key, transposition direction, tone-follow state, and derived output.
 - `Save` overwrites the linked saved record when one exists; `Save As` always creates a new saved record.
