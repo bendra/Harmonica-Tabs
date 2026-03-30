@@ -27,3 +27,4 @@
 - Extract `useTabEditor` from App.tsx (Step 6 of hook extraction plan — the remaining hook covering editor input, save modal, and library-edit handlers)
 - accessibility
 - localization
+- allow selection of flat vs sharp for both harmonica and position (flat seems to be the standard)

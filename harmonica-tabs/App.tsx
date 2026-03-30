@@ -868,6 +868,10 @@ export default function App() {
   const scalesArpeggioTabValueStyle = {
     fontSize: scalesLayout.arpeggioTabFontSize,
   };
+  const transposerOutputTextStyle = {
+    fontSize: scalesLayout.tabFontSize,
+    lineHeight: scalesLayout.tabLineHeight,
+  };
   const isScalesScreen = screen === 'scales' && !tabsEditorVisible;
 
   useEffect(() => {
@@ -1543,7 +1547,7 @@ export default function App() {
                     }}
                     scrollEventThrottle={16}
                   >
-                    <Text style={styles.transposerOutputText}>
+                    <Text style={[styles.transposerOutputText, transposerOutputTextStyle]}>
                       {transposerSourceTab === null
                         ? 'Choose a saved tab to generate a transposed tab.'
                         : transposerResult.outputSegments.map((segment, index) => (
