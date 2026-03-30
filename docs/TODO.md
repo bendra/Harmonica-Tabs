@@ -23,3 +23,4 @@
 - Consider cross-device sync only after local import/export proves useful.
 - accessibility
 - localization
+- allow selection of flat vs sharp for both harmonica and position (flat seems to be the standard)

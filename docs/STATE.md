@@ -48,6 +48,7 @@
 - `Tabs -> Transpose` contains source actions, octave-shift buttons, shared listen control, clickable transposed tab output, and parser/transpose warnings.
 - The transposer also shows a compact label for the currently displayed saved tab.
 - The transposer includes `Choose Tab` plus `Edit Tab` actions instead of direct text editing; `Choose Tab` clears the active source and returns to the library.
+- The transposed tab box now scales its tab typography across compact, regular, and wide layouts to stay closer to the main `Scales` tab readability on larger displays.
 - `Tabs -> Library` owns saved-tab browsing with `Open`, `Edit`, `Delete`, and `New Tab`.
 - The library keeps the bottom workspace navigation visible; when saved tabs overflow, the list scrolls inside the library card instead of pushing the workspace nav off-screen.
 - The editor is a full-screen overlay within `Tabs` and owns a labeled `Cancel` dismiss action, top-aligned `Save` / `Save As` controls, a secondary `Clean Input` helper, and raw tab entry.
@@ -88,6 +89,7 @@
 - `harmonica-tabs/tests/ui/navigation.test.tsx`
   - Top-level `Scales` / `Tabs` navigation and Tabs editor/library flows work as expected.
   - The `Scales` workspace scales its main tab sizing across compact, regular, and wide screen sizes, only caps width on wide layouts, and keeps its results list in an inner scroll area.
+  - The transposer output scales its tab text sizing across compact, regular, and wide screen sizes.
   - `Tabs` opens on the library until a transposer source is selected.
   - Returning to `Tabs` preserves the active transposer source unless `Choose Tab` was used to clear it.
   - The transposer shows its empty output state until a saved source tab is selected, then exposes clickable output tokens and the shared listen button.
