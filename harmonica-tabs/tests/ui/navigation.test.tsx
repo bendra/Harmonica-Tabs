@@ -83,6 +83,10 @@ function findTransposerOutputScroll(root: any) {
   return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'transposer-output-scroll');
 }
 
+function findTransposerOutputTextNode(root: any) {
+  return findTransposerOutputScroll(root).findAll((node: any) => node.type === 'Text')[0];
+}
+
 function findSavedTabsScroll(root: any) {
   return root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'saved-tabs-scroll');
 }
@@ -306,6 +310,38 @@ describe('App navigation', () => {
     expect(findByTestId(root, 'workspace-scales-button')).toBeTruthy();
     expect(findByTestId(root, 'workspace-tabs-button')).toBeTruthy();
     expect(findScalesResultsScroll(root).props.nestedScrollEnabled).toBe(true);
+  });
+
+  it('scales the transposer output text up across compact, regular, and wide widths', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4 5 -5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const compactRenderer = await renderAppAtSize(390, 844);
+    const compactRoot = compactRenderer.root;
+    goToTabs(compactRoot);
+    await openLibraryTab(compactRoot, 'source');
+
+    const regularRenderer = await renderAppAtSize(700, 1024);
+    const regularRoot = regularRenderer.root;
+    goToTabs(regularRoot);
+    await openLibraryTab(regularRoot, 'source');
+
+    const wideRenderer = await renderAppAtSize(900, 1200);
+    const wideRoot = wideRenderer.root;
+    goToTabs(wideRoot);
+    await openLibraryTab(wideRoot, 'source');
+
+    expect(readStyleNumber(findTransposerOutputTextNode(compactRoot).props.style, 'fontSize')).toBe(14);
+    expect(readStyleNumber(findTransposerOutputTextNode(regularRoot).props.style, 'fontSize')).toBe(16);
+    expect(readStyleNumber(findTransposerOutputTextNode(wideRoot).props.style, 'fontSize')).toBe(18);
   });
 
   it('keeps the workspace nav visible while the library list scrolls internally', async () => {
