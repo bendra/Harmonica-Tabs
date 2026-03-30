@@ -1,4 +1,4 @@
-# TODO / Next Steps
+git # TODO / Next Steps
 
 - Revisit tab ordering and octave handling if alternate tunings are added.
 - Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
@@ -27,4 +27,3 @@
 - Consider extracting remaining App.tsx layout/caret tracking into a `useScaleLayoutTracking` hook if that section grows unwieldy
 - accessibility
 - localization
-- allow selection of flat vs sharp for both harmonica and position (flat seems to be the standard)

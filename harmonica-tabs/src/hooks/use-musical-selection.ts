@@ -21,6 +21,8 @@ export type DropdownOption<T> = {
   value: T;
 };
 
+export type NoteLabelStyle = 'flat' | 'sharp';
+
 function formatOrdinal(value: number) {
   const mod100 = value % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
@@ -61,12 +63,16 @@ type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 
 export function useMusicalSelection() {
   const [harmonicaKey, setHarmonicaKey] = useState<HarmonicaKey>(HARMONICA_KEYS[0]);
+  const [harmonicaKeyLabelStyle, setHarmonicaKeyLabelStyle] = useState<NoteLabelStyle>('flat');
+  const [targetKeyLabelStyle, setTargetKeyLabelStyle] = useState<NoteLabelStyle>('flat');
   const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
   const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
   const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>('-2');
   const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(null);
   const [scaleRoot, setScaleRoot] = useState<NoteName>('C');
   const [scaleId, setScaleId] = useState<string>(SCALE_DEFINITIONS[0].id);
+  const harmonicaKeyPreferFlats = harmonicaKeyLabelStyle === 'flat';
+  const targetKeyPreferFlats = targetKeyLabelStyle === 'flat';
 
   const scale = useMemo(
     () => ({ rootPc: noteToPc(scaleRoot), scaleId } satisfies ScaleSelection),
@@ -88,9 +94,18 @@ export function useMusicalSelection() {
     [scale, arpeggioSelection],
   );
 
+  const harmonicaKeyDropdownOptions = useMemo<DropdownOption<number>[]>(
+    () =>
+      HARMONICA_KEYS.map((key) => ({
+        label: pcToNote(key.pc, harmonicaKeyPreferFlats),
+        value: key.pc,
+      })),
+    [harmonicaKeyPreferFlats],
+  );
+
   const scaleKeyOptions = useMemo(
-    () => buildScaleKeyOptions(harmonicaKey.pc, harmonicaKey.preferFlats),
-    [harmonicaKey.pc, harmonicaKey.preferFlats],
+    () => buildScaleKeyOptions(harmonicaKey.pc, targetKeyPreferFlats),
+    [harmonicaKey.pc, targetKeyPreferFlats],
   );
 
   const visibleScaleKeyOptions = useMemo(() => {
@@ -116,15 +131,23 @@ export function useMusicalSelection() {
   );
 
   const firstPositionRoot = useMemo(
-    () => pcToNote(harmonicaKey.pc, harmonicaKey.preferFlats),
-    [harmonicaKey.pc, harmonicaKey.preferFlats],
+    () => pcToNote(harmonicaKey.pc, targetKeyPreferFlats),
+    [harmonicaKey.pc, targetKeyPreferFlats],
   );
 
-  // Auto-correct scaleRoot if it is no longer visible under the current position filter.
+  // Keep the selected target root visible and respell it when the flat/sharp display style changes.
   useEffect(() => {
-    if (scaleKeyDropdownOptions.some((option) => option.value === scaleRoot)) return;
+    const scaleRootPc = noteToPc(scaleRoot);
+    const matchingOption = scaleKeyDropdownOptions.find((option) => noteToPc(option.value) === scaleRootPc);
+    if (matchingOption) {
+      if (matchingOption.value !== scaleRoot) {
+        setScaleRoot(matchingOption.value);
+      }
+      return;
+    }
+
     const nextOption = scaleKeyDropdownOptions[0];
-    if (nextOption) {
+    if (nextOption && nextOption.value !== scaleRoot) {
       setScaleRoot(nextOption.value);
     }
   }, [scaleKeyDropdownOptions, scaleRoot]);
@@ -132,6 +155,13 @@ export function useMusicalSelection() {
   return {
     harmonicaKey,
     setHarmonicaKey,
+    harmonicaKeyLabelStyle,
+    setHarmonicaKeyLabelStyle,
+    harmonicaKeyDropdownOptions,
+    targetKeyLabelStyle,
+    setTargetKeyLabelStyle,
+    harmonicaKeyPreferFlats,
+    targetKeyPreferFlats,
     notation,
     setNotation,
     positionKeyFilter,

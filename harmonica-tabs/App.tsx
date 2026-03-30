@@ -14,7 +14,14 @@ import {
 import { pcToNote } from './src/data/notes';
 import { HARMONICA_KEYS } from './src/data/keys';
 import { buildTabsForPcSet } from './src/logic/tabs';
-import { useMusicalSelection, DropdownOption, ScaleKeyOption, formatScaleLabel, getPreferredTabOption } from './src/hooks/use-musical-selection';
+import {
+  useMusicalSelection,
+  DropdownOption,
+  NoteLabelStyle,
+  ScaleKeyOption,
+  formatScaleLabel,
+  getPreferredTabOption,
+} from './src/hooks/use-musical-selection';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import {
   formatSavedTabPreview,
@@ -322,6 +329,12 @@ export default function App() {
   const {
     harmonicaKey,
     setHarmonicaKey,
+    harmonicaKeyLabelStyle,
+    setHarmonicaKeyLabelStyle,
+    harmonicaKeyDropdownOptions,
+    targetKeyLabelStyle,
+    setTargetKeyLabelStyle,
+    targetKeyPreferFlats,
     notation,
     setNotation,
     positionKeyFilter,
@@ -539,7 +552,7 @@ export default function App() {
   function formatNotes(pcs: number[], rootPc: number) {
     return pcs.map((pc, index) => (
       <Text key={`${pc}:${index}`} style={pc === rootPc ? styles.arpeggioNotesRoot : undefined}>
-        {index === 0 ? pcToNote(pc, harmonicaKey.preferFlats) : `–${pcToNote(pc, harmonicaKey.preferFlats)}`}
+        {index === 0 ? pcToNote(pc, targetKeyPreferFlats) : `–${pcToNote(pc, targetKeyPreferFlats)}`}
       </Text>
     ));
   }
@@ -1007,6 +1020,32 @@ export default function App() {
               <View style={styles.propertiesCompactDropdownField}>
                 <Dropdown
                   compact
+                  label="Harp keys"
+                  value={harmonicaKeyLabelStyle}
+                  options={[
+                    { label: 'Flat', value: 'flat' },
+                    { label: 'Sharp', value: 'sharp' },
+                  ]}
+                  onChange={(value) => setHarmonicaKeyLabelStyle(value as NoteLabelStyle)}
+                />
+              </View>
+              <View style={styles.propertiesCompactDropdownField}>
+                <Dropdown
+                  compact
+                  label="Target keys"
+                  value={targetKeyLabelStyle}
+                  options={[
+                    { label: 'Flat', value: 'flat' },
+                    { label: 'Sharp', value: 'sharp' },
+                  ]}
+                  onChange={(value) => setTargetKeyLabelStyle(value as NoteLabelStyle)}
+                />
+              </View>
+            </View>
+            <View style={styles.propertiesCompactDropdownRow}>
+              <View style={styles.propertiesCompactDropdownField}>
+                <Dropdown
+                  compact
                   label="-2 / 3"
                   value={gAltPreference}
                   options={[
@@ -1180,10 +1219,10 @@ export default function App() {
                   <View style={styles.topRowKey}>
                     <Dropdown
                       label="Harmonica key"
-                      value={harmonicaKey.label}
-                      options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
-                      onChange={(label) => {
-                        const key = HARMONICA_KEYS.find((item) => item.label === label);
+                      value={harmonicaKey.pc}
+                      options={harmonicaKeyDropdownOptions}
+                      onChange={(pc) => {
+                        const key = HARMONICA_KEYS.find((item) => item.pc === pc);
                         if (key) setHarmonicaKey(key);
                       }}
                     />
@@ -1452,11 +1491,11 @@ export default function App() {
               <View style={styles.topRowKey}>
                 <Dropdown
                   label="Harmonica key"
-                  value={harmonicaKey.label}
+                  value={harmonicaKey.pc}
                   size={scalesLayout.controlSize}
-                  options={HARMONICA_KEYS.map((key) => ({ label: key.label, value: key.label }))}
-                  onChange={(label) => {
-                    const key = HARMONICA_KEYS.find((item) => item.label === label);
+                  options={harmonicaKeyDropdownOptions}
+                  onChange={(pc) => {
+                    const key = HARMONICA_KEYS.find((item) => item.pc === pc);
                     if (key) setHarmonicaKey(key);
                   }}
                 />
@@ -1560,7 +1599,7 @@ export default function App() {
                   <View style={styles.checkboxRow}>
                     <Text style={[styles.checkbox, scalesCheckboxStyle]}>{mainSelected ? '☑' : '☐'}</Text>
                     <Text style={[styles.resultTitle, scalesResultTitleStyle]}>
-                      {formatScaleLabel(scale.rootPc, scale.scaleId, harmonicaKey.preferFlats)}
+                      {formatScaleLabel(scale.rootPc, scale.scaleId, targetKeyPreferFlats)}
                     </Text>
                   </View>
                 </Pressable>
@@ -1901,6 +1940,7 @@ const styles = StyleSheet.create({
   },
   propertiesCompactDropdownRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'flex-start',
     gap: 6,
   },
