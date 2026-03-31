@@ -57,13 +57,10 @@ export function useTabEditor({
   const [editorSelection, setEditorSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [editorSavedTabId, setEditorSavedTabId] = useState<string | null>(null);
   const [editorReturnTo, setEditorReturnTo] = useState<TabsSubview>('library');
-  const [saveTabModalVisible, setSaveTabModalVisible] = useState(false);
-  const [saveTabMode, setSaveTabMode] = useState<SaveTabMode>('overwrite');
   const [saveTabTitleInput, setSaveTabTitleInput] = useState('');
   const [saveTabTitleError, setSaveTabTitleError] = useState<string | null>(null);
   const [isSavingTab, setIsSavingTab] = useState(false);
   const [pendingOpenRecord, setPendingOpenRecord] = useState<SavedTabRecord | null>(null);
-  const [openAfterSaveRecordId, setOpenAfterSaveRecordId] = useState<string | null>(null);
   const [closeEditorModalVisible, setCloseEditorModalVisible] = useState(false);
   const [saveWithContext, setSaveWithContext] = useState(false);
   const [draftSavedContext, setDraftSavedContext] = useState<SavedTabContext>(null);
@@ -88,8 +85,9 @@ export function useTabEditor({
   const linkedSavedContext = editorSavedTab ? getSavedTabContext(editorSavedTab) : null;
   const effectiveDraftContext = saveWithContext ? draftSavedContext : null;
   const hasUnsavedContextChanges = editorSavedTab ? !sameSavedContext(linkedSavedContext, effectiveDraftContext) : false;
+  const hasUnsavedTitleChange = editorSavedTab ? saveTabTitleInput.trim() !== editorSavedTab.title : false;
   const hasUnsavedEditorChanges = editorSavedTab
-    ? editorInput !== editorSavedTab.inputText || hasUnsavedContextChanges
+    ? editorInput !== editorSavedTab.inputText || hasUnsavedContextChanges || hasUnsavedTitleChange
     : editorInput.trim().length > 0;
 
   function handleEditorInputChange(value: string) {
@@ -108,40 +106,12 @@ export function useTabEditor({
     }));
   }
 
-  function closeSaveTabModal() {
-    setSaveTabModalVisible(false);
-    setSaveTabMode('overwrite');
-    setSaveTabTitleInput('');
-    saveTabTitleInputRef.current = '';
+  function resetEditorDialogState() {
     setSaveTabTitleError(null);
     setIsSavingTab(false);
     isSavingTabRef.current = false;
-    setOpenAfterSaveRecordId(null);
-  }
-
-  function resetEditorDialogState() {
-    closeSaveTabModal();
     setCloseEditorModalVisible(false);
     setPendingOpenRecord(null);
-  }
-
-  function openSaveTabModal(mode: SaveTabMode = 'overwrite', nextOpenRecordId: string | null = null) {
-    if (editorInput.trim().length === 0) {
-      setSavedTabsStatus('Enter some tab text before saving.');
-      return;
-    }
-
-    const defaultTitle = editorSavedTab?.title ?? buildSavedTabTitleCandidate(editorInput);
-
-    setSaveTabMode(mode);
-    setSaveTabTitleInput(defaultTitle);
-    saveTabTitleInputRef.current = defaultTitle;
-    setSaveTabTitleError(null);
-    setIsSavingTab(false);
-    isSavingTabRef.current = false;
-    setOpenAfterSaveRecordId(nextOpenRecordId);
-    setSaveTabModalVisible(true);
-    setSavedTabsStatus(null);
   }
 
   function handleSaveTabTitleInputChange(value: string) {
@@ -165,6 +135,9 @@ export function useTabEditor({
     setPendingOpenRecord(null);
     setSaveWithContext(false);
     setDraftSavedContext(currentSelectionContext);
+    setSaveTabTitleInput('');
+    saveTabTitleInputRef.current = '';
+    setSaveTabTitleError(null);
     setSavedTabsStatus('Started a new tab.');
     requestAnimationFrame(() => {
       editorInputRef.current?.focus();
@@ -189,6 +162,9 @@ export function useTabEditor({
     setEditorInput(record.inputText);
     setEditorSelection({ start: 0, end: 0 });
     setEditorSavedTabId(record.id);
+    setSaveTabTitleInput(record.title);
+    saveTabTitleInputRef.current = record.title;
+    setSaveTabTitleError(null);
     applyDraftState(record);
     setEditorReturnTo(returnTo);
     setPendingOpenRecord(null);
@@ -210,53 +186,53 @@ export function useTabEditor({
     setSavedTabsStatus(null);
   }
 
-  async function handleSaveTabConfirm() {
-    debugTabEditor('save-confirm:entered', {
-      saveMode: saveTabMode,
-      modalVisible: saveTabModalVisible,
-      titleLength: saveTabTitleInputRef.current.trim().length,
-    });
+  async function handleDirectSave(mode: SaveTabMode = 'overwrite', nextOpenRecordId: string | null = null) {
+    if (editorInput.trim().length === 0) {
+      setSavedTabsStatus('Enter some tab text before saving.');
+      return;
+    }
     if (isSavingTabRef.current) {
-      debugTabEditor('save-confirm:ignored-already-saving');
+      debugTabEditor('direct-save:ignored-already-saving');
       return;
     }
 
-    const nextTitle = saveTabTitleInputRef.current.trim();
-    if (nextTitle.length === 0) {
-      setSaveTabTitleError('Title is required.');
-      return;
+    // Auto-suggest title from content when left blank
+    let title = saveTabTitleInputRef.current.trim();
+    if (title.length === 0) {
+      title = buildSavedTabTitleCandidate(editorInput);
+      setSaveTabTitleInput(title);
+      saveTabTitleInputRef.current = title;
     }
+
+    isSavingTabRef.current = true;
+    setIsSavingTab(true);
+    setSaveTabTitleError(null);
+
+    const saveTargetId = mode === 'create_new' ? null : editorSavedTabId;
+    const savedContext = saveWithContext ? draftSavedContext : null;
 
     try {
-      isSavingTabRef.current = true;
-      setIsSavingTab(true);
-      setSaveTabTitleInput(nextTitle);
-      saveTabTitleInputRef.current = nextTitle;
-      const nextSaveMode = saveTabMode;
-      const nextOpenRecordId = openAfterSaveRecordId;
-      const saveTargetId = nextSaveMode === 'create_new' ? null : editorSavedTabId;
-      const savedContext = saveWithContext ? draftSavedContext : null;
       const result = await getSavedTabLibraryService().saveTab({
         id: saveTargetId,
-        title: nextTitle,
+        title,
         inputText: editorInput,
         harmonicaPc: savedContext?.harmonicaPc ?? null,
         positionNumber: savedContext?.positionNumber ?? null,
       });
       setSavedTabs(result.tabs);
       setEditorSavedTabId(result.savedTab.id);
+      setSaveTabTitleInput(result.savedTab.title);
+      saveTabTitleInputRef.current = result.savedTab.title;
       applyDraftState(result.savedTab);
       setSavedTabsStatus(`Saved "${result.savedTab.title}".`);
-      closeSaveTabModal();
-      debugTabEditor('save-confirm:resolved', {
-        savedTabId: result.savedTab.id,
-      });
+      isSavingTabRef.current = false;
+      setIsSavingTab(false);
+      debugTabEditor('direct-save:resolved', { savedTabId: result.savedTab.id });
 
-      if (nextSaveMode === 'save_then_close') {
+      if (mode === 'save_then_close') {
         finishClosingEditor();
         return;
       }
-
       if (nextOpenRecordId) {
         const nextRecord = result.tabs.find((tab) => tab.id === nextOpenRecordId) ?? null;
         if (nextRecord) {
@@ -264,11 +240,10 @@ export function useTabEditor({
         }
         return;
       }
-
       finishClosingEditor();
     } catch (error) {
       const nextMessage = error instanceof Error && error.message ? error.message : 'Could not save this tab.';
-      debugTabEditor('save-confirm:error', { message: nextMessage });
+      debugTabEditor('direct-save:error', { message: nextMessage });
       setSaveTabTitleError(nextMessage);
       setIsSavingTab(false);
       isSavingTabRef.current = false;
@@ -317,8 +292,6 @@ export function useTabEditor({
     setEditorSelection,
     editorSavedTabId,
     editorReturnTo,
-    saveTabModalVisible,
-    saveTabMode,
     saveTabTitleInput,
     setSaveTabTitleInput,
     saveTabTitleError,
@@ -338,13 +311,11 @@ export function useTabEditor({
     handleSaveTabTitleInputChange,
     handleEditorInputChange,
     handleCleanEditorInput,
-    closeSaveTabModal,
-    openSaveTabModal,
     finishClosingEditor,
     handleEditorCloseRequest,
     openSavedTabInEditor,
     openEditorForNewDraft,
-    handleSaveTabConfirm,
+    handleDirectSave,
     handleSavedTabEditPress,
     handleDeleteSavedTab,
   };

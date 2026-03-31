@@ -54,7 +54,7 @@
 - `Tabs -> Library` owns saved-tab browsing with `Open`, `Edit`, `Delete`, and `New Tab`.
 - The library list is sorted alphabetically by tab title.
 - The library keeps the bottom workspace navigation visible; when saved tabs overflow, the list scrolls inside the library card instead of pushing the workspace nav off-screen.
-- The editor is a full-screen overlay within `Tabs` and owns a labeled `Cancel` dismiss action, top-aligned `Save` / `Save As` controls, a secondary helper row with `Clean Input` plus an opt-in `Save with key/position context` toggle, editor-local saved-context dropdowns for harmonica key and position/key when that toggle is on, and raw tab entry.
+- The editor is a full-screen overlay within `Tabs` and owns: always-visible saved-context dropdowns (harmonica key and position/key, disabled until opted in) with a `Save with key/position context` checkbox beneath them; a primary action row with `Cancel`, `Save` (overwrite, primary style), and `Save As` (new copy, outlined style) — new drafts show only `Save`; a standalone `Clean Input` button; an inline title field (pre-filled from the saved record, or blank and auto-suggested from content for new drafts); and raw tab entry.
 - The editor now relies entirely on the platform keyboard and normal paste behavior; the custom tab pad has been removed.
 - The transposer now keeps a numeric octave offset relative to the current target result instead of a fixed `down/base/up` candidate trio.
 - `Down` and `Up` step one octave from whatever tab is currently displayed, and can be pressed repeatedly until the next octave becomes unavailable.
@@ -101,7 +101,7 @@
   - `Base` also resets the target picker to first position, and unavailable octave buttons update after each step.
   - Changing the displayed octave resets the active output token.
   - The transposer output auto-scrolls to keep the active token visible.
-  - The editor overlay supports save, re-save, save-as branching, return-to-origin behavior after save, and unsaved-close confirmation.
+  - The editor overlay supports save, save-as branching, return-to-origin behavior after save, and unsaved-close confirmation; title auto-suggests from content when the title field is blank at save time.
   - Deleting the current transposer source clears the transposer back to its empty state.
   - The editor saved-context toggle defaults off for new drafts and restores saved context for existing records.
   - Opening a saved tab with mismatched saved context shows the 3-option prompt and resolves the current-harp option by preserving the saved target key.

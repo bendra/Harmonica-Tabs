@@ -63,14 +63,16 @@ SafeAreaView (styles.safeArea)
       │     ├─ Overlay Header (styles.headerRow + styles.title)
       │     │  └─ Includes `Tab Editor` title
       │     └─ Editor Card (styles.transposerCard)
-      │        ├─ Draft Title + Meta (styles.transposerTitle + styles.transposerMeta)
+      │        ├─ Saved Context Selectors (styles.editorContextSelectors + styles.dropdown*)
+      │        │  └─ Always visible; `Saved harmonica key` and `Saved position/key` dropdowns disabled when context is off
+      │        ├─ Context Checkbox (styles.editorContextCheckboxRow)
+      │        │  └─ `Save with key/position context` — enables/disables the selectors above
       │        ├─ Primary Action Row (styles.editorPrimaryRow + styles.editorPrimaryActionButton)
-      │        │  └─ Includes `Cancel`, `Save` / `Re-save`, and `Save As`
-      │        ├─ Secondary Helper Row (styles.editorSecondaryRow + styles.editorSecondaryButton)
-      │        │  └─ Includes `Clean Input` and the `Save with key/position context` toggle
-      │        ├─ Saved Context Selectors (styles.editorContextSelectors + styles.dropdown*, conditional)
-      │        │  └─ Includes `Saved harmonica key` and `Saved position/key`
-      │        ├─ Input (styles.transposerInput)
+      │        │  └─ `Cancel` (dismiss), `Save` (primary, blue fill), `Save As` (secondary, outlined) — new drafts show only `Save`
+      │        ├─ Clean Input Button (styles.editorSecondaryButton)
+      │        ├─ Title Field (styles.editorTitleInput, testID="save-tab-title-input")
+      │        │  └─ Inline editable title; pre-filled from saved tab or blank for new drafts; auto-suggests from content on save
+      │        └─ Tab Content Input (styles.transposerInput, testID="editor-tab-input")
       ├─ Properties Screen (`screen === 'properties'`)
       │  └─ Properties Card (styles.propertiesCard)
       │     ├─ Section Title (styles.propertiesTitle)
@@ -92,7 +94,6 @@ SafeAreaView (styles.safeArea)
    │  ├─ `Scales` button (styles.workspaceNavButton)
    │  └─ `Tabs` button (styles.workspaceNavButton)
    └─ Global Modals
-      ├─ Save Tab Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogInput)
       ├─ Unsaved Open Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
       └─ Editor Close Confirmation Modal (styles.dialogOverlay + styles.dialogCard + styles.dialogActionColumn)
 ```
@@ -114,6 +115,6 @@ SafeAreaView (styles.safeArea)
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
 - **Tab Transposer**: `transposerCard`, `transposerFollowControls`, `transposerSavedTabsStatus`, `transposerCurrentTab`, `transposerLibraryRow`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
-- **Tab Editor**: `editorDismissButton`, `transposerTitle`, `transposerMeta`, `editorPrimaryRow`, `editorPrimaryActionButton`, `editorSecondaryRow`, `editorSecondaryButton`, `editorContextSelectors`, `transposerInput`
+- **Tab Editor**: `editorDismissButton`, `editorSaveAsButton`, `editorTitleInput`, `editorContextCheckboxRow`, `editorContextCheckbox`, `editorContextSelectors`, `editorPrimaryRow`, `editorPrimaryActionButton`, `editorSecondaryButton`, `transposerInput`
 - **Saved Tab Library**: `savedTabsStatus`, `libraryListArea`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
 - **Dialogs**: `dialogOverlay`, `dialogCard`, `dialogTitle`, `dialogInput`, `dialogActionRow`, `dialogActionColumn`, `dialogButton`

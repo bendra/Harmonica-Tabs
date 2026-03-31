@@ -162,7 +162,7 @@ function readStyleNumber(style: any, key: string) {
 }
 
 function findTextInput(root: any) {
-  return root.find((node: any) => node.type === 'TextInput');
+  return root.find((node: any) => node.props?.testID === 'editor-tab-input');
 }
 
 function findTransposerOutputScroll(root: any) {
@@ -970,7 +970,7 @@ describe('App navigation', () => {
     expect(findAllText(root, 'Cancel').length).toBeGreaterThan(0);
     expect(findAllText(root, 'X')).toHaveLength(0);
     expect(findTextInput(root).props.value).toBe('4 -4 5');
-    expect(findAllText(root, 'Editing: Edit Me').length).toBeGreaterThan(0);
+    expect(findByTestId(root, 'save-tab-title-input').props.value).toBe('Edit Me');
   });
 
   it('places cancel, save actions, and helper controls above the editor input', async () => {
@@ -984,13 +984,12 @@ describe('App navigation', () => {
 
     expect(findAllText(root, 'Cancel').length).toBeGreaterThan(0);
     expect(findAllText(root, 'Save').length).toBeGreaterThan(0);
-    expect(findAllText(root, 'Save As').length).toBeGreaterThan(0);
-    expect(findAllText(root, 'Helpers').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Clean Input').length).toBeGreaterThan(0);
 
     const cancelOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-close-button');
     const saveOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-save-button');
     const cleanOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-clean-button');
-    const editorInputOrder = findNodeOrder(root, (node: any) => node.type === 'TextInput');
+    const editorInputOrder = findNodeOrder(root, (node: any) => node.props?.testID === 'editor-tab-input');
 
     expect(cancelOrder).toBeGreaterThan(-1);
     expect(saveOrder).toBeGreaterThan(-1);
@@ -1067,25 +1066,13 @@ describe('App navigation', () => {
     openCreateTab(root);
 
     act(() => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
       findTextInput(root).props.onChangeText('4 -4');
     });
 
     await act(async () => {
       findByTestId(root, 'editor-save-button').props.onPress();
       await Promise.resolve();
-    });
-
-    expect(findAllText(root, 'Save Tab').length).toBeGreaterThan(0);
-    expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
-      await findByTestId(root, 'save-tab-confirm-button').props.onPressIn();
     });
 
     const storedLibrary = readSavedTabsFromStorage();
@@ -1107,14 +1094,16 @@ describe('App navigation', () => {
 
     expect(findByTestId(root, 'editor-save-context-toggle')).toBeTruthy();
     expect(findAllText(root, 'Save with key/position context').length).toBeGreaterThan(0);
-    expect(root.findAll((node: any) => node.props?.testID === 'editor-context-harmonica-dropdown')).toHaveLength(0);
-    expect(root.findAll((node: any) => node.props?.testID === 'editor-context-position-dropdown')).toHaveLength(0);
+    expect(findDropdownByTestId(root, 'editor-context-harmonica-dropdown').props.disabled).toBe(true);
+    expect(findDropdownByTestId(root, 'editor-context-position-dropdown').props.disabled).toBe(true);
 
     act(() => {
       findByTestId(root, 'editor-save-context-toggle').props.onPress();
     });
 
+    expect(findDropdownByTestId(root, 'editor-context-harmonica-dropdown').props.disabled).toBe(false);
     expect(findDropdownByTestId(root, 'editor-context-harmonica-dropdown').props.value).toBe(0);
+    expect(findDropdownByTestId(root, 'editor-context-position-dropdown').props.disabled).toBe(false);
     expect(findDropdownByTestId(root, 'editor-context-position-dropdown').props.value).toBe(1);
   });
 
@@ -1153,6 +1142,7 @@ describe('App navigation', () => {
     openCreateTab(root);
 
     act(() => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Keyed tab');
       findTextInput(root).props.onChangeText('4 -4');
       findByTestId(root, 'editor-save-context-toggle').props.onPress();
     });
@@ -1165,11 +1155,6 @@ describe('App navigation', () => {
     await act(async () => {
       findByTestId(root, 'editor-save-button').props.onPress();
       await Promise.resolve();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Keyed tab');
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
     const storedLibrary = readSavedTabsFromStorage();
@@ -1204,10 +1189,6 @@ describe('App navigation', () => {
     await act(async () => {
       findByTestId(root, 'editor-save-button').props.onPress();
       await Promise.resolve();
-    });
-
-    await act(async () => {
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
     const storedLibrary = readSavedTabsFromStorage();
@@ -1249,10 +1230,6 @@ describe('App navigation', () => {
       await Promise.resolve();
     });
 
-    await act(async () => {
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
-    });
-
     expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
     expect(findAllText(root, 'Current tab: Warmup').length).toBeGreaterThan(0);
   });
@@ -1277,24 +1254,13 @@ describe('App navigation', () => {
     await editLibraryTab(root, 'original');
 
     act(() => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Original copy');
       findTextInput(root).props.onChangeText('4 -4 5');
     });
 
     await act(async () => {
       findByTestId(root, 'editor-save-as-button').props.onPress();
       await Promise.resolve();
-    });
-
-    expect(findAllText(root, 'Save As New Tab').length).toBeGreaterThan(0);
-    expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Original copy');
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
     const storedLibrary = readSavedTabsFromStorage();
@@ -1389,7 +1355,7 @@ describe('App navigation', () => {
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
   });
 
-  it('lets the save dialog cancel and return focus to the editor', async () => {
+  it('auto-suggests a title from the first line of content when the title field is blank', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
@@ -1398,8 +1364,11 @@ describe('App navigation', () => {
     goToTabs(root);
     openCreateTab(root);
 
+    // Title starts blank for a new draft
+    expect(findByTestId(root, 'save-tab-title-input').props.value).toBe('');
+
     act(() => {
-      findTextInput(root).props.onChangeText('4 -4');
+      findTextInput(root).props.onChangeText('Sweet Home Chicago\n4 -4 5 -5');
     });
 
     await act(async () => {
@@ -1407,16 +1376,11 @@ describe('App navigation', () => {
       await Promise.resolve();
     });
 
-    expect(findAllText(root, 'Save Tab').length).toBeGreaterThan(0);
-    expect(findByTestId(root, 'save-tab-title-input')).toBeTruthy();
-
-    act(() => {
-      findPressableByText(findByTestId(root, 'save-tab-modal'), 'Cancel').props.onPress();
-    });
-
-    expect(root.findAll((node: any) => node.props?.testID === 'save-tab-title-input')).toHaveLength(0);
-    expect(findByTestId(root, 'editor-close-button')).toBeTruthy();
-    expect(findTextInput(root).props.value).toBe('4 -4');
+    // Title was auto-suggested from first line of content
+    const storedLibrary = readSavedTabsFromStorage();
+    expect(storedLibrary).toHaveLength(1);
+    expect(storedLibrary[0]?.title).toBe('Sweet Home Chicago');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
   });
 
   it('keeps Clean Input working after moving it above the editor field', async () => {
@@ -1449,6 +1413,7 @@ describe('App navigation', () => {
     openCreateTab(root);
 
     act(() => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Saved on close');
       findTextInput(root).props.onChangeText('6 -6');
     });
 
@@ -1459,15 +1424,6 @@ describe('App navigation', () => {
     await act(async () => {
       findByTestId(root, 'editor-close-save-button').props.onPress();
       await Promise.resolve();
-    });
-
-    await act(async () => {
-      findByTestId(root, 'save-tab-title-input').props.onChangeText('Saved on close');
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
     expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);

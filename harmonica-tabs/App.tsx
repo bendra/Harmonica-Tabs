@@ -46,11 +46,6 @@ function getLayoutTier(shortEdge: number): LayoutTier {
   return 'regular';
 }
 
-function debugSaveDialog(step: string, details?: Record<string, unknown>) {
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.info('[save-dialog]', step, details ?? {});
-  }
-}
 
 function getScalesLayoutMetrics(layoutTier: LayoutTier) {
   switch (layoutTier) {
@@ -172,19 +167,6 @@ function formatSavedTabTimestamp(value: string) {
   return date.toLocaleString();
 }
 
-function getSaveDialogTitle(mode: SaveTabMode, hasLinkedRecord: boolean) {
-  if (mode === 'create_new') return 'Save As New Tab';
-  if (mode === 'save_then_open') return 'Save Then Open';
-  if (mode === 'save_then_close') return 'Save Then Close';
-  return hasLinkedRecord ? 'Update Saved Tab' : 'Save Tab';
-}
-
-function getSaveDialogConfirmLabel(mode: SaveTabMode) {
-  if (mode === 'create_new') return 'Save As';
-  if (mode === 'save_then_open') return 'Save Then Open';
-  if (mode === 'save_then_close') return 'Save Then Close';
-  return 'Save';
-}
 
 function isSavedTabsErrorStatus(value: string | null) {
   if (!value) return false;
@@ -203,6 +185,7 @@ function Dropdown<T extends string | number>(props: {
   compact?: boolean;
   size?: ResponsiveControlSize;
   testID?: string;
+  disabled?: boolean;
 }) {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
@@ -221,13 +204,16 @@ function Dropdown<T extends string | number>(props: {
   }
 
   return (
-    <View testID={props.testID} style={[styles.dropdown, compact && styles.dropdownCompact]}>
+    <View testID={props.testID} style={[styles.dropdown, compact && styles.dropdownCompact, props.disabled && styles.dropdownDisabled]}>
       <Text style={[styles.dropdownLabel, compact && styles.dropdownLabelCompact, wide && styles.dropdownLabelWide]}>
         {props.label}
       </Text>
       <Pressable
         ref={triggerRef}
-        onPress={() => (open ? setOpen(false) : openMenu())}
+        onPress={() => {
+          if (props.disabled) return;
+          open ? setOpen(false) : openMenu();
+        }}
         style={[
           styles.dropdownTrigger,
           compact && styles.dropdownTriggerCompact,
@@ -448,8 +434,6 @@ export default function App() {
     setEditorSelection,
     editorSavedTabId,
     editorReturnTo,
-    saveTabModalVisible,
-    saveTabMode,
     saveTabTitleInput,
     saveTabTitleError,
     isSavingTab,
@@ -462,13 +446,11 @@ export default function App() {
     editorInputRef,
     handleEditorInputChange,
     handleCleanEditorInput,
-    closeSaveTabModal,
-    openSaveTabModal,
     finishClosingEditor,
     handleEditorCloseRequest,
     openSavedTabInEditor,
     openEditorForNewDraft,
-    handleSaveTabConfirm,
+    handleDirectSave,
     handleSavedTabEditPress,
     handleDeleteSavedTab,
     saveWithContext,
@@ -504,7 +486,6 @@ export default function App() {
     screen,
     tabsSubview,
     tabsEditorVisible,
-    saveTabModalVisible,
     pendingOpenRecordVisible: pendingOpenRecord !== null,
     closeEditorModalVisible,
   });
@@ -515,7 +496,6 @@ export default function App() {
       screen,
       tabsSubview,
       tabsEditorVisible,
-      saveTabModalVisible,
       pendingOpenRecordId: pendingOpenRecord?.id ?? null,
       closeEditorModalVisible,
     });
@@ -523,7 +503,6 @@ export default function App() {
     screen,
     tabsSubview,
     tabsEditorVisible,
-    saveTabModalVisible,
     pendingOpenRecord,
     closeEditorModalVisible,
   ]);
@@ -873,12 +852,50 @@ export default function App() {
               <Text style={styles.title}>Tab Editor</Text>
             </View>
             <View style={[styles.transposerCard, styles.transposerCardGrow]}>
-              <Text style={styles.transposerTitle}>
-                {editorSavedTab ? `Editing: ${editorSavedTab.title}` : 'New Tab Draft'}
-              </Text>
-              <Text style={styles.transposerMeta}>
-                Type or paste source tabs here. This is the only place raw tab text can be edited.
-              </Text>
+              <View style={styles.editorContextSelectors}>
+                <View style={styles.topRowKey}>
+                  <Dropdown
+                    testID="editor-context-harmonica-dropdown"
+                    label="Saved harmonica key"
+                    value={draftSavedContext?.harmonicaPc ?? harmonicaKey.pc}
+                    options={harmonicaKeyDropdownOptions}
+                    onChange={(nextHarmonicaPc) => {
+                      setDraftSavedContext((prev) => ({
+                        harmonicaPc: nextHarmonicaPc,
+                        positionNumber: prev?.positionNumber ?? currentPositionNumber,
+                      }));
+                    }}
+                    disabled={!saveWithContext}
+                    size={isSmallScreen ? 'compact' : 'regular'}
+                  />
+                </View>
+                <View style={styles.topRowKey}>
+                  <Dropdown
+                    testID="editor-context-position-dropdown"
+                    label="Saved position/key"
+                    value={draftSavedContext?.positionNumber ?? currentPositionNumber}
+                    options={editorSavedContextPositionOptions}
+                    onChange={(nextPositionNumber) => {
+                      setDraftSavedContext((prev) => ({
+                        harmonicaPc: prev?.harmonicaPc ?? harmonicaKey.pc,
+                        positionNumber: nextPositionNumber,
+                      }));
+                    }}
+                    disabled={!saveWithContext}
+                    size={isSmallScreen ? 'compact' : 'regular'}
+                  />
+                </View>
+              </View>
+              <Pressable
+                testID="editor-save-context-toggle"
+                onPress={() => setSaveWithContext((prev) => !prev)}
+                style={styles.editorContextCheckboxRow}
+              >
+                <View style={[styles.editorContextCheckbox, saveWithContext && styles.editorContextCheckboxChecked]}>
+                  {saveWithContext && <Text style={styles.editorContextCheckmark}>✓</Text>}
+                </View>
+                <Text style={styles.editorContextCheckboxLabel}>Save with key/position context</Text>
+              </Pressable>
               <View style={styles.editorPrimaryRow}>
                 <Pressable
                   testID="editor-close-button"
@@ -891,105 +908,100 @@ export default function App() {
                 >
                   <Text style={styles.editorDismissButtonText}>Cancel</Text>
                 </Pressable>
-                <Pressable
-                  testID="editor-save-button"
-                  onPress={() => openSaveTabModal('overwrite')}
-                  style={[
-                    styles.transposerActionButton,
-                    styles.editorPrimaryActionButton,
-                    isSmallScreen && styles.transposerActionButtonCompact,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.transposerActionButtonText,
-                      isSmallScreen && styles.transposerActionButtonTextCompact,
-                    ]}
-                  >
-                    {editorSavedTabId ? 'Re-save' : 'Save'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  testID="editor-save-as-button"
-                  onPress={() => openSaveTabModal('create_new')}
-                  style={[
-                    styles.transposerActionButton,
-                    styles.editorPrimaryActionButton,
-                    isSmallScreen && styles.transposerActionButtonCompact,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.transposerActionButtonText,
-                      isSmallScreen && styles.transposerActionButtonTextCompact,
-                    ]}
-                  >
-                    Save As
-                  </Text>
-                </Pressable>
-              </View>
-              <View style={styles.editorSecondaryRow}>
-                <Text style={styles.editorSecondaryLabel}>Helpers</Text>
-                <View style={styles.editorSecondaryActions}>
+                {editorSavedTabId ? (
+                  <>
+                    <Pressable
+                      testID="editor-save-button"
+                      onPress={() => void handleDirectSave('overwrite')}
+                      disabled={isSavingTab}
+                      style={[
+                        styles.transposerActionButton,
+                        styles.editorPrimaryActionButton,
+                        isSmallScreen && styles.transposerActionButtonCompact,
+                        isSavingTab && styles.dialogButtonDisabled,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.transposerActionButtonText,
+                          isSmallScreen && styles.transposerActionButtonTextCompact,
+                        ]}
+                      >
+                        {isSavingTab ? 'Saving…' : 'Save'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      testID="editor-save-as-button"
+                      onPress={() => void handleDirectSave('create_new')}
+                      disabled={isSavingTab}
+                      style={[
+                        styles.editorSaveAsButton,
+                        styles.editorPrimaryActionButton,
+                        isSmallScreen && styles.transposerActionButtonCompact,
+                        isSavingTab && styles.dialogButtonDisabled,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.editorSaveAsButtonText,
+                          isSmallScreen && styles.transposerActionButtonTextCompact,
+                        ]}
+                      >
+                        Save As
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : (
                   <Pressable
-                    testID="editor-save-context-toggle"
-                    onPress={() => setSaveWithContext((prev) => !prev)}
+                    testID="editor-save-button"
+                    onPress={() => void handleDirectSave('create_new')}
+                    disabled={isSavingTab}
                     style={[
-                      styles.propertiesToggleButton,
-                      saveWithContext && styles.propertiesToggleButtonActive,
+                      styles.transposerActionButton,
+                      styles.editorPrimaryActionButton,
+                      isSmallScreen && styles.transposerActionButtonCompact,
+                      isSavingTab && styles.dialogButtonDisabled,
                     ]}
                   >
-                    <Text style={styles.propertiesToggleText}>Save with key/position context</Text>
-                  </Pressable>
-                  <Pressable
-                    testID="editor-clean-button"
-                    onPress={handleCleanEditorInput}
-                    style={[
-                      styles.editorSecondaryButton,
-                      isSmallScreen && styles.editorSecondaryButtonCompact,
-                    ]}
-                  >
-                    <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
-                      Clean Input
+                    <Text
+                      style={[
+                        styles.transposerActionButtonText,
+                        isSmallScreen && styles.transposerActionButtonTextCompact,
+                      ]}
+                    >
+                      {isSavingTab ? 'Saving…' : 'Save'}
                     </Text>
                   </Pressable>
-                </View>
+                )}
               </View>
-              {saveWithContext && draftSavedContext && (
-                <View style={styles.editorContextSelectors}>
-                  <View style={styles.topRowKey}>
-                    <Dropdown
-                      testID="editor-context-harmonica-dropdown"
-                      label="Saved harmonica key"
-                      value={draftSavedContext.harmonicaPc}
-                      options={harmonicaKeyDropdownOptions}
-                      onChange={(nextHarmonicaPc) => {
-                        setDraftSavedContext((prev) => ({
-                          harmonicaPc: nextHarmonicaPc,
-                          positionNumber: prev?.positionNumber ?? currentPositionNumber,
-                        }));
-                      }}
-                      size={isSmallScreen ? 'compact' : 'regular'}
-                    />
-                  </View>
-                  <View style={styles.topRowKey}>
-                    <Dropdown
-                      testID="editor-context-position-dropdown"
-                      label="Saved position/key"
-                      value={draftSavedContext.positionNumber}
-                      options={editorSavedContextPositionOptions}
-                      onChange={(nextPositionNumber) => {
-                        setDraftSavedContext((prev) => ({
-                          harmonicaPc: prev?.harmonicaPc ?? harmonicaKey.pc,
-                          positionNumber: nextPositionNumber,
-                        }));
-                      }}
-                      size={isSmallScreen ? 'compact' : 'regular'}
-                    />
-                  </View>
-                </View>
-              )}
+              <Pressable
+                testID="editor-clean-button"
+                onPress={handleCleanEditorInput}
+                style={[
+                  styles.editorSecondaryButton,
+                  isSmallScreen && styles.editorSecondaryButtonCompact,
+                ]}
+              >
+                <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
+                  Clean Input
+                </Text>
+              </Pressable>
               <TextInput
+                testID="save-tab-title-input"
+                value={saveTabTitleInput}
+                onChangeText={handleSaveTabTitleInputChange}
+                onSubmitEditing={() => void handleDirectSave(editorSavedTabId ? 'overwrite' : 'create_new')}
+                style={styles.editorTitleInput}
+                placeholder="Tab title"
+                placeholderTextColor="#64748b"
+                autoCorrect={false}
+                autoCapitalize="sentences"
+                spellCheck={false}
+                returnKeyType="done"
+              />
+              {saveTabTitleError && <Text style={styles.dialogErrorText}>{saveTabTitleError}</Text>}
+              <TextInput
+                testID="editor-tab-input"
                 ref={editorInputRef}
                 style={[styles.transposerInput, styles.transposerInputGrow]}
                 multiline
@@ -1005,59 +1017,13 @@ export default function App() {
                 autoCorrect={false}
                 autoCapitalize="none"
                 spellCheck={false}
-                placeholder="Paste or enter first-position tabs here, for example 4 -4 5 -5 6."
+                placeholder="Paste or type tab text here — e.g. 4 -4 5 -5 6"
                 placeholderTextColor="#64748b"
                 textAlignVertical="top"
               />
             </View>
           </ScrollView>
         </SafeAreaView>
-        {saveTabModalVisible && (
-          <View testID="save-tab-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeSaveTabModal} />
-            <View style={styles.dialogCard}>
-              <Text style={styles.dialogTitle}>{getSaveDialogTitle(saveTabMode, editorSavedTab !== null)}</Text>
-              <Text style={styles.helperText}>Titles help users find a saved tab later.</Text>
-              <TextInput
-                testID="save-tab-title-input"
-                value={saveTabTitleInput}
-                onChangeText={handleSaveTabTitleInputChange}
-                onSubmitEditing={() => {
-                  void handleSaveTabConfirm();
-                }}
-                style={styles.dialogInput}
-                placeholder="Saved tab title"
-                placeholderTextColor="#64748b"
-                autoCorrect={false}
-                autoCapitalize="sentences"
-                spellCheck={false}
-                returnKeyType="done"
-              />
-              {saveTabTitleError && <Text style={styles.dialogErrorText}>{saveTabTitleError}</Text>}
-              <View style={styles.dialogActionRow}>
-                <Pressable onPress={closeSaveTabModal} style={styles.dialogButton}>
-                  <Text style={styles.dialogButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  testID="save-tab-confirm-button"
-                  onPressIn={() => {
-                    debugSaveDialog('confirm-button:press-in', {
-                      titleLength: saveTabTitleInput.trim().length,
-                      isSavingTab,
-                    });
-                    void handleSaveTabConfirm();
-                  }}
-                  onPress={handleSaveTabConfirm}
-                  style={[styles.dialogButton, styles.dialogPrimaryButton, isSavingTab && styles.dialogButtonDisabled]}
-                >
-                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>
-                    {isSavingTab ? 'Saving…' : getSaveDialogConfirmLabel(saveTabMode)}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        )}
         {pendingOpenRecord !== null && (
           <View testID="pending-open-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
@@ -1083,7 +1049,7 @@ export default function App() {
                 <Pressable
                   onPress={() => {
                     if (!pendingOpenRecord) return;
-                    openSaveTabModal('save_then_open', pendingOpenRecord.id);
+                    void handleDirectSave('save_then_open', pendingOpenRecord.id);
                     setPendingOpenRecord(null);
                   }}
                   style={[styles.dialogButton, styles.dialogPrimaryButton]}
@@ -1114,7 +1080,7 @@ export default function App() {
                 <Pressable
                   testID="editor-close-save-button"
                   onPress={() => {
-                    openSaveTabModal('save_then_close');
+                    void handleDirectSave('save_then_close');
                     setCloseEditorModalVisible(false);
                   }}
                   style={[styles.dialogButton, styles.dialogPrimaryButton]}
@@ -2138,7 +2104,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   editorDismissButtonText: {
-    color: '#e2e8f0',
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  editorSaveAsButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+  },
+  editorSaveAsButtonText: {
+    color: '#7dd3fc',
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -2892,10 +2873,54 @@ const styles = StyleSheet.create({
   editorSecondaryButtonTextCompact: {
     fontSize: 10,
   },
+  editorTitleInput: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#0f172a',
+    color: '#e2e8f0',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  editorContextCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editorContextCheckbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editorContextCheckboxChecked: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
+  },
+  editorContextCheckmark: {
+    color: '#38bdf8',
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '700',
+  },
+  editorContextCheckboxLabel: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   editorContextSelectors: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 12,
+  },
+  dropdownDisabled: {
+    opacity: 0.4,
   },
   savedTabsStatus: {
     color: '#93c5fd',
