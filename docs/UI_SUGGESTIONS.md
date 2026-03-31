@@ -127,3 +127,22 @@ The **Top Row** (Harmonica Key + Target Position/Key) appears on both the Scales
 ### No visual indication of technique type beyond notation characters
 
 Across all tab displays — **Main Tab Row**, **Arpeggio Tab Chips** (`arpeggioTabChip`), and **Transposed Tab Box** — technique type is encoded only in notation characters (`-`, `'`, `°`). For users still learning the notation, and especially during live pitch feedback when reading speed matters, an additional visual layer (color, weight, or icon) would lower the reading barrier. This is the single highest-impact visual improvement available short of a layout overhaul.
+
+---
+
+## Best Bang-for-Buck Ranking
+
+Ranked by likely user impact relative to implementation effort, with simpler and safer changes favored over larger layout work.
+
+1. **Listen Card — label and status**: clarifies a core interaction, reduces visual noise, and should be a modest wording/layout tweak.
+2. **Arpeggio Section — tap targets**: strong usability win on mobile with relatively low implementation risk.
+3. **Delete button visual weight**: small styling change that improves safety and visual hierarchy immediately.
+4. **Current Source Label**: low-effort improvement that makes the Transpose view easier to orient within.
+5. **Octave Shift Controls — "Base" label**: very cheap wording fix for a real comprehension problem.
+6. **Transposer Output Box — active token highlight**: likely a contained visual tweak with clear benefit during tone-follow use.
+7. **Tab Symbols Help — discoverability**: helpful for beginners, though it adds a new link or affordance near already-dense tab UI.
+8. **Listen Card — empty state**: worthwhile polish, especially on tablet, but slightly less important than the main listen-label/status cleanup.
+9. **Properties Screen — Tone Follow fields in Advanced**: improves first-impression simplicity, but requires a little more UI restructuring.
+10. **Saved Tab Rows — preview truncation**: useful improvement for library scanning, though it may require preview-generation logic rather than pure styling.
+11. **No visual indication of technique type beyond notation characters**: potentially very high impact, but should be explored carefully so it does not conflict with existing root-note and active-state emphasis.
+12. **Tablet Layout — Scales Workspace two-column / width caps**: probably the biggest layout payoff on large screens, but it is the largest and riskiest change in this document, so it should come after the smaller wins above.

@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { openDatabaseAsync } from 'expo-sqlite';
 
 export type AppStorage = {
   getItem: (key: string) => Promise<string | null>;
@@ -6,26 +6,53 @@ export type AppStorage = {
   removeItem: (key: string) => Promise<void>;
 };
 
-type SQLiteDatabase = {
+export type AppDatabaseBindValue = string | number | boolean | null;
+
+export type AppDatabase = {
   execAsync: (sql: string) => Promise<void>;
-  getFirstAsync: <T>(sql: string, params: unknown[]) => Promise<T | null>;
-  runAsync: (sql: string, params: unknown[]) => Promise<void>;
+  getFirstAsync: <T>(sql: string, ...params: AppDatabaseBindValue[]) => Promise<T | null>;
+  getAllAsync: <T>(sql: string, ...params: AppDatabaseBindValue[]) => Promise<T[]>;
+  runAsync: (sql: string, ...params: AppDatabaseBindValue[]) => Promise<void>;
 };
 
-let db: SQLiteDatabase | null = null;
+let appDatabasePromise: Promise<AppDatabase> | null = null;
 
-async function getDb(): Promise<SQLiteDatabase> {
-  if (!db) {
-    const SQLite = await import('expo-sqlite');
-    db = await SQLite.openDatabaseAsync('harmonica-tabs.db');
-    await db.execAsync(`
+function createAppDatabase() {
+  return (async (): Promise<AppDatabase> => {
+    const database = await openDatabaseAsync('harmonica-tabs.db');
+    await database.execAsync(`
       CREATE TABLE IF NOT EXISTS kv_store (
         key   TEXT PRIMARY KEY NOT NULL,
         value TEXT NOT NULL
       );
     `);
+
+    return {
+      execAsync(sql) {
+        return database.execAsync(sql);
+      },
+      getFirstAsync(sql, ...params) {
+        return database.getFirstAsync(sql, ...params);
+      },
+      getAllAsync(sql, ...params) {
+        return database.getAllAsync(sql, ...params);
+      },
+      async runAsync(sql, ...params) {
+        await database.runAsync(sql, ...params);
+      },
+    };
+  })();
+}
+
+export function getAppDatabase(): Promise<AppDatabase> {
+  if (!appDatabasePromise) {
+    appDatabasePromise = createAppDatabase().catch((error) => {
+      appDatabasePromise = null;
+      throw error;
+    });
   }
-  return db;
+
+  return appDatabasePromise;
 }
 
 /**
@@ -33,31 +60,19 @@ async function getDb(): Promise<SQLiteDatabase> {
  */
 export const appStorage: AppStorage = {
   async getItem(key) {
-    if (Platform.OS === 'web') return localStorage.getItem(key);
-    const database = await getDb();
+    const database = await getAppDatabase();
     const row = await database.getFirstAsync<{ value: string }>(
       'SELECT value FROM kv_store WHERE key = ?',
-      [key],
+      key,
     );
     return row?.value ?? null;
   },
   async setItem(key, value) {
-    if (Platform.OS === 'web') {
-      localStorage.setItem(key, value);
-      return;
-    }
-    const database = await getDb();
-    await database.runAsync('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)', [
-      key,
-      value,
-    ]);
+    const database = await getAppDatabase();
+    await database.runAsync('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)', key, value);
   },
   async removeItem(key) {
-    if (Platform.OS === 'web') {
-      localStorage.removeItem(key);
-      return;
-    }
-    const database = await getDb();
-    await database.runAsync('DELETE FROM kv_store WHERE key = ?', [key]);
+    const database = await getAppDatabase();
+    await database.runAsync('DELETE FROM kv_store WHERE key = ?', key);
   },
 };

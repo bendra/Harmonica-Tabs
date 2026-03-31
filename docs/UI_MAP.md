@@ -67,7 +67,9 @@ SafeAreaView (styles.safeArea)
       │        ├─ Primary Action Row (styles.editorPrimaryRow + styles.editorPrimaryActionButton)
       │        │  └─ Includes `Cancel`, `Save` / `Re-save`, and `Save As`
       │        ├─ Secondary Helper Row (styles.editorSecondaryRow + styles.editorSecondaryButton)
-      │        │  └─ Includes `Clean Input`
+      │        │  └─ Includes `Clean Input` and the `Save with key/position context` toggle
+      │        ├─ Saved Context Selectors (styles.editorContextSelectors + styles.dropdown*, conditional)
+      │        │  └─ Includes `Saved harmonica key` and `Saved position/key`
       │        ├─ Input (styles.transposerInput)
       ├─ Properties Screen (`screen === 'properties'`)
       │  └─ Properties Card (styles.propertiesCard)
@@ -112,6 +114,6 @@ SafeAreaView (styles.safeArea)
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
 - **Tab Transposer**: `transposerCard`, `transposerFollowControls`, `transposerSavedTabsStatus`, `transposerCurrentTab`, `transposerLibraryRow`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
-- **Tab Editor**: `editorDismissButton`, `transposerTitle`, `transposerMeta`, `editorPrimaryRow`, `editorPrimaryActionButton`, `editorSecondaryRow`, `editorSecondaryButton`, `transposerInput`
+- **Tab Editor**: `editorDismissButton`, `transposerTitle`, `transposerMeta`, `editorPrimaryRow`, `editorPrimaryActionButton`, `editorSecondaryRow`, `editorSecondaryButton`, `editorContextSelectors`, `transposerInput`
 - **Saved Tab Library**: `savedTabsStatus`, `libraryListArea`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
 - **Dialogs**: `dialogOverlay`, `dialogCard`, `dialogTitle`, `dialogInput`, `dialogActionRow`, `dialogActionColumn`, `dialogButton`

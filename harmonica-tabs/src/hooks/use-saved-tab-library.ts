@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import { createSavedTabLibraryService, SavedTabRecord } from '../logic/saved-tab-library';
 
-export const savedTabLibraryService = createSavedTabLibraryService();
+let savedTabLibraryService = createSavedTabLibraryService();
+
+export function getSavedTabLibraryService() {
+  return savedTabLibraryService;
+}
+
+export function resetSavedTabLibraryServiceForTests() {
+  savedTabLibraryService = createSavedTabLibraryService();
+}
 
 export function useSavedTabLibrary() {
   const [savedTabs, setSavedTabs] = useState<SavedTabRecord[]>([]);
@@ -10,15 +18,17 @@ export function useSavedTabLibrary() {
   useEffect(() => {
     let cancelled = false;
 
-    savedTabLibraryService
+    getSavedTabLibraryService()
       .listTabs()
       .then((tabs) => {
         if (cancelled) return;
         setSavedTabs(tabs);
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return;
-        setSavedTabsStatus('Saved tabs could not be loaded.');
+        const message =
+          error instanceof Error && error.message ? error.message : 'Saved tabs could not be loaded.';
+        setSavedTabsStatus(message);
       });
 
     return () => {
@@ -27,7 +37,7 @@ export function useSavedTabLibrary() {
   }, []);
 
   async function deleteSavedTab(record: SavedTabRecord): Promise<SavedTabRecord[]> {
-    const nextTabs = await savedTabLibraryService.deleteTab(record.id);
+    const nextTabs = await getSavedTabLibraryService().deleteTab(record.id);
     setSavedTabs(nextTabs);
     return nextTabs;
   }

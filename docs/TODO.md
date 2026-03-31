@@ -22,7 +22,8 @@ git # TODO / Next Steps
 - Consider single-tab sharing/export flows after whole-library import/export exists.
 - Consider cross-device sync only after local import/export proves useful.
 - Add a performance mode: a single toggle that enlarges the Main Tab Row chips and increases contrast for on-stage use, without affecting controls or arpeggios — scoped to the existing layout tier system rather than a general font-size preference
-- Optionally save harmonica key + target position with a saved tab: add a nullable position field to SavedTabRecord (null = no context, so no migration needed for existing records); expose an opt-in "Save with key/position context" toggle in the Editor Secondary Helper Row (defaults off, since most web tabs are key-agnostic); when a tab with saved context is opened and it mismatches the current selection, prompt with three options: switch to the saved harp+position, stay on current harp at the equivalent position (showing the resolved key name), or keep current selection and just load — when this ships, migrate saved-tab-library from the JSON blob to a proper SQLite schema with typed columns (id, title, inputText, harmonica_pc, position_number, etc.)
+- Revisit the saved-context open prompt after user testing, especially whether the current-harp option text clearly communicates that it preserves the saved song key rather than the saved position number.
+- Consider whether the library should expose an explicit “clear saved context” or “edit saved context” affordance beyond reopening the editor and toggling `Save with key/position context`.
 - Set up a Puppeteer or Playwright MCP server for live browser observation (useful for debugging resource leaks, audio lifecycle, and runtime behavior without relying on manual screenshots)
 - Consider extracting remaining App.tsx layout/caret tracking into a `useScaleLayoutTracking` hook if that section grows unwieldy
 - accessibility

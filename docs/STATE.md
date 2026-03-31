@@ -22,7 +22,8 @@
 - Tone follow is automatically on while listening is on, and off while listening is off.
 - Repeated identical output notes require a release before the cursor can advance again.
 - When tone follow matches the last playable transposer note, the cursor wraps back to the first playable note.
-- Saved tabs persist only `inputText` plus library metadata (`id`, `title`, `createdAt`, `updatedAt`).
+- Saved tabs persist `id`, `title`, `inputText`, optional `harmonicaPc`, optional `positionNumber`, `createdAt`, and `updatedAt`.
+- On web, saved tabs use the existing JSON blob in app storage; on native, the saved-tab service still uses the typed SQLite-backed path. In both cases, malformed half-filled saved context is normalized to no context.
 - The transposer works only from a selected saved-library tab; unsaved drafts never feed the transposer.
 - The app now has two top-level user-facing workspaces: `Scales` and `Tabs`.
 - The `Scales` workspace keeps its single-column phone flow on larger screens, but now uses compact/regular/wide sizing tiers so controls and tabs scale up on tablets instead of staying phone-sized.
@@ -30,7 +31,8 @@
 - The `Tabs` workspace owns `Transpose` and `Library` views; entering `Tabs` opens `Transpose` when a source tab is active and `Library` when there is no active source.
 - `Choose Tab` is an explicit reset action: it clears the current transposer source and returns `Tabs` to the library state until another source is opened.
 - The editor is a full-screen overlay within the `Tabs` workspace, not a separate peer workflow.
-- Selecting `Transpose` in the library updates the transposer source tab, switches `Tabs` to the `Transpose` view, and resets the transposer octave offset to zero for the current target; it does not change harmonica key, target position/key, or editor draft state.
+- Selecting `Open` in the library updates the transposer source tab, switches `Tabs` to the `Transpose` view, and resets the transposer octave offset to zero for the chosen target context.
+- If a saved tab includes harp/position context and it mismatches the current target, opening it first prompts the user to either use the saved harp+position, keep the current harp but switch to the position that preserves the same target key, or keep the current selection and just load.
 - Editing an existing saved tab happens only in the editor overlay; saving there overwrites that same record unless the user chooses `Save As`.
 - `Save As` always creates a new saved record, even when the editor is currently linked to an existing saved tab.
 - Deleting the currently edited saved tab removes it from the library but keeps the current editor text on screen as an unsaved draft.
@@ -50,8 +52,9 @@
 - The transposer includes `Choose Tab` plus `Edit Tab` actions instead of direct text editing; `Choose Tab` clears the active source and returns to the library.
 - The transposed tab box now scales its tab typography across compact, regular, and wide layouts to stay closer to the main `Scales` tab readability on larger displays.
 - `Tabs -> Library` owns saved-tab browsing with `Open`, `Edit`, `Delete`, and `New Tab`.
+- The library list is sorted alphabetically by tab title.
 - The library keeps the bottom workspace navigation visible; when saved tabs overflow, the list scrolls inside the library card instead of pushing the workspace nav off-screen.
-- The editor is a full-screen overlay within `Tabs` and owns a labeled `Cancel` dismiss action, top-aligned `Save` / `Save As` controls, a secondary `Clean Input` helper, and raw tab entry.
+- The editor is a full-screen overlay within `Tabs` and owns a labeled `Cancel` dismiss action, top-aligned `Save` / `Save As` controls, a secondary helper row with `Clean Input` plus an opt-in `Save with key/position context` toggle, editor-local saved-context dropdowns for harmonica key and position/key when that toggle is on, and raw tab entry.
 - The editor now relies entirely on the platform keyboard and normal paste behavior; the custom tab pad has been removed.
 - The transposer now keeps a numeric octave offset relative to the current target result instead of a fixed `down/base/up` candidate trio.
 - `Down` and `Up` step one octave from whatever tab is currently displayed, and can be pressed repeatedly until the next octave becomes unavailable.
@@ -61,6 +64,7 @@
 - Transposer output now preserves render segments while also tracking playable output tokens with MIDI metadata for tone follow.
 - The transposer output auto-scrolls just enough to keep the active token visible during tone follow and manual cursor moves.
 - Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
+- When the editor toggle is on, it also shows a compact summary of the saved context such as `C harp • 2nd / G`.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
 - The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling, target-key spelling, and tone-follow settings for tolerance, minimum confidence, and hold duration.
 - Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
@@ -85,7 +89,7 @@
   - Cleanup helpers for pasted mixed content.
   - Selection-aware insertion, full-token insertion, and backspace behavior for the editor input.
 - `harmonica-tabs/tests/logic/saved-tab-library.test.ts`
-  - Title defaults, malformed-data fallback, save/update behavior, and sort order for persisted saved tabs.
+  - Title defaults, malformed-data fallback, web storage persistence, native migration behavior, saved-context persistence, and alphabetical sort order for persisted saved tabs.
 - `harmonica-tabs/tests/ui/navigation.test.tsx`
   - Top-level `Scales` / `Tabs` navigation and Tabs editor/library flows work as expected.
   - The `Scales` workspace scales its main tab sizing across compact, regular, and wide screen sizes, only caps width on wide layouts, and keeps its results list in an inner scroll area.
@@ -99,3 +103,5 @@
   - The transposer output auto-scrolls to keep the active token visible.
   - The editor overlay supports save, re-save, save-as branching, return-to-origin behavior after save, and unsaved-close confirmation.
   - Deleting the current transposer source clears the transposer back to its empty state.
+  - The editor saved-context toggle defaults off for new drafts and restores saved context for existing records.
+  - Opening a saved tab with mismatched saved context shows the 3-option prompt and resolves the current-harp option by preserving the saved target key.

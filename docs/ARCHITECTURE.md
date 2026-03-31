@@ -33,8 +33,8 @@ Out of scope today:
 - `tabs.ts`: core mapping from pitch classes to playable tab groups. Includes bend/overbend formatting and ordering.
 - `arpeggios.ts`: generates triad/7th/blues arpeggio sections from selected scale root/definition.
 - `pitch.ts`: MIDI/frequency/cents conversions + nearest tab matching + interpolation factor `t`.
-- `app-storage.ts`: app-owned async string-storage wrapper around device persistence.
-- `saved-tab-library.ts`: versioned saved-tab parsing, sorting, title helpers, and persistence service.
+- `app-storage.ts`: app-owned async string-storage wrapper plus shared SQLite database access used by native persistence.
+- `saved-tab-library.ts`: saved-tab repository with backend-aware persistence, native legacy migration, saved-context normalization, sorting, title helpers, and persistence service.
 - `transposer.ts`: parses transposer input and produces both render segments and playable output-token metadata.
 - `transposer-follow.ts`: pure cursor-advance state machine for tone-follow behavior.
 - `web-audio.ts`: web microphone pitch detector (autocorrelation-like approach + EMA smoothing).
@@ -51,7 +51,7 @@ In `App.tsx`, state is split by concern:
 - Visual tracking: measured layouts for main tabs and each arpeggio row, plus row-selection state for caret placement.
 - Transposer source + follow: selected saved-tab id for the transposer, current octave offset (integer steps of 12 semitones), active output token index, hold/re-arm state, and tone-follow settings.
 - Editor state: raw draft text, current selection, linked saved-tab id, tabs-local return target, save-dialog state, dirty-open confirmation state, and new-draft confirmation state.
-- Saved-tab library: persisted records and library status text.
+- Saved-tab library: persisted records, library status text, and pending saved-context open choice.
 
 Derived values (`useMemo`) drive most rendering:
 - `groups` from `buildTabsForScale(...)`.
@@ -95,14 +95,17 @@ Derived values (`useMemo`) drive most rendering:
 
 ### E) Tabs workspace, saved-tab library, and editor
 1. User enters the `Tabs` workspace, which contains sibling `Transpose` and `Library` views plus an editor child screen.
-2. `saved-tab-library.ts` persists only the raw `inputText` plus library metadata (`id`, `title`, timestamps) under one versioned storage key.
-3. The `Library` view lists saved items sorted by `updatedAt` descending.
-4. Choosing `Open` on a saved tab sets the transposer source tab and switches `Tabs` to the `Transpose` view; other musical/transposition settings stay untouched.
-5. Choosing `Edit` opens the editor child screen for that saved item; if the current editor has unsaved changes, a confirmation dialog offers `Cancel`, `Open Anyway`, or `Save Then Open`.
-6. `Clean Input` on the editor always strips non-tab content and normalizes excess whitespace before saving or further editing.
-7. `Save As` branches the current editor text into a new saved record without overwriting the original linked tab.
-8. `New` clears the editor into a blank draft; if there are unsaved changes, a confirmation dialog offers `Cancel`, `Discard and New`, or `Save Then New`.
-9. Deleting the active saved item removes it from storage; if that item was the current editor link, the editor keeps its text as an unsaved draft, and if it was the transposer source, the transposer falls back to its empty state.
+2. `saved-tab-library.ts` persists saved tabs through a backend-aware service: web uses the saved-tab JSON blob in app storage, while native keeps the typed SQLite-backed path and imports legacy JSON-blob records on first read.
+3. Each saved tab stores raw `inputText`, title/timestamps, and optional harp+position context (`harmonicaPc`, `positionNumber`).
+4. The `Library` view lists saved items sorted by `title` ascending with a stable secondary tie-break.
+5. Choosing `Open` on a saved tab sets the transposer source tab and switches `Tabs` to the `Transpose` view.
+6. If the saved tab includes harp/position context and it mismatches the current target, the app prompts the user to either use the saved harp+position, keep the current harp but switch to the position that preserves the same target key, or keep the current selection and just load.
+7. Choosing `Edit` opens the editor child screen for that saved item; if the current editor has unsaved changes, a confirmation dialog offers `Cancel`, `Open Anyway`, or `Save Then Open`.
+8. `Clean Input` on the editor always strips non-tab content and normalizes excess whitespace before saving or further editing.
+9. The editor can optionally save the current harp+position context; the toggle defaults off for new drafts, and saving with it off clears any previously stored context on that record.
+10. `Save As` branches the current editor text into a new saved record without overwriting the original linked tab.
+11. `New` clears the editor into a blank draft; if there are unsaved changes, a confirmation dialog offers `Cancel`, `Discard and New`, or `Save Then New`.
+12. Deleting the active saved item removes it from storage; if that item was the current editor link, the editor keeps its text as an unsaved draft, and if it was the transposer source, the transposer falls back to its empty state.
 
 ## 6. Storage Strategy
 
@@ -134,9 +137,9 @@ If the app ever needs full-text search, relational queries, or a significantly l
 
 ### Tab data layout
 
-Both platforms store tabs identically above the storage layer: the entire library is serialized as a single JSON blob under the key `harmonica-tabs:saved-tabs`. The `SavedTabLibrary` type is versioned (`version: 1`) to allow future migrations. Sorting (e.g. by `updatedAt`) is applied in memory after reading the blob; no storage-level indexing is needed or used.
+Above the platform storage layer, saved tabs share the same record shape: `id`, `title`, `inputText`, optional saved context, and timestamps. On web, the entire library is serialized as one JSON blob under `harmonica-tabs:saved-tabs`. On native, the current service keeps a typed SQLite table and migrates legacy blob data on first read.
 
-There is no sync between platforms — web `localStorage` and native SQLite are independent stores.
+There is no sync between platforms — web app storage and native SQLite are independent stores.
 
 ## 7. Important Behavioral Rules
 
@@ -145,7 +148,7 @@ There is no sync between platforms — web `localStorage` and native SQLite are 
 - Overbend notation is user-selectable (`'` vs `°`).
 - Harmonica-key labels and target/scale-note labels have separate flat/sharp display preferences, both defaulting to flats.
 - Alternate selection is currently most visible for G (`-2` vs `3`) where both exist at the same MIDI pitch.
-- Saved tabs intentionally exclude harmonica key, position/key, transposition direction, tone-follow state, and derived output.
+- Saved tabs intentionally exclude transposition direction, tone-follow state, and derived output; they may optionally include harmonica key plus target position context for reopen behavior.
 - `Save` overwrites the linked saved record when one exists; `Save As` always creates a new saved record.
 - The transposer never works from an unsaved draft.
 - If mic is unavailable/blocked/unsupported, app runs with simulated frequency input.
@@ -160,9 +163,10 @@ There is no sync between platforms — web `localStorage` and native SQLite are 
   - `-2` vs `3` alternate behavior,
   - overbend notation rendering,
   - overbend hole exclusions,
-  - saved-tab persistence/update/sort behavior,
+  - saved-tab storage persistence/update/sort behavior, including web blob storage and native migration behavior,
   - transposer source selection, token-clicking, and auto-scroll behavior,
-  - editor save/re-save/save-as/new-draft/dirty-open flows.
+  - editor save/re-save/save-as/new-draft/dirty-open flows,
+  - saved-context open-prompt behavior and editor toggle defaults/restoration.
 
 Current gap:
 - No automated tests yet for `arpeggios.ts`, `pitch.ts`, or web audio detector behavior.

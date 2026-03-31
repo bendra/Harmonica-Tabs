@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { HARMONICA_KEYS, HarmonicaKey } from '../data/keys';
 import { SCALE_DEFINITIONS } from '../data/scales';
-import { noteToPc, pcToNote, NoteName } from '../data/notes';
+import { noteToPc, normalizePc, pcToNote, NoteName } from '../data/notes';
 import { buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from '../logic/tabs';
 import { buildArpeggioSections } from '../logic/arpeggios';
 
@@ -23,7 +23,7 @@ export type DropdownOption<T> = {
 
 export type NoteLabelStyle = 'flat' | 'sharp';
 
-function formatOrdinal(value: number) {
+export function formatOrdinal(value: number) {
   const mod100 = value % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
 
@@ -39,10 +39,22 @@ function formatOrdinal(value: number) {
   }
 }
 
-function buildScaleKeyOptions(harmonicaPc: number, preferFlats: boolean): ScaleKeyOption[] {
+export function getTargetRootPcForPosition(harmonicaPc: number, positionNumber: number) {
+  return normalizePc(harmonicaPc + (positionNumber - 1) * 7);
+}
+
+export function getPositionNumberForTargetRootPc(harmonicaPc: number, targetRootPc: number) {
+  return normalizePc((targetRootPc - harmonicaPc) * 7) + 1;
+}
+
+export function formatPositionKeyLabel(positionNumber: number, targetRootPc: number, preferFlats: boolean) {
+  return `${formatOrdinal(positionNumber)} / ${pcToNote(targetRootPc, preferFlats)}`;
+}
+
+export function buildScaleKeyOptions(harmonicaPc: number, preferFlats: boolean): ScaleKeyOption[] {
   return Array.from({ length: 12 }, (_, index) => {
     const position = index + 1;
-    const rootPc = (harmonicaPc + index * 7) % 12;
+    const rootPc = getTargetRootPcForPosition(harmonicaPc, position);
     return {
       position,
       note: pcToNote(rootPc, preferFlats),
@@ -59,7 +71,7 @@ export function getPreferredTabOption(group: TabGroup, gAltPreference: '-2' | '3
   return group.options[0];
 }
 
-type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
+export type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 
 export function useMusicalSelection() {
   const [harmonicaKey, setHarmonicaKey] = useState<HarmonicaKey>(HARMONICA_KEYS[0]);

@@ -2,25 +2,107 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestRenderer, { act } from 'react-test-renderer';
 import { resetReactNativeMocks, scrollToSpy, setReactNativeWindowDimensions } from './react-native.mock';
-import { parseSavedTabLibrary, SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
+import { SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
 import { HARMONICA_KEYS } from '../../src/data/keys';
 import { buildTabsForScale } from '../../src/logic/tabs';
 
-const { asyncStorageMock, asyncStorageValues } = vi.hoisted(() => {
+const { asyncStorageMock, asyncStorageValues, savedTabDb } = vi.hoisted(() => {
+  function createMockSavedTabDatabase() {
+    const rows = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        input_text: string;
+        harmonica_pc: number | null;
+        position_number: number | null;
+        created_at: string;
+        updated_at: string;
+      }
+    >();
+
+    function listRows() {
+      return [...rows.values()].sort((left, right) => {
+        const titleDelta = left.title.localeCompare(right.title, undefined, { sensitivity: 'base' });
+        if (titleDelta !== 0) return titleDelta;
+
+        const exactTitleDelta = left.title.localeCompare(right.title);
+        if (exactTitleDelta !== 0) return exactTitleDelta;
+
+        const updatedDelta = new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime();
+        if (updatedDelta !== 0) return updatedDelta;
+
+        return left.id.localeCompare(right.id);
+      });
+    }
+
+    return {
+      database: {
+        async execAsync() {},
+        async getFirstAsync<T>(sql: string, ...params: Array<string | number | boolean | null>) {
+          const normalized = sql.toLowerCase();
+          if (normalized.includes('count(*) as count')) {
+            return { count: rows.size } as T;
+          }
+
+          if (normalized.includes('where id = ?')) {
+            const row = rows.get(String(params[0]));
+            return row ? ({ ...row } as T) : null;
+          }
+
+          throw new Error(`Unsupported mock getFirstAsync query: ${sql}`);
+        },
+        async getAllAsync<T>() {
+          return listRows().map((row) => ({ ...row } as T));
+        },
+        async runAsync(sql: string, ...params: Array<string | number | boolean | null>) {
+          const normalized = sql.toLowerCase();
+          if (normalized.includes('insert or replace into saved_tabs')) {
+            const [id, title, inputText, harmonicaPc, positionNumber, createdAt, updatedAt] = params;
+            rows.set(String(id), {
+              id: String(id),
+              title: String(title),
+              input_text: String(inputText),
+              harmonica_pc: harmonicaPc === null ? null : Number(harmonicaPc),
+              position_number: positionNumber === null ? null : Number(positionNumber),
+              created_at: String(createdAt),
+              updated_at: String(updatedAt),
+            });
+            return;
+          }
+
+          if (normalized.includes('delete from saved_tabs where id = ?')) {
+            rows.delete(String(params[0]));
+            return;
+          }
+
+          throw new Error(`Unsupported mock runAsync query: ${sql}`);
+        },
+      },
+      reset() {
+        rows.clear();
+      },
+      listRows,
+    };
+  }
+
   const values = new Map<string, string>();
+  const db = createMockSavedTabDatabase();
   const mock = {
     getItem: vi.fn(async (key: string) => values.get(key) ?? null),
     setItem: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
     removeItem: vi.fn(async (key: string) => { values.delete(key); }),
   };
-  return { asyncStorageValues: values, asyncStorageMock: mock };
+  return { asyncStorageValues: values, asyncStorageMock: mock, savedTabDb: db };
 });
 
 vi.mock('../../src/logic/app-storage', () => ({
   appStorage: asyncStorageMock,
+  getAppDatabase: async () => savedTabDb.database,
 }));
 
 const { default: App } = await import('../../App');
+const { resetSavedTabLibraryServiceForTests } = await import('../../src/hooks/use-saved-tab-library');
 
 function flattenTextChildren(children: any[]): string {
   return children
@@ -56,6 +138,10 @@ function findPressableByText(root: any, text: string) {
 
 function findDropdownByLabel(root: any, label: string) {
   return root.find((node: any) => typeof node.type === 'function' && node.props?.label === label);
+}
+
+function findDropdownByTestId(root: any, testID: string) {
+  return root.find((node: any) => typeof node.type === 'function' && node.props?.testID === testID);
 }
 
 function findAllText(root: any, text: string) {
@@ -138,7 +224,7 @@ function stubWebInputEnvironment(params: { coarsePointerMatches: boolean; maxTou
   });
 }
 
-function seedSavedTabs(tabs: Array<Record<string, string>>) {
+function seedSavedTabs(tabs: Array<Record<string, any>>) {
   asyncStorageValues.set(
     SAVED_TAB_LIBRARY_STORAGE_KEY,
     JSON.stringify({
@@ -146,6 +232,13 @@ function seedSavedTabs(tabs: Array<Record<string, string>>) {
       tabs,
     }),
   );
+}
+
+function readSavedTabsFromStorage() {
+  const rawValue = asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null;
+  if (!rawValue) return [];
+  const parsed = JSON.parse(rawValue) as { tabs?: Array<Record<string, any>> };
+  return Array.isArray(parsed.tabs) ? parsed.tabs : [];
 }
 
 function goToTabs(root: any) {
@@ -183,6 +276,11 @@ function openLibraryFromTransposer(root: any) {
 
 async function openLibraryTab(root: any, id: string) {
   await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await act(async () => {
     findByTestId(root, `saved-tab-open:${id}`).props.onPress();
     await Promise.resolve();
   });
@@ -202,6 +300,11 @@ function chooseHarmonicaKey(root: any, pc: number) {
 
 async function editLibraryTab(root: any, id: string) {
   await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await act(async () => {
     findByTestId(root, `saved-tab-edit:${id}`).props.onPress();
     await Promise.resolve();
   });
@@ -212,6 +315,7 @@ async function renderApp() {
 
   await act(async () => {
     renderer = TestRenderer.create(<App />);
+    await Promise.resolve();
     await Promise.resolve();
   });
 
@@ -227,6 +331,8 @@ describe('App navigation', () => {
   beforeEach(() => {
     resetReactNativeMocks();
     asyncStorageValues.clear();
+    savedTabDb.reset();
+    resetSavedTabLibraryServiceForTests();
     asyncStorageMock.getItem.mockClear();
     asyncStorageMock.setItem.mockClear();
     asyncStorageMock.removeItem.mockClear();
@@ -979,15 +1085,97 @@ describe('App navigation', () => {
 
     await act(async () => {
       findByTestId(root, 'save-tab-title-input').props.onChangeText('Warmup');
+      await findByTestId(root, 'save-tab-confirm-button').props.onPressIn();
+    });
+
+    const storedLibrary = readSavedTabsFromStorage();
+    expect(storedLibrary).toHaveLength(1);
+    expect(storedLibrary[0]?.title).toBe('Warmup');
+    expect(storedLibrary[0]?.inputText).toBe('4 -4');
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+  });
+
+  it('defaults the editor saved-context toggle off for new tabs', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    openCreateTab(root);
+
+    expect(findByTestId(root, 'editor-save-context-toggle')).toBeTruthy();
+    expect(findAllText(root, 'Save with key/position context').length).toBeGreaterThan(0);
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-context-harmonica-dropdown')).toHaveLength(0);
+    expect(root.findAll((node: any) => node.props?.testID === 'editor-context-position-dropdown')).toHaveLength(0);
+
+    act(() => {
+      findByTestId(root, 'editor-save-context-toggle').props.onPress();
+    });
+
+    expect(findDropdownByTestId(root, 'editor-context-harmonica-dropdown').props.value).toBe(0);
+    expect(findDropdownByTestId(root, 'editor-context-position-dropdown').props.value).toBe(1);
+  });
+
+  it('reopens saved context in the editor with the toggle on and saved-context dropdowns restored', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'context-tab',
+        title: 'Context tab',
+        inputText: '4 -4',
+        harmonicaPc: 0,
+        positionNumber: 2,
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    await editLibraryTab(root, 'context-tab');
+
+    expect(findByTestId(root, 'editor-save-context-toggle')).toBeTruthy();
+    expect(findDropdownByTestId(root, 'editor-context-harmonica-dropdown').props.value).toBe(0);
+    expect(findDropdownByTestId(root, 'editor-context-position-dropdown').props.value).toBe(2);
+  });
+
+  it('saves edited saved-context dropdown values with the tab', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+    openCreateTab(root);
+
+    act(() => {
+      findTextInput(root).props.onChangeText('4 -4');
+      findByTestId(root, 'editor-save-context-toggle').props.onPress();
+    });
+
+    act(() => {
+      findDropdownByTestId(root, 'editor-context-harmonica-dropdown').props.onChange(5);
+      findDropdownByTestId(root, 'editor-context-position-dropdown').props.onChange(3);
+    });
+
+    await act(async () => {
+      findByTestId(root, 'editor-save-button').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findByTestId(root, 'save-tab-title-input').props.onChangeText('Keyed tab');
       await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
-    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
-    expect(storedLibrary.tabs).toHaveLength(1);
-    expect(storedLibrary.tabs[0]?.title).toBe('Warmup');
-    expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4');
-    expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
-    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+    const storedLibrary = readSavedTabsFromStorage();
+    expect(storedLibrary).toHaveLength(1);
+    expect(storedLibrary[0]?.harmonicaPc).toBe(5);
+    expect(storedLibrary[0]?.positionNumber).toBe(3);
   });
 
   it('edits a saved tab and re-saves it from the editor', async () => {
@@ -1022,10 +1210,10 @@ describe('App navigation', () => {
       await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
-    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
-    expect(storedLibrary.tabs).toHaveLength(1);
-    expect(storedLibrary.tabs[0]?.title).toBe('Warmup');
-    expect(storedLibrary.tabs[0]?.inputText).toBe('4 -4 5');
+    const storedLibrary = readSavedTabsFromStorage();
+    expect(storedLibrary).toHaveLength(1);
+    expect(storedLibrary[0]?.title).toBe('Warmup');
+    expect(storedLibrary[0]?.inputText).toBe('4 -4 5');
     expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
   });
@@ -1109,13 +1297,43 @@ describe('App navigation', () => {
       await findByTestId(root, 'save-tab-confirm-button').props.onPress();
     });
 
-    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
-    expect(storedLibrary.tabs).toHaveLength(2);
-    expect(storedLibrary.tabs.map((tab) => tab.title).sort()).toEqual(['Original', 'Original copy']);
-    expect(storedLibrary.tabs.find((tab) => tab.title === 'Original')?.inputText).toBe('4 -4');
-    expect(storedLibrary.tabs.find((tab) => tab.title === 'Original copy')?.inputText).toBe('4 -4 5');
+    const storedLibrary = readSavedTabsFromStorage();
+    expect(storedLibrary).toHaveLength(2);
+    expect(storedLibrary.map((tab) => tab.title).sort()).toEqual(['Original', 'Original copy']);
+    expect(storedLibrary.find((tab) => tab.title === 'Original')?.inputText).toBe('4 -4');
+    expect(storedLibrary.find((tab) => tab.title === 'Original copy')?.inputText).toBe('4 -4 5');
     expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
+  });
+
+  it('prompts when opening a saved tab whose context mismatches the current selection', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'context-tab',
+        title: 'Context tab',
+        inputText: '4 -4',
+        harmonicaPc: 0,
+        positionNumber: 2,
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    chooseHarmonicaKey(root, 5);
+    goToTabs(root);
+    await openLibraryTab(root, 'context-tab');
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(findByTestId(root, 'saved-tab-context-modal')).toBeTruthy();
+    expect(findAllText(root, 'Use saved: C harp • 2nd / G').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Keep F harp: 3rd / G').length).toBeGreaterThan(0);
+    expect(findAllText(root, 'Keep current selection and load').length).toBeGreaterThan(0);
   });
 
   it('hides the workspace switcher while the editor overlay is open', async () => {
@@ -1255,9 +1473,9 @@ describe('App navigation', () => {
     expect(root.findAll((node: any) => node.props?.testID === 'editor-close-button')).toHaveLength(0);
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
 
-    const storedLibrary = parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null);
-    expect(storedLibrary.tabs).toHaveLength(1);
-    expect(storedLibrary.tabs[0]?.title).toBe('Saved on close');
+    const storedLibrary = readSavedTabsFromStorage();
+    expect(storedLibrary).toHaveLength(1);
+    expect(storedLibrary[0]?.title).toBe('Saved on close');
   });
 
 
@@ -1288,7 +1506,7 @@ describe('App navigation', () => {
     });
 
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
-    expect(parseSavedTabLibrary(asyncStorageValues.get(SAVED_TAB_LIBRARY_STORAGE_KEY) ?? null).tabs).toHaveLength(0);
+    expect(readSavedTabsFromStorage()).toHaveLength(0);
   });
 
 });

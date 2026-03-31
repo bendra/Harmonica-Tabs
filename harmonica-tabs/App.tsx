@@ -11,20 +11,27 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { pcToNote } from './src/data/notes';
+import { noteToPc, pcToNote } from './src/data/notes';
 import { HARMONICA_KEYS } from './src/data/keys';
-import { buildTabsForPcSet } from './src/logic/tabs';
+import { buildTabsForPcSet, OverbendNotation } from './src/logic/tabs';
 import {
   useMusicalSelection,
+  buildScaleKeyOptions,
   DropdownOption,
   NoteLabelStyle,
+  PositionKeyFilter,
   ScaleKeyOption,
+  formatPositionKeyLabel,
+  formatOrdinal,
   formatScaleLabel,
+  getPositionNumberForTargetRootPc,
   getPreferredTabOption,
+  getTargetRootPcForPosition,
 } from './src/hooks/use-musical-selection';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import {
   formatSavedTabPreview,
+  getSavedTabContext,
   SavedTabRecord,
 } from './src/logic/saved-tab-library';
 import { useSavedTabLibrary } from './src/hooks/use-saved-tab-library';
@@ -37,6 +44,12 @@ function getLayoutTier(shortEdge: number): LayoutTier {
   if (shortEdge < 420) return 'compact';
   if (shortEdge >= 768) return 'wide';
   return 'regular';
+}
+
+function debugSaveDialog(step: string, details?: Record<string, unknown>) {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.info('[save-dialog]', step, details ?? {});
+  }
 }
 
 function getScalesLayoutMetrics(layoutTier: LayoutTier) {
@@ -189,6 +202,7 @@ function Dropdown<T extends string | number>(props: {
   onChange: (value: T) => void;
   compact?: boolean;
   size?: ResponsiveControlSize;
+  testID?: string;
 }) {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
@@ -207,7 +221,7 @@ function Dropdown<T extends string | number>(props: {
   }
 
   return (
-    <View style={[styles.dropdown, compact && styles.dropdownCompact]}>
+    <View testID={props.testID} style={[styles.dropdown, compact && styles.dropdownCompact]}>
       <Text style={[styles.dropdownLabel, compact && styles.dropdownLabelCompact, wide && styles.dropdownLabelWide]}>
         {props.label}
       </Text>
@@ -437,9 +451,8 @@ export default function App() {
     saveTabModalVisible,
     saveTabMode,
     saveTabTitleInput,
-    setSaveTabTitleInput,
     saveTabTitleError,
-    setSaveTabTitleError,
+    isSavingTab,
     pendingOpenRecord,
     setPendingOpenRecord,
     closeEditorModalVisible,
@@ -457,8 +470,12 @@ export default function App() {
     openEditorForNewDraft,
     handleSaveTabConfirm,
     handleSavedTabEditPress,
-    handleSavedTabTransposePress,
     handleDeleteSavedTab,
+    saveWithContext,
+    setSaveWithContext,
+    draftSavedContext,
+    setDraftSavedContext,
+    handleSaveTabTitleInputChange,
   } = useTabEditor({
     savedTabs,
     setSavedTabs,
@@ -468,7 +485,10 @@ export default function App() {
     setTabsEditorVisible,
     setScreen,
     deleteSavedTab,
+    currentHarmonicaPc: harmonicaKey.pc,
+    currentPositionNumber: getPositionNumberForTargetRootPc(harmonicaKey.pc, scale.rootPc),
   });
+  const [pendingContextOpenRecord, setPendingContextOpenRecord] = useState<SavedTabRecord | null>(null);
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
   const [arpeggioLayouts, setArpeggioLayouts] = useState<
     Record<string, Array<{ x: number; y: number; width: number; height: number }>>
@@ -509,6 +529,36 @@ export default function App() {
   ]);
 
   const savedTabsStatusIsError = isSavedTabsErrorStatus(savedTabsStatus);
+  const currentPositionNumber = getPositionNumberForTargetRootPc(harmonicaKey.pc, scale.rootPc);
+  const editorSavedContextPositionOptions = useMemo<DropdownOption<number>[]>(
+    () =>
+      draftSavedContext
+        ? buildScaleKeyOptions(draftSavedContext.harmonicaPc, targetKeyPreferFlats).map((option) => ({
+            label: formatPositionKeyLabel(option.position, noteToPc(option.note), targetKeyPreferFlats),
+            value: option.position,
+          }))
+        : [],
+    [draftSavedContext, targetKeyPreferFlats],
+  );
+
+  const pendingContextRecordContext = pendingContextOpenRecord ? getSavedTabContext(pendingContextOpenRecord) : null;
+  const pendingContextTargetPc =
+    pendingContextRecordContext !== null
+      ? getTargetRootPcForPosition(
+          pendingContextRecordContext.harmonicaPc,
+          pendingContextRecordContext.positionNumber,
+        )
+      : null;
+  const pendingContextCurrentHarpPosition =
+    pendingContextTargetPc !== null
+      ? getPositionNumberForTargetRootPc(harmonicaKey.pc, pendingContextTargetPc)
+      : null;
+  const pendingContextCurrentHarpVisible =
+    pendingContextTargetPc !== null &&
+    pendingContextCurrentHarpPosition !== null &&
+    visibleScaleKeyOptions.some(
+      (option) => option.position === pendingContextCurrentHarpPosition && noteToPc(option.note) === pendingContextTargetPc,
+    );
 
   function renderToneFollowDebugPanel() {
     return (
@@ -555,6 +605,55 @@ export default function App() {
         {index === 0 ? pcToNote(pc, targetKeyPreferFlats) : `–${pcToNote(pc, targetKeyPreferFlats)}`}
       </Text>
     ));
+  }
+
+  function ensurePositionVisible(positionNumber: number) {
+    if (visibleScaleKeyOptions.some((option) => option.position === positionNumber)) {
+      return;
+    }
+
+    setPositionKeyFilter('all');
+  }
+
+  function applyHarpAndTargetSelection(nextHarmonicaPc: number, nextPositionNumber: number) {
+    const nextTargetRootPc = getTargetRootPcForPosition(nextHarmonicaPc, nextPositionNumber);
+    const nextTargetRoot = pcToNote(nextTargetRootPc, targetKeyPreferFlats);
+
+    ensurePositionVisible(nextPositionNumber);
+
+    const nextHarmonicaKey = HARMONICA_KEYS.find((item) => item.pc === nextHarmonicaPc) ?? null;
+    if (nextHarmonicaKey) {
+      setHarmonicaKey(nextHarmonicaKey);
+    }
+    setScaleRoot(nextTargetRoot);
+    setTransposerOctaveOffset(0);
+  }
+
+  function openSavedTabInTransposer(record: SavedTabRecord) {
+    setTransposerSourceTabId(record.id);
+    setSavedTabsStatus(`Selected "${record.title}" for transposing.`);
+    setTabsEditorVisible(false);
+    setTabsSubview('transpose');
+    setScreen('tabs');
+    setPendingContextOpenRecord(null);
+  }
+
+  function handleSavedTabOpenPress(record: SavedTabRecord) {
+    const savedContext = getSavedTabContext(record);
+    if (savedContext === null) {
+      openSavedTabInTransposer(record);
+      return;
+    }
+
+    if (
+      savedContext.harmonicaPc === harmonicaKey.pc &&
+      savedContext.positionNumber === currentPositionNumber
+    ) {
+      openSavedTabInTransposer(record);
+      return;
+    }
+
+    setPendingContextOpenRecord(record);
   }
 
   function openTabsWorkspace() {
@@ -831,19 +930,65 @@ export default function App() {
               </View>
               <View style={styles.editorSecondaryRow}>
                 <Text style={styles.editorSecondaryLabel}>Helpers</Text>
-                <Pressable
-                  testID="editor-clean-button"
-                  onPress={handleCleanEditorInput}
-                  style={[
-                    styles.editorSecondaryButton,
-                    isSmallScreen && styles.editorSecondaryButtonCompact,
-                  ]}
-                >
-                  <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
-                    Clean Input
-                  </Text>
-                </Pressable>
+                <View style={styles.editorSecondaryActions}>
+                  <Pressable
+                    testID="editor-save-context-toggle"
+                    onPress={() => setSaveWithContext((prev) => !prev)}
+                    style={[
+                      styles.propertiesToggleButton,
+                      saveWithContext && styles.propertiesToggleButtonActive,
+                    ]}
+                  >
+                    <Text style={styles.propertiesToggleText}>Save with key/position context</Text>
+                  </Pressable>
+                  <Pressable
+                    testID="editor-clean-button"
+                    onPress={handleCleanEditorInput}
+                    style={[
+                      styles.editorSecondaryButton,
+                      isSmallScreen && styles.editorSecondaryButtonCompact,
+                    ]}
+                  >
+                    <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
+                      Clean Input
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
+              {saveWithContext && draftSavedContext && (
+                <View style={styles.editorContextSelectors}>
+                  <View style={styles.topRowKey}>
+                    <Dropdown
+                      testID="editor-context-harmonica-dropdown"
+                      label="Saved harmonica key"
+                      value={draftSavedContext.harmonicaPc}
+                      options={harmonicaKeyDropdownOptions}
+                      onChange={(nextHarmonicaPc) => {
+                        setDraftSavedContext((prev) => ({
+                          harmonicaPc: nextHarmonicaPc,
+                          positionNumber: prev?.positionNumber ?? currentPositionNumber,
+                        }));
+                      }}
+                      size={isSmallScreen ? 'compact' : 'regular'}
+                    />
+                  </View>
+                  <View style={styles.topRowKey}>
+                    <Dropdown
+                      testID="editor-context-position-dropdown"
+                      label="Saved position/key"
+                      value={draftSavedContext.positionNumber}
+                      options={editorSavedContextPositionOptions}
+                      onChange={(nextPositionNumber) => {
+                        setDraftSavedContext((prev) => ({
+                          harmonicaPc: prev?.harmonicaPc ?? harmonicaKey.pc,
+                          positionNumber: nextPositionNumber,
+                        }));
+                      }}
+                      size={isSmallScreen ? 'compact' : 'regular'}
+                    />
+                  </View>
+                </View>
+              )}
               <TextInput
                 ref={editorInputRef}
                 style={[styles.transposerInput, styles.transposerInputGrow]}
@@ -876,11 +1021,9 @@ export default function App() {
               <TextInput
                 testID="save-tab-title-input"
                 value={saveTabTitleInput}
-                onChangeText={(value) => {
-                  setSaveTabTitleInput(value);
-                  if (saveTabTitleError) {
-                    setSaveTabTitleError(null);
-                  }
+                onChangeText={handleSaveTabTitleInputChange}
+                onSubmitEditing={() => {
+                  void handleSaveTabConfirm();
                 }}
                 style={styles.dialogInput}
                 placeholder="Saved tab title"
@@ -888,6 +1031,7 @@ export default function App() {
                 autoCorrect={false}
                 autoCapitalize="sentences"
                 spellCheck={false}
+                returnKeyType="done"
               />
               {saveTabTitleError && <Text style={styles.dialogErrorText}>{saveTabTitleError}</Text>}
               <View style={styles.dialogActionRow}>
@@ -896,11 +1040,18 @@ export default function App() {
                 </Pressable>
                 <Pressable
                   testID="save-tab-confirm-button"
+                  onPressIn={() => {
+                    debugSaveDialog('confirm-button:press-in', {
+                      titleLength: saveTabTitleInput.trim().length,
+                      isSavingTab,
+                    });
+                    void handleSaveTabConfirm();
+                  }}
                   onPress={handleSaveTabConfirm}
-                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton, isSavingTab && styles.dialogButtonDisabled]}
                 >
                   <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>
-                    {getSaveDialogConfirmLabel(saveTabMode)}
+                    {isSavingTab ? 'Saving…' : getSaveDialogConfirmLabel(saveTabMode)}
                   </Text>
                 </Pressable>
               </View>
@@ -1188,7 +1339,7 @@ export default function App() {
                         <View style={styles.savedTabActions}>
                           <Pressable
                             testID={`saved-tab-open:${tab.id}`}
-                            onPress={() => handleSavedTabTransposePress(tab)}
+                            onPress={() => handleSavedTabOpenPress(tab)}
                             style={styles.savedTabActionButton}
                           >
                             <Text style={styles.savedTabActionText}>Open</Text>
@@ -1794,6 +1945,82 @@ export default function App() {
                 )}
               </View>
             </ScrollView>
+            </View>
+          </View>
+        )}
+        {pendingContextOpenRecord !== null && pendingContextRecordContext !== null && pendingContextTargetPc !== null && (
+          <View testID="saved-tab-context-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingContextOpenRecord(null)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>Saved tab context</Text>
+              <Text style={styles.helperText}>
+                "{pendingContextOpenRecord.title}" was saved with{' '}
+                {pcToNote(pendingContextRecordContext.harmonicaPc, harmonicaKeyLabelStyle === 'flat')} harp in{' '}
+                {formatOrdinal(pendingContextRecordContext.positionNumber).toLowerCase()} position (
+                {pcToNote(pendingContextTargetPc, targetKeyPreferFlats)}). Choose how to open it.
+              </Text>
+              <View style={styles.dialogActionColumn}>
+                <Pressable onPress={() => setPendingContextOpenRecord(null)} style={styles.dialogButton}>
+                  <Text style={styles.dialogButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  testID="saved-tab-context-use-saved-button"
+                  onPress={() => {
+                    applyHarpAndTargetSelection(
+                      pendingContextRecordContext.harmonicaPc,
+                      pendingContextRecordContext.positionNumber,
+                    );
+                    openSavedTabInTransposer(pendingContextOpenRecord);
+                  }}
+                  style={styles.dialogButton}
+                >
+                  <Text style={styles.dialogButtonText}>
+                    Use saved: {pcToNote(pendingContextRecordContext.harmonicaPc, harmonicaKeyLabelStyle === 'flat')} harp •{' '}
+                    {formatPositionKeyLabel(
+                      pendingContextRecordContext.positionNumber,
+                      pendingContextTargetPc,
+                      targetKeyPreferFlats,
+                    )}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  testID="saved-tab-context-keep-harp-button"
+                  disabled={!pendingContextCurrentHarpVisible}
+                  onPress={() => {
+                    if (pendingContextCurrentHarpPosition === null) return;
+                    applyHarpAndTargetSelection(harmonicaKey.pc, pendingContextCurrentHarpPosition);
+                    openSavedTabInTransposer(pendingContextOpenRecord);
+                  }}
+                  style={[
+                    styles.dialogButton,
+                    !pendingContextCurrentHarpVisible && styles.dialogButtonDisabled,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dialogButtonText,
+                      !pendingContextCurrentHarpVisible && styles.dialogButtonTextDisabled,
+                    ]}
+                  >
+                    {pendingContextCurrentHarpVisible && pendingContextCurrentHarpPosition !== null
+                      ? `Keep ${pcToNote(harmonicaKey.pc, harmonicaKeyLabelStyle === 'flat')} harp: ${formatPositionKeyLabel(
+                          pendingContextCurrentHarpPosition,
+                          pendingContextTargetPc,
+                          targetKeyPreferFlats,
+                        )}`
+                      : `Keep ${pcToNote(harmonicaKey.pc, harmonicaKeyLabelStyle === 'flat')} harp: target key not available in visible positions`}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  testID="saved-tab-context-keep-current-button"
+                  onPress={() => openSavedTabInTransposer(pendingContextOpenRecord)}
+                  style={[styles.dialogButton, styles.dialogPrimaryButton]}
+                >
+                  <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>
+                    Keep current selection and load
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         )}
@@ -2629,6 +2856,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  editorSecondaryActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 8,
+    flex: 1,
+  },
   editorSecondaryLabel: {
     color: '#94a3b8',
     fontSize: 11,
@@ -2657,6 +2891,11 @@ const styles = StyleSheet.create({
   },
   editorSecondaryButtonTextCompact: {
     fontSize: 10,
+  },
+  editorContextSelectors: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
   },
   savedTabsStatus: {
     color: '#93c5fd',
@@ -2977,12 +3216,18 @@ const styles = StyleSheet.create({
     borderColor: '#38bdf8',
     backgroundColor: '#0b3b4a',
   },
+  dialogButtonDisabled: {
+    opacity: 0.55,
+  },
   dialogButtonText: {
     color: '#e2e8f0',
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  dialogButtonTextDisabled: {
+    color: '#94a3b8',
   },
   dialogPrimaryButtonText: {
     color: '#e0f2fe',

@@ -14,8 +14,72 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-const { asyncStorageMock, asyncStorageValues, detectorMockState } = vi.hoisted(() => {
+const { asyncStorageMock, asyncStorageValues, detectorMockState, savedTabDb } = vi.hoisted(() => {
+  function createMockSavedTabDatabase() {
+    const rows = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        input_text: string;
+        harmonica_pc: number | null;
+        position_number: number | null;
+        created_at: string;
+        updated_at: string;
+      }
+    >();
+
+    return {
+      database: {
+        async execAsync() {},
+        async getFirstAsync<T>(sql: string, ...params: Array<string | number | boolean | null>) {
+          const normalized = sql.toLowerCase();
+          if (normalized.includes('count(*) as count')) {
+            return { count: rows.size } as T;
+          }
+
+          if (normalized.includes('where id = ?')) {
+            const row = rows.get(String(params[0]));
+            return row ? ({ ...row } as T) : null;
+          }
+
+          throw new Error(`Unsupported mock getFirstAsync query: ${sql}`);
+        },
+        async getAllAsync<T>() {
+          return [...rows.values()].map((row) => ({ ...row } as T));
+        },
+        async runAsync(sql: string, ...params: Array<string | number | boolean | null>) {
+          const normalized = sql.toLowerCase();
+          if (normalized.includes('insert or replace into saved_tabs')) {
+            const [id, title, inputText, harmonicaPc, positionNumber, createdAt, updatedAt] = params;
+            rows.set(String(id), {
+              id: String(id),
+              title: String(title),
+              input_text: String(inputText),
+              harmonica_pc: harmonicaPc === null ? null : Number(harmonicaPc),
+              position_number: positionNumber === null ? null : Number(positionNumber),
+              created_at: String(createdAt),
+              updated_at: String(updatedAt),
+            });
+            return;
+          }
+
+          if (normalized.includes('delete from saved_tabs where id = ?')) {
+            rows.delete(String(params[0]));
+            return;
+          }
+
+          throw new Error(`Unsupported mock runAsync query: ${sql}`);
+        },
+      },
+      reset() {
+        rows.clear();
+      },
+    };
+  }
+
   const values = new Map<string, string>();
+  const db = createMockSavedTabDatabase();
   return {
     asyncStorageValues: values,
     asyncStorageMock: {
@@ -23,6 +87,7 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState } = vi.hoisted((
       setItem: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
       removeItem: vi.fn(async (key: string) => { values.delete(key); }),
     },
+    savedTabDb: db,
     detectorMockState: {
       isSupported: false,
       startQueue: [] as Array<() => Promise<void>>,
@@ -35,6 +100,7 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState } = vi.hoisted((
 
 vi.mock('../../src/logic/app-storage', () => ({
   appStorage: asyncStorageMock,
+  getAppDatabase: async () => savedTabDb.database,
 }));
 
 vi.mock('../../src/logic/web-audio', () => ({
@@ -51,6 +117,7 @@ vi.mock('../../src/logic/web-audio', () => ({
 }));
 
 const { default: App } = await import('../../App');
+const { resetSavedTabLibraryServiceForTests } = await import('../../src/hooks/use-saved-tab-library');
 
 function flattenTextChildren(children: any[]): string {
   return children
@@ -106,6 +173,11 @@ function goToTabs(root: any) {
 
 async function openLibraryTab(root: any, id: string) {
   await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await act(async () => {
     findByTestId(root, `saved-tab-open:${id}`).props.onPress();
     await Promise.resolve();
   });
@@ -117,6 +189,7 @@ async function renderApp() {
   await act(async () => {
     renderer = TestRenderer.create(<App />);
     await Promise.resolve();
+    await Promise.resolve();
   });
 
   return renderer;
@@ -126,6 +199,8 @@ describe('App listening lifecycle', () => {
   beforeEach(() => {
     resetReactNativeMocks();
     asyncStorageValues.clear();
+    savedTabDb.reset();
+    resetSavedTabLibraryServiceForTests();
     asyncStorageMock.getItem.mockClear();
     asyncStorageMock.setItem.mockClear();
     asyncStorageMock.removeItem.mockClear();
