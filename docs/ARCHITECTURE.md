@@ -104,7 +104,41 @@ Derived values (`useMemo`) drive most rendering:
 8. `New` clears the editor into a blank draft; if there are unsaved changes, a confirmation dialog offers `Cancel`, `Discard and New`, or `Save Then New`.
 9. Deleting the active saved item removes it from storage; if that item was the current editor link, the editor keeps its text as an unsaved draft, and if it was the transposer source, the transposer falls back to its empty state.
 
-## 6. Important Behavioral Rules
+## 6. Storage Strategy
+
+### Abstraction layer
+
+`src/logic/app-storage.ts` defines an `AppStorage` interface (`getItem` / `setItem` / `removeItem`) that the rest of the app depends on. No call site above this layer knows which backend is in use.
+
+### Platform backends
+
+| Platform | File | Backend |
+|---|---|---|
+| Web | `src/logic/app-storage.web.ts` | Browser `localStorage` |
+| Native (iOS/Android via Expo Go) | `src/logic/app-storage.ts` | SQLite via `expo-sqlite` (`harmonica-tabs.db`) |
+
+Expo's platform-specific module resolution picks the right file automatically: the `.web.ts` suffix causes the web build to use `app-storage.web.ts`; native builds fall through to `app-storage.ts`.
+
+The native SQLite implementation uses a simple two-column key-value table (`kv_store`) — no relational schema. SQLite is used here purely for its persistence guarantees on iOS/Android, not for query capabilities.
+
+### Why not SQLite on web too?
+
+`expo-sqlite` does support web via the browser's Origin Private File System (OPFS) API, so it is technically possible. It is not used because:
+
+- The app only stores a single JSON blob per storage key; there are no queries where SQLite would add value over `localStorage`.
+- Shipping SQLite on web requires a ~1 MB+ WebAssembly binary, a meaningful load-time cost for no functional gain.
+- OPFS has narrower browser support and more complex initialization than `localStorage`.
+- The `AppStorage` abstraction already contains the divergence cleanly; the rest of the codebase is unaffected.
+
+If the app ever needs full-text search, relational queries, or a significantly larger data volume, revisiting SQLite on web would be reasonable.
+
+### Tab data layout
+
+Both platforms store tabs identically above the storage layer: the entire library is serialized as a single JSON blob under the key `harmonica-tabs:saved-tabs`. The `SavedTabLibrary` type is versioned (`version: 1`) to allow future migrations. Sorting (e.g. by `updatedAt`) is applied in memory after reading the blob; no storage-level indexing is needed or used.
+
+There is no sync between platforms — web `localStorage` and native SQLite are independent stores.
+
+## 7. Important Behavioral Rules
 
 - Standard 10-hole Richter only.
 - Overbends are excluded on holes `2`, `3`, and `8` (`tabs.ts`).
@@ -117,7 +151,7 @@ Derived values (`useMemo`) drive most rendering:
 - If mic is unavailable/blocked/unsupported, app runs with simulated frequency input.
 - Detector-specific code remains isolated so a future native audio pipeline can feed the same detector snapshot and transposer-follow logic.
 
-## 7. Testing and Quality Gates
+## 8. Testing and Quality Gates
 
 - Test runner: Vitest (`npm test` in `harmonica-tabs`).
 - Current coverage focus: transposer behavior, editor/library UI interactions, and core tab logic.
@@ -133,7 +167,7 @@ Derived values (`useMemo`) drive most rendering:
 Current gap:
 - No automated tests yet for `arpeggios.ts`, `pitch.ts`, or web audio detector behavior.
 
-## 8. Contributor Playbook (What You Need to Contribute Usefully)
+## 9. Contributor Playbook (What You Need to Contribute Usefully)
 
 ### Local workflow
 1. `cd harmonica-tabs`
@@ -154,14 +188,14 @@ Current gap:
 - Add or update tests whenever behavior changes.
 - Preserve current UX fallbacks (especially simulated Hz) unless intentionally changing product behavior.
 
-## 9. Known Architecture Debt
+## 10. Known Architecture Debt
 
 - `App.tsx` is still large and mixes orchestration + rendering + interaction details.
 - Layout-measurement logic is duplicated across main and arpeggio tab rows.
 - Pitch detection is web-only and intentionally lightweight (accuracy/stability tradeoffs).
 - Some data/logic assumptions are implicit (for example, technique ranking and alternate handling conventions).
 
-## 10. Working Agreement While Exploring
+## 11. Working Agreement While Exploring
 
 - Treat this document as a snapshot, not a fixed contract.
 - Favor clarity and correctness over abstraction.
