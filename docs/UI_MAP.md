@@ -18,12 +18,13 @@ SafeAreaView (styles.safeArea)
       │  │  └─ Container (styles.topRow)
       │  │     ├─ Harmonica Key (styles.topRowKey + styles.dropdown*)
       │  │     └─ Target Position/Key (styles.topRowKey + styles.dropdown*)
+      │  ├─ Listen Card (styles.listenCard)
+      │  │  ├─ Listen Row (styles.listenRow) — contains Listen Button only
+      │  │  ├─ Status Line (styles.listenValue) — frequency/note data when on; prompt when off
+      │  │  └─ Debug Panel (styles.debugPanel, conditional)
       │  ├─ Header Controls (styles.pageOneHeader)
       │  │  ├─ Scale Name (styles.scalePickerColumn + styles.dropdown*)
       │  │  └─ Arpeggios (styles.topRowToggle + styles.toggleGroup/toggleRow)
-      │  ├─ Listen Card (styles.listenCard)
-      │  │  ├─ Listen Row (styles.listenRow)
-      │  │  └─ Debug Panel (styles.debugPanel, conditional)
       │  └─ Results Scroll Area (`testID="scales-results-scroll"`, `styles.scalesResultsScroll`)
       │     └─ Results List (styles.resultsList)
       │        └─ Result Card (styles.resultRow)
@@ -56,7 +57,7 @@ SafeAreaView (styles.safeArea)
       │  │        └─ Saved Tab Rows (styles.savedTabRow)
       │  │           ├─ Row Header (styles.savedTabRowHeader)
       │  │           ├─ Preview (styles.savedTabPreview)
-      │  │           ├─ Updated Meta (styles.savedTabMeta)
+      │  │           ├─ Meta (styles.savedTabMeta) — harp/position context (when saved) + update timestamp
       │  │           └─ Row Actions (styles.savedTabActions + styles.savedTabActionButton)
       │  │              └─ Includes `Open`, `Edit`, and `Delete`
       │  └─ Editor Overlay (`screen === 'tabs'` + editor visible, modal)
@@ -109,7 +110,7 @@ SafeAreaView (styles.safeArea)
 - **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`
 - **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
 - **Tab Symbols**: `symbolRow`, `symbolKey`, `symbolMeaning`
-- **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue`, `debugPanel`, `debugPanelLabel`
+- **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue` (status line below button row), `debugPanel`, `debugPanelLabel`
 - **Scales Workspace**: `scalesWorkspace`, responsive shell via `testID="scales-workspace-shell"`, results scroller via `testID="scales-results-scroll"`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`

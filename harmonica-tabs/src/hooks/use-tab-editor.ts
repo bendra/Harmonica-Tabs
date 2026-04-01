@@ -303,6 +303,8 @@ export function useTabEditor({
     setCloseEditorModalVisible,
     editorSavedTab,
     hasUnsavedEditorChanges,
+    hasUnsavedTitleChange,
+    hasUnsavedContextChanges,
     editorInputRef,
     saveWithContext,
     setSaveWithContext,

@@ -443,6 +443,8 @@ export default function App() {
     setCloseEditorModalVisible,
     editorSavedTab,
     hasUnsavedEditorChanges,
+    hasUnsavedTitleChange,
+    hasUnsavedContextChanges,
     editorInputRef,
     handleEditorInputChange,
     handleCleanEditorInput,
@@ -470,6 +472,7 @@ export default function App() {
     currentHarmonicaPc: harmonicaKey.pc,
     currentPositionNumber: getPositionNumberForTargetRootPc(harmonicaKey.pc, scale.rootPc),
   });
+  const [cleanInputHelpVisible, setCleanInputHelpVisible] = useState(false);
   const [pendingContextOpenRecord, setPendingContextOpenRecord] = useState<SavedTabRecord | null>(null);
   const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; y: number; width: number; height: number }>>([]);
   const [arpeggioLayouts, setArpeggioLayouts] = useState<
@@ -700,10 +703,9 @@ export default function App() {
       : activeTab && effectiveConfidence >= AUDIO_CONFIDENCE_GATE
         ? `${activeTab.tab} • ${frequency?.toFixed(1)} Hz ${pitchMatch ? formatCents(pitchMatch.centsOffset) : ''}`
         : 'No signal'
-    : 'Off';
+    : 'Tap to start pitch detection';
   const canListenOnTransposer = transposerSourceTab !== null && transposerResult.playableTokens.length > 0;
-  const listenFeatureLabel = '🎤 Listen & Highlight Notes';
-  const listenToggleStateLabel = `[${isListening ? 'On' : 'Off'}]`;
+  const listenFeatureLabel = '🎤 Listen';
   const scalesContainerStyle = {
     padding: scalesLayout.containerPadding,
     gap: scalesLayout.workspaceGap,
@@ -913,12 +915,12 @@ export default function App() {
                     <Pressable
                       testID="editor-save-button"
                       onPress={() => void handleDirectSave('overwrite')}
-                      disabled={isSavingTab}
+                      disabled={isSavingTab || !hasUnsavedEditorChanges}
                       style={[
                         styles.transposerActionButton,
                         styles.editorPrimaryActionButton,
                         isSmallScreen && styles.transposerActionButtonCompact,
-                        isSavingTab && styles.dialogButtonDisabled,
+                        (isSavingTab || !hasUnsavedEditorChanges) && styles.dialogButtonDisabled,
                       ]}
                     >
                       <Text
@@ -933,12 +935,12 @@ export default function App() {
                     <Pressable
                       testID="editor-save-as-button"
                       onPress={() => void handleDirectSave('create_new')}
-                      disabled={isSavingTab}
+                      disabled={isSavingTab || !(hasUnsavedTitleChange || hasUnsavedContextChanges)}
                       style={[
                         styles.editorSaveAsButton,
                         styles.editorPrimaryActionButton,
                         isSmallScreen && styles.transposerActionButtonCompact,
-                        isSavingTab && styles.dialogButtonDisabled,
+                        (isSavingTab || !(hasUnsavedTitleChange || hasUnsavedContextChanges)) && styles.dialogButtonDisabled,
                       ]}
                     >
                       <Text
@@ -955,12 +957,12 @@ export default function App() {
                   <Pressable
                     testID="editor-save-button"
                     onPress={() => void handleDirectSave('create_new')}
-                    disabled={isSavingTab}
+                    disabled={isSavingTab || !hasUnsavedEditorChanges}
                     style={[
                       styles.transposerActionButton,
                       styles.editorPrimaryActionButton,
                       isSmallScreen && styles.transposerActionButtonCompact,
-                      isSavingTab && styles.dialogButtonDisabled,
+                      (isSavingTab || !hasUnsavedEditorChanges) && styles.dialogButtonDisabled,
                     ]}
                   >
                     <Text
@@ -974,18 +976,27 @@ export default function App() {
                   </Pressable>
                 )}
               </View>
-              <Pressable
-                testID="editor-clean-button"
-                onPress={handleCleanEditorInput}
-                style={[
-                  styles.editorSecondaryButton,
-                  isSmallScreen && styles.editorSecondaryButtonCompact,
-                ]}
-              >
-                <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
-                  Clean Input
-                </Text>
-              </Pressable>
+              <View style={styles.cleanInputRow}>
+                <Pressable
+                  testID="editor-clean-button"
+                  onPress={handleCleanEditorInput}
+                  style={[
+                    styles.editorSecondaryButton,
+                    isSmallScreen && styles.editorSecondaryButtonCompact,
+                  ]}
+                >
+                  <Text style={[styles.editorSecondaryButtonText, isSmallScreen && styles.editorSecondaryButtonTextCompact]}>
+                    Clean Input
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setCleanInputHelpVisible(true)}
+                  style={styles.helpIconButton}
+                  accessibilityLabel="Help for Clean Input"
+                >
+                  <Text style={styles.helpIconText}>?</Text>
+                </Pressable>
+              </View>
               <TextInput
                 testID="save-tab-title-input"
                 value={saveTabTitleInput}
@@ -1024,6 +1035,20 @@ export default function App() {
             </View>
           </ScrollView>
         </SafeAreaView>
+        {cleanInputHelpVisible && (
+          <View testID="clean-input-help-dialog" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setCleanInputHelpVisible(false)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>Clean Input</Text>
+              <Text style={styles.helperText}>
+                Removes all extranious text and spacing, leaving only the tab characters themselves.
+              </Text>
+              <Pressable onPress={() => setCleanInputHelpVisible(false)} style={styles.dialogButton}>
+                <Text style={styles.dialogButtonText}>Got it</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
         {pendingOpenRecord !== null && (
           <View testID="pending-open-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setPendingOpenRecord(null)} />
@@ -1301,7 +1326,12 @@ export default function App() {
                           {transposerSourceTabId === tab.id && <Text style={styles.savedTabActiveBadge}>Source</Text>}
                         </View>
                         <Text style={styles.savedTabPreview}>{formatSavedTabPreview(tab.inputText)}</Text>
-                        <Text style={styles.savedTabMeta}>Updated {formatSavedTabTimestamp(tab.updatedAt)}</Text>
+                        <Text style={styles.savedTabMeta}>
+                          {tab.harmonicaPc !== null && tab.positionNumber !== null
+                            ? `${pcToNote(tab.harmonicaPc, harmonicaKeyLabelStyle === 'flat')} harp • ${formatOrdinal(tab.positionNumber)} / ${pcToNote(getTargetRootPcForPosition(tab.harmonicaPc, tab.positionNumber), targetKeyPreferFlats)}  ·  `
+                            : ''}
+                          Updated {formatSavedTabTimestamp(tab.updatedAt)}
+                        </Text>
                         <View style={styles.savedTabActions}>
                           <Pressable
                             testID={`saved-tab-open:${tab.id}`}
@@ -1384,15 +1414,6 @@ export default function App() {
                           ]}
                         >
                           {listenFeatureLabel}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.listenButtonState,
-                            isListening && styles.listenButtonTextActive,
-                            !canListenOnTransposer && !isListening && styles.listenButtonTextDisabled,
-                          ]}
-                        >
-                          {listenToggleStateLabel}
                         </Text>
                       </View>
                     </Pressable>
@@ -1631,6 +1652,35 @@ export default function App() {
               </View>
             </View>
 
+            <View style={[styles.listenCard, scalesListenCardStyle]}>
+              <View style={[styles.listenRow, scalesListenRowStyle]}>
+                <Pressable
+                  onPress={() => {
+                    if (isListening) {
+                      stopListening();
+                    } else {
+                      startListening();
+                    }
+                  }}
+                  style={[styles.listenButton, scalesListenButtonStyle, isListening && styles.listenButtonActive]}
+                >
+                  <View style={styles.listenButtonContent}>
+                    <Text
+                      style={[
+                        styles.listenButtonTitle,
+                        scalesListenButtonTitleStyle,
+                        isListening && styles.listenButtonTextActive,
+                      ]}
+                    >
+                      {listenFeatureLabel}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+              <Text style={[styles.listenValue, scalesListenValueStyle]}>{statusText}</Text>
+              {showDebug && renderToneFollowDebugPanel()}
+            </View>
+
             <View style={[styles.pageOneHeader, scalesPageHeaderStyle]}>
               <View style={styles.scalePickerColumn}>
                 <Dropdown
@@ -1654,44 +1704,6 @@ export default function App() {
                   onChange={setArpeggioSelection}
                 />
               </View>
-            </View>
-
-            <View style={[styles.listenCard, scalesListenCardStyle]}>
-              <View style={[styles.listenRow, scalesListenRowStyle]}>
-                <Pressable
-                  onPress={() => {
-                    if (isListening) {
-                      stopListening();
-                    } else {
-                      startListening();
-                    }
-                  }}
-                  style={[styles.listenButton, scalesListenButtonStyle, isListening && styles.listenButtonActive]}
-                >
-                  <View style={styles.listenButtonContent}>
-                    <Text
-                      style={[
-                        styles.listenButtonTitle,
-                        scalesListenButtonTitleStyle,
-                        isListening && styles.listenButtonTextActive,
-                      ]}
-                    >
-                      {listenFeatureLabel}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.listenButtonState,
-                        scalesListenButtonStateStyle,
-                        isListening && styles.listenButtonTextActive,
-                      ]}
-                    >
-                      {listenToggleStateLabel}
-                    </Text>
-                  </View>
-                </Pressable>
-                <Text style={[styles.listenValue, scalesListenValueStyle]}>{statusText}</Text>
-              </View>
-              {showDebug && renderToneFollowDebugPanel()}
             </View>
 
             <ScrollView
@@ -2872,6 +2884,25 @@ const styles = StyleSheet.create({
   },
   editorSecondaryButtonTextCompact: {
     fontSize: 10,
+  },
+  cleanInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  helpIconButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpIconText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   editorTitleInput: {
     borderWidth: 1,
