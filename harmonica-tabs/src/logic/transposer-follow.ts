@@ -17,14 +17,13 @@ export type FollowableToken = {
 export type TransposerFollowStatus =
   | 'idle'
   | 'listening'
-  | 'holding'
+  | 'matching-current'
   | 'advanced'
   | 'waiting-for-release'
   | 'no-match';
 
 export type TransposerFollowState = {
   activeTokenIndex: number | null;
-  matchedSince: number | null;
   waitingForRelease: boolean;
 };
 
@@ -35,8 +34,6 @@ export type EvaluateTransposerFollowInput = {
   detector: DetectorSnapshot;
   toneToleranceCents: number;
   minConfidence: number;
-  holdDurationMs: number;
-  now: number;
 };
 
 export type EvaluateTransposerFollowResult = {
@@ -49,7 +46,6 @@ export type EvaluateTransposerFollowResult = {
 export function createTransposerFollowState(activeTokenIndex: number | null): TransposerFollowState {
   return {
     activeTokenIndex,
-    matchedSince: null,
     waitingForRelease: false,
   };
 }
@@ -57,7 +53,7 @@ export function createTransposerFollowState(activeTokenIndex: number | null): Tr
 export function evaluateTransposerFollow(
   input: EvaluateTransposerFollowInput,
 ): EvaluateTransposerFollowResult {
-  const { detector, enabled, holdDurationMs, minConfidence, now, state, tokens, toneToleranceCents } = input;
+  const { detector, enabled, minConfidence, state, tokens, toneToleranceCents } = input;
 
   if (tokens.length === 0) {
     return {
@@ -74,90 +70,96 @@ export function evaluateTransposerFollow(
       : Math.max(0, Math.min(state.activeTokenIndex, tokens.length - 1));
   const nextState: TransposerFollowState = {
     activeTokenIndex: safeIndex,
-    matchedSince: state.matchedSince,
     waitingForRelease: state.waitingForRelease,
   };
 
   if (!enabled) {
     return {
-      state: { ...nextState, matchedSince: null, waitingForRelease: false },
+      state: { ...nextState, waitingForRelease: false },
       status: detector.source ? 'listening' : 'idle',
       centsOffset: null,
       matchingTarget: false,
     };
   }
 
-  const token = tokens[safeIndex];
-  const hasSignal = detector.frequency !== null && Number.isFinite(detector.frequency);
-  const confidentEnough = detector.confidence >= minConfidence;
-  const match =
-    hasSignal && confidentEnough
-      ? matchFrequencyToTabs([token.midi], detector.frequency as number, toneToleranceCents)
-      : null;
-  const matchingTarget = Boolean(match?.withinTolerance);
-  const centsOffset = match ? match.centsOffset : null;
-
-  if (nextState.waitingForRelease) {
-    if (matchingTarget) {
-      return {
-        state: { ...nextState, matchedSince: null },
-        status: 'waiting-for-release',
-        centsOffset,
-        matchingTarget: true,
-      };
-    }
-
-    nextState.waitingForRelease = false;
-    nextState.matchedSince = null;
-  }
-
   if (!detector.source) {
     return {
-      state: { ...nextState, matchedSince: null },
+      state: { ...nextState, waitingForRelease: false },
       status: 'idle',
       centsOffset: null,
       matchingTarget: false,
     };
   }
 
+  const hasSignal = detector.frequency !== null && Number.isFinite(detector.frequency);
+  const confidentEnough = detector.confidence >= minConfidence;
+  const currentToken = tokens[safeIndex];
+
+  const currentMatch =
+    hasSignal && confidentEnough
+      ? matchFrequencyToTabs([currentToken.midi], detector.frequency as number, toneToleranceCents)
+      : null;
+  const matchingCurrent = Boolean(currentMatch?.withinTolerance);
+  const centsOffset = currentMatch ? currentMatch.centsOffset : null;
+
+  // After advancing, block further advancement until the pitch drops.
+  // This handles consecutive same-pitch tokens (e.g., two -4 in a row).
+  if (nextState.waitingForRelease) {
+    if (matchingCurrent) {
+      return {
+        state: nextState,
+        status: 'waiting-for-release',
+        centsOffset,
+        matchingTarget: true,
+      };
+    }
+    // Pitch dropped or changed — release the block
+    nextState.waitingForRelease = false;
+  }
+
   if (!hasSignal || !confidentEnough) {
     return {
-      state: { ...nextState, matchedSince: null },
+      state: nextState,
       status: 'listening',
       centsOffset: null,
       matchingTarget: false,
     };
   }
 
-  if (!matchingTarget) {
+  // Check next token first — if player has moved to the next note, advance immediately.
+  const nextIndex = (safeIndex + 1) % tokens.length;
+  const nextToken = tokens[nextIndex];
+  const nextMatch = matchFrequencyToTabs(
+    [nextToken.midi],
+    detector.frequency as number,
+    toneToleranceCents,
+  );
+
+  if (nextMatch?.withinTolerance) {
     return {
-      state: { ...nextState, matchedSince: null },
-      status: 'no-match',
-      centsOffset,
-      matchingTarget: false,
+      state: {
+        activeTokenIndex: nextIndex,
+        waitingForRelease: true,
+      },
+      status: 'advanced',
+      centsOffset: nextMatch.centsOffset,
+      matchingTarget: true,
     };
   }
 
-  const matchedSince = nextState.matchedSince ?? now;
-  const heldForMs = now - matchedSince;
-
-  if (heldForMs < holdDurationMs) {
+  if (matchingCurrent) {
     return {
-      state: { ...nextState, matchedSince },
-      status: 'holding',
+      state: nextState,
+      status: 'matching-current',
       centsOffset,
       matchingTarget: true,
     };
   }
 
   return {
-    state: {
-      activeTokenIndex: (safeIndex + 1) % tokens.length,
-      matchedSince: null,
-      waitingForRelease: true,
-    },
-    status: 'advanced',
+    state: nextState,
+    status: 'no-match',
     centsOffset,
-    matchingTarget: true,
+    matchingTarget: false,
   };
 }

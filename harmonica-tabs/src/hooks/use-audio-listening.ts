@@ -1,15 +1,20 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { Platform } from 'react-native';
+import { Audio } from 'expo-av';
 import { DetectorSnapshot } from '../logic/transposer-follow';
 import { createWebAudioPitchDetector } from '../logic/web-audio';
+import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
 
 const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
 
 type AudioListeningParams = {
   simHz: number | null;
+  harmonicaPc: number;
 };
 
-export function useAudioListening({ simHz }: AudioListeningParams) {
+export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) {
+  const vocabulary = useMemo(() => buildHarmonicaVocabulary(harmonicaPc), [harmonicaPc]);
   const [isListening, setIsListening] = useState(false);
   const [listenError, setListenError] = useState<string | null>(null);
   const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
@@ -23,7 +28,13 @@ export function useAudioListening({ simHz }: AudioListeningParams) {
   const listenSessionRef = useRef(0);
 
   useEffect(() => {
-    detectorRef.current = createWebAudioPitchDetector();
+    if (Platform.OS === 'web') {
+      detectorRef.current = createWebAudioPitchDetector();
+    } else {
+      // Dynamic require prevents the native module from being bundled on web.
+      const { createNativeAudioPitchDetector } = require('../logic/native-audio');
+      detectorRef.current = createNativeAudioPitchDetector();
+    }
     return () => {
       isMountedRef.current = false;
       listenSessionRef.current += 1;
@@ -62,6 +73,19 @@ export function useAudioListening({ simHz }: AudioListeningParams) {
       return isMountedRef.current && listenSessionRef.current === listenSession;
     }
 
+    // On native, request microphone permission before attempting to start.
+    // On web, getUserMedia handles the permission prompt itself.
+    if (Platform.OS !== 'web') {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) {
+        if (!isCurrentListenSession()) return;
+        setListenError('Microphone permission denied');
+        setListenSource('sim');
+        setIsListening(true);
+        return;
+      }
+    }
+
     const detector = detectorRef.current;
     if (detector?.isSupported()) {
       try {
@@ -73,7 +97,7 @@ export function useAudioListening({ simHz }: AudioListeningParams) {
           if (update.frequency && update.confidence >= AUDIO_CONFIDENCE_GATE) {
             setLastDetectedAt(Date.now());
           }
-        });
+        }, vocabulary);
         if (!isCurrentListenSession()) return;
         setListenSource('web');
       } catch {
@@ -83,7 +107,7 @@ export function useAudioListening({ simHz }: AudioListeningParams) {
       }
     } else {
       if (!isCurrentListenSession()) return;
-      setListenError('Mic not supported in this browser (using sim)');
+      setListenError('Mic not supported on this platform (using sim)');
       setListenSource('sim');
     }
 

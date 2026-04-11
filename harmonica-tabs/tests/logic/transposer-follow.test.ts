@@ -24,8 +24,8 @@ function createDetectorSnapshot(overrides: Partial<DetectorSnapshot> = {}): Dete
 }
 
 describe('evaluateTransposerFollow', () => {
-  it('advances when the target note is held long enough with enough confidence', () => {
-    const holding = evaluateTransposerFollow({
+  it('highlights current note without advancing when player matches it', () => {
+    const result = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
       state: createTransposerFollowState(0),
@@ -35,40 +35,72 @@ describe('evaluateTransposerFollow', () => {
       }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_000,
     });
 
-    expect(holding.status).toBe('holding');
-    expect(holding.state).toEqual({
+    expect(result.status).toBe('matching-current');
+    expect(result.matchingTarget).toBe(true);
+    expect(result.state).toEqual({
       activeTokenIndex: 0,
-      matchedSince: 1_000,
       waitingForRelease: false,
     });
+  });
 
-    const advanced = evaluateTransposerFollow({
+  it('advances when player plays the next note', () => {
+    const result = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
-      state: holding.state,
+      state: createTransposerFollowState(0),
+      detector: createDetectorSnapshot({
+        frequency: midiToFrequency(73),
+        confidence: 0.8,
+      }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
+    });
+
+    expect(result.status).toBe('advanced');
+    expect(result.matchingTarget).toBe(true);
+    expect(result.state).toEqual({
+      activeTokenIndex: 1,
+      waitingForRelease: true,
+    });
+  });
+
+  it('does not advance on current-note match alone', () => {
+    const result = evaluateTransposerFollow({
+      enabled: true,
+      tokens: TOKENS,
+      state: createTransposerFollowState(0),
       detector: createDetectorSnapshot({
         frequency: midiToFrequency(72),
         confidence: 0.8,
       }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_320,
     });
 
-    expect(advanced.status).toBe('advanced');
-    expect(advanced.state).toEqual({
-      activeTokenIndex: 1,
-      matchedSince: null,
-      waitingForRelease: true,
-    });
+    expect(result.state.activeTokenIndex).toBe(0);
   });
 
-  it('does not advance when confidence is below the threshold', () => {
+  it('returns no-match when pitch is outside tolerance of both current and next', () => {
+    const result = evaluateTransposerFollow({
+      enabled: true,
+      tokens: TOKENS,
+      state: createTransposerFollowState(0),
+      detector: createDetectorSnapshot({
+        frequency: midiToFrequency(60), // far from midi 72 or 73
+        confidence: 0.8,
+      }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
+    });
+
+    expect(result.status).toBe('no-match');
+    expect(result.matchingTarget).toBe(false);
+    expect(result.state.activeTokenIndex).toBe(0);
+  });
+
+  it('returns listening when confidence is below the threshold', () => {
     const result = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
@@ -79,105 +111,63 @@ describe('evaluateTransposerFollow', () => {
       }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_000,
     });
 
     expect(result.status).toBe('listening');
-    expect(result.state).toEqual({
-      activeTokenIndex: 0,
-      matchedSince: null,
-      waitingForRelease: false,
-    });
+    expect(result.matchingTarget).toBe(false);
   });
 
-  it('does not advance when the detected note is outside tolerance', () => {
+  it('blocks advancement while pitch persists on newly advanced token', () => {
     const result = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
-      state: createTransposerFollowState(0),
-      detector: createDetectorSnapshot({
-        frequency: midiToFrequency(72) * 1.03,
-        confidence: 0.8,
-      }),
-      toneToleranceCents: 10,
-      minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_000,
-    });
-
-    expect(result.status).toBe('no-match');
-    expect(result.state).toEqual({
-      activeTokenIndex: 0,
-      matchedSince: null,
-      waitingForRelease: false,
-    });
-  });
-
-  it('resets hold progress when signal drops out', () => {
-    const holding = evaluateTransposerFollow({
-      enabled: true,
-      tokens: TOKENS,
-      state: createTransposerFollowState(0),
-      detector: createDetectorSnapshot({
-        frequency: midiToFrequency(72),
-        confidence: 0.8,
-      }),
-      toneToleranceCents: 10,
-      minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_000,
-    });
-
-    const reset = evaluateTransposerFollow({
-      enabled: true,
-      tokens: TOKENS,
-      state: holding.state,
-      detector: createDetectorSnapshot({
-        frequency: null,
-        confidence: 0,
-      }),
-      toneToleranceCents: 10,
-      minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_100,
-    });
-
-    expect(reset.status).toBe('listening');
-    expect(reset.state).toEqual({
-      activeTokenIndex: 0,
-      matchedSince: null,
-      waitingForRelease: false,
-    });
-  });
-
-  it('requires a release before repeated identical notes can advance again', () => {
-    const firstAdvance = evaluateTransposerFollow({
-      enabled: true,
-      tokens: TOKENS,
-      state: {
-        activeTokenIndex: 1,
-        matchedSince: 1_000,
-        waitingForRelease: false,
-      },
+      state: { activeTokenIndex: 1, waitingForRelease: true },
       detector: createDetectorSnapshot({
         frequency: midiToFrequency(73),
         confidence: 0.8,
       }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_350,
+    });
+
+    expect(result.status).toBe('waiting-for-release');
+    expect(result.matchingTarget).toBe(true);
+    expect(result.state).toEqual({ activeTokenIndex: 1, waitingForRelease: true });
+  });
+
+  it('clears waitingForRelease when pitch drops', () => {
+    const result = evaluateTransposerFollow({
+      enabled: true,
+      tokens: TOKENS,
+      state: { activeTokenIndex: 1, waitingForRelease: true },
+      detector: createDetectorSnapshot({ frequency: null, confidence: 0 }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
+    });
+
+    expect(result.status).toBe('listening');
+    expect(result.state).toEqual({ activeTokenIndex: 1, waitingForRelease: false });
+  });
+
+  it('requires a release between consecutive same-pitch tokens', () => {
+    // Advance from index 1 to index 2 (both midi 73)
+    const firstAdvance = evaluateTransposerFollow({
+      enabled: true,
+      tokens: TOKENS,
+      state: createTransposerFollowState(1),
+      detector: createDetectorSnapshot({
+        frequency: midiToFrequency(73),
+        confidence: 0.8,
+      }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
     });
 
     expect(firstAdvance.status).toBe('advanced');
-    expect(firstAdvance.state).toEqual({
-      activeTokenIndex: 2,
-      matchedSince: null,
-      waitingForRelease: true,
-    });
+    expect(firstAdvance.state).toEqual({ activeTokenIndex: 2, waitingForRelease: true });
 
-    const waiting = evaluateTransposerFollow({
+    // Still holding same pitch — blocked
+    const stillHolding = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
       state: firstAdvance.state,
@@ -187,86 +177,69 @@ describe('evaluateTransposerFollow', () => {
       }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_500,
     });
 
-    expect(waiting.status).toBe('waiting-for-release');
-    expect(waiting.state.waitingForRelease).toBe(true);
+    expect(stillHolding.status).toBe('waiting-for-release');
+    expect(stillHolding.state.waitingForRelease).toBe(true);
 
+    // Release
     const released = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
-      state: waiting.state,
-      detector: createDetectorSnapshot({
-        frequency: null,
-        confidence: 0,
-      }),
+      state: stillHolding.state,
+      detector: createDetectorSnapshot({ frequency: null, confidence: 0 }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_600,
     });
 
     expect(released.status).toBe('listening');
-    expect(released.state).toEqual({
-      activeTokenIndex: 2,
-      matchedSince: null,
-      waitingForRelease: false,
-    });
+    expect(released.state).toEqual({ activeTokenIndex: 2, waitingForRelease: false });
   });
 
-  it('clears hold progress when the cursor is moved manually', () => {
+  it('wraps back to the first token when the next note after the last matches', () => {
+    // At index 2 (last), next wraps to index 0 (midi 72)
     const result = evaluateTransposerFollow({
       enabled: true,
       tokens: TOKENS,
-      state: {
-        activeTokenIndex: 2,
-        matchedSince: null,
-        waitingForRelease: false,
-      },
+      state: createTransposerFollowState(2),
       detector: createDetectorSnapshot({
-        frequency: midiToFrequency(73),
+        frequency: midiToFrequency(72),
         confidence: 0.8,
       }),
       toneToleranceCents: 10,
       minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_000,
-    });
-
-    expect(result.status).toBe('holding');
-    expect(result.state).toEqual({
-      activeTokenIndex: 2,
-      matchedSince: 1_000,
-      waitingForRelease: false,
-    });
-  });
-
-  it('wraps back to the first token after the last token advances', () => {
-    const result = evaluateTransposerFollow({
-      enabled: true,
-      tokens: TOKENS,
-      state: {
-        activeTokenIndex: 2,
-        matchedSince: 1_000,
-        waitingForRelease: false,
-      },
-      detector: createDetectorSnapshot({
-        frequency: midiToFrequency(73),
-        confidence: 0.8,
-      }),
-      toneToleranceCents: 10,
-      minConfidence: 0.4,
-      holdDurationMs: 300,
-      now: 1_350,
     });
 
     expect(result.status).toBe('advanced');
-    expect(result.state).toEqual({
-      activeTokenIndex: 0,
-      matchedSince: null,
-      waitingForRelease: true,
+    expect(result.state).toEqual({ activeTokenIndex: 0, waitingForRelease: true });
+  });
+
+  it('returns idle when there is no audio source', () => {
+    const result = evaluateTransposerFollow({
+      enabled: true,
+      tokens: TOKENS,
+      state: createTransposerFollowState(0),
+      detector: createDetectorSnapshot({ source: null }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
     });
+
+    expect(result.status).toBe('idle');
+  });
+
+  it('clears waitingForRelease when disabled', () => {
+    const result = evaluateTransposerFollow({
+      enabled: false,
+      tokens: TOKENS,
+      state: { activeTokenIndex: 1, waitingForRelease: true },
+      detector: createDetectorSnapshot({
+        frequency: midiToFrequency(73),
+        confidence: 0.8,
+      }),
+      toneToleranceCents: 10,
+      minConfidence: 0.4,
+    });
+
+    expect(result.state.waitingForRelease).toBe(false);
   });
 });

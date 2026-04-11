@@ -1,3 +1,6 @@
+import { detectSingleNote } from './fft-detector';
+import { HarmonicaVocabulary } from './harmonica-frequencies';
+
 /**
  * Streaming pitch detector update emitted from the microphone loop.
  */
@@ -21,8 +24,8 @@ export function createWebAudioPitchDetector() {
   let running = false;
   let startPromise: Promise<void> | null = null;
   let generation = 0;
-  let emaFrequency: number | null = null;
   let onUpdateRef: PitchUpdateHandler | null = null;
+  let currentVocabulary: HarmonicaVocabulary | null = null;
 
   async function cleanupResources(
     resources: {
@@ -90,7 +93,6 @@ export function createWebAudioPitchDetector() {
       if (audioContext === currentAudioContext) {
         audioContext = null;
       }
-      emaFrequency = null;
     }
 
     if (options.clearCallback) {
@@ -109,9 +111,14 @@ export function createWebAudioPitchDetector() {
 
   /**
    * Starts microphone capture and emits pitch updates.
+   *
+   * Uses a 4096-sample buffer for the ScriptProcessor — large enough for
+   * the Goertzel algorithm to distinguish adjacent harmonica notes (~20–30 Hz
+   * apart in the middle octave, requiring <10 Hz frequency resolution).
    */
-  async function start(onUpdate: PitchUpdateHandler) {
+  async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary) {
     onUpdateRef = onUpdate;
+    currentVocabulary = vocabulary;
     if (running) return;
     if (startPromise) {
       await startPromise;
@@ -151,7 +158,7 @@ export function createWebAudioPitchDetector() {
         }
 
         resources.source = resources.audioContext.createMediaStreamSource(resources.stream);
-        resources.processor = resources.audioContext.createScriptProcessor(2048, 1, 1);
+        resources.processor = resources.audioContext.createScriptProcessor(4096, 1, 1);
         resources.gainNode = resources.audioContext.createGain();
         resources.gainNode.gain.value = 0.001;
 
@@ -165,18 +172,9 @@ export function createWebAudioPitchDetector() {
         resources.processor.onaudioprocess = (event: any) => {
           if (generation !== startGeneration || !running || !resources.audioContext) return;
           const input = event.inputBuffer?.getChannelData(0);
-          if (!input) return;
-          const result = detectPitch(input, resources.audioContext.sampleRate);
-          if (!result) {
-            const rms = calculateRms(input);
-            onUpdateRef?.({ frequency: null, confidence: 0, rms });
-            return;
-          }
-
-          const smoothed =
-            emaFrequency === null ? result.frequency : emaFrequency + 0.2 * (result.frequency - emaFrequency);
-          emaFrequency = smoothed;
-          onUpdateRef?.({ frequency: smoothed, confidence: result.confidence, rms: result.rms });
+          if (!input || !currentVocabulary) return;
+          const result = detectSingleNote(input, resources.audioContext.sampleRate, currentVocabulary);
+          onUpdateRef?.(result);
         };
 
         resources.source.connect(resources.processor);
@@ -193,7 +191,6 @@ export function createWebAudioPitchDetector() {
         processor = resources.processor;
         gainNode = resources.gainNode;
         stream = resources.stream;
-        emaFrequency = null;
         running = true;
       } catch (error) {
         await cleanupResources(resources, { clearCallback: false, resetGlobal: false });
@@ -224,78 +221,10 @@ export function createWebAudioPitchDetector() {
     processor = null;
     gainNode = null;
     stream = null;
-    emaFrequency = null;
+    currentVocabulary = null;
     onUpdateRef = null;
     void cleanupResources(resources, { clearCallback: false, resetGlobal: false });
   }
 
   return { isSupported, start, stop };
-}
-
-/**
- * Calculates root-mean-square energy of an audio frame.
- */
-function calculateRms(input: Float32Array) {
-  const size = input.length;
-  let rms = 0;
-  for (let i = 0; i < size; i += 1) {
-    const value = input[i];
-    rms += value * value;
-  }
-  return Math.sqrt(rms / size);
-}
-
-/**
- * Estimates pitch using normalized auto-correlation with parabolic refinement.
- */
-function detectPitch(input: Float32Array, sampleRate: number) {
-  const rms = calculateRms(input);
-  if (rms < 0.005) return null;
-
-  const size = input.length;
-  const minFreq = 80;
-  const maxFreq = 2000;
-  const minLag = Math.floor(sampleRate / maxFreq);
-  const maxLag = Math.min(size - 1, Math.floor(sampleRate / minFreq));
-  if (maxLag <= minLag) return null;
-
-  let bestLag = -1;
-  let bestVal = Number.NEGATIVE_INFINITY;
-  const correlations = new Float32Array(maxLag + 1);
-
-  for (let lag = minLag; lag <= maxLag; lag += 1) {
-    let sum = 0;
-    let sumSq = 0;
-    for (let i = 0; i < size - lag; i += 1) {
-      const x = input[i];
-      const y = input[i + lag];
-      sum += x * y;
-      sumSq += x * x;
-    }
-    const norm = Math.sqrt(sumSq) || 1;
-    const corr = sum / norm;
-    correlations[lag] = corr;
-    if (corr > bestVal) {
-      bestVal = corr;
-      bestLag = lag;
-    }
-  }
-
-  if (bestLag <= 0) return null;
-
-  let refinedLag = bestLag;
-  if (bestLag + 1 <= maxLag && bestLag - 1 >= minLag) {
-    const x1 = correlations[bestLag - 1];
-    const x2 = correlations[bestLag];
-    const x3 = correlations[bestLag + 1];
-    const a = (x1 + x3 - 2 * x2) / 2;
-    const b = (x3 - x1) / 2;
-    if (a !== 0) {
-      refinedLag = bestLag - b / (2 * a);
-    }
-  }
-
-  const frequency = sampleRate / refinedLag;
-  const confidence = Math.max(0, Math.min(1, bestVal));
-  return { frequency, confidence, rms };
 }

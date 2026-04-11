@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWebAudioPitchDetector } from '../../src/logic/web-audio';
+import { buildHarmonicaVocabulary } from '../../src/logic/harmonica-frequencies';
+
+const testVocabulary = buildHarmonicaVocabulary(0);
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -103,7 +106,7 @@ describe('createWebAudioPitchDetector', () => {
     const detector = createWebAudioPitchDetector();
     const onUpdate = vi.fn();
 
-    await detector.start(onUpdate);
+    await detector.start(onUpdate, testVocabulary);
 
     expect(detector.isSupported()).toBe(true);
     expect(getUserMedia).toHaveBeenCalledTimes(1);
@@ -136,7 +139,7 @@ describe('createWebAudioPitchDetector', () => {
 
     const detector = createWebAudioPitchDetector();
 
-    await expect(detector.start(vi.fn())).rejects.toThrow('resume failed');
+    await expect(detector.start(vi.fn(), testVocabulary)).rejects.toThrow('resume failed');
 
     expect(instances).toHaveLength(1);
     expect(track.onended).toBeNull();
@@ -155,7 +158,7 @@ describe('createWebAudioPitchDetector', () => {
 
     const detector = createWebAudioPitchDetector();
 
-    await detector.start(vi.fn());
+    await detector.start(vi.fn(), testVocabulary);
     detector.stop();
     detector.stop();
     await Promise.resolve();
@@ -179,8 +182,8 @@ describe('createWebAudioPitchDetector', () => {
     const firstHandler = vi.fn();
     const secondHandler = vi.fn();
 
-    const firstStart = detector.start(firstHandler);
-    const secondStart = detector.start(secondHandler);
+    const firstStart = detector.start(firstHandler, testVocabulary);
+    const secondStart = detector.start(secondHandler, testVocabulary);
 
     streamDeferred.resolve(stream);
     await Promise.all([firstStart, secondStart]);
@@ -214,7 +217,7 @@ describe('createWebAudioPitchDetector', () => {
     const detector = createWebAudioPitchDetector();
     const onUpdate = vi.fn();
 
-    await detector.start(onUpdate);
+    await detector.start(onUpdate, testVocabulary);
     const endedHandler = track.onended;
 
     detector.stop();

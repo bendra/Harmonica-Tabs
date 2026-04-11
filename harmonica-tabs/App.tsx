@@ -364,13 +364,10 @@ export default function App() {
     setToneToleranceInput,
     toneFollowMinConfidenceInput,
     setToneFollowMinConfidenceInput,
-    toneFollowHoldDurationInput,
-    setToneFollowHoldDurationInput,
     simFrequency,
     setSimFrequency,
     toneToleranceCents,
     toneFollowMinConfidence,
-    toneFollowHoldDurationMs,
     simHz,
   } = useAudioSettings();
   const {
@@ -384,7 +381,7 @@ export default function App() {
     audioSnapshot,
     startListening,
     stopListening,
-  } = useAudioListening({ simHz });
+  } = useAudioListening({ simHz, harmonicaPc: harmonicaKey.pc });
   const {
     savedTabs,
     setSavedTabs,
@@ -424,7 +421,6 @@ export default function App() {
     audioSnapshot,
     toneToleranceCents,
     toneFollowMinConfidence,
-    toneFollowHoldDurationMs,
     isListening,
   });
   const {
@@ -480,35 +476,8 @@ export default function App() {
   >({});
   const [mainSelected, setMainSelected] = useState(true);
   const [arpeggioItemSelected, setArpeggioItemSelected] = useState<Record<string, boolean>>({});
-  const renderCountRef = useRef(0);
   const arpeggioLayoutLogCountRef = useRef(0);
   const lastCaretVisibleRef = useRef(false);
-
-  renderCountRef.current += 1;
-  console.log('[render]', renderCountRef.current, {
-    screen,
-    tabsSubview,
-    tabsEditorVisible,
-    pendingOpenRecordVisible: pendingOpenRecord !== null,
-    closeEditorModalVisible,
-  });
-
-
-  useEffect(() => {
-    console.log('[state]', {
-      screen,
-      tabsSubview,
-      tabsEditorVisible,
-      pendingOpenRecordId: pendingOpenRecord?.id ?? null,
-      closeEditorModalVisible,
-    });
-  }, [
-    screen,
-    tabsSubview,
-    tabsEditorVisible,
-    pendingOpenRecord,
-    closeEditorModalVisible,
-  ]);
 
   const savedTabsStatusIsError = isSavedTabsErrorStatus(savedTabsStatus);
   const currentPositionNumber = getPositionNumberForTargetRootPc(harmonicaKey.pc, scale.rootPc);
@@ -551,7 +520,7 @@ export default function App() {
           {detectedFrequency ? detectedFrequency.toFixed(1) : '—'}
         </Text>
         <Text style={styles.debugText}>
-          Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Hold: {toneFollowHoldDurationMs}ms
+          Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Status: {transposerFollowEvaluation.status}
         </Text>
         <View style={styles.debugRow}>
           <Text style={styles.debugLabel}>Source</Text>
@@ -1234,21 +1203,6 @@ export default function App() {
                   autoCapitalize="none"
                   spellCheck={false}
                   placeholder="0.35"
-                  placeholderTextColor="#64748b"
-                  style={styles.propertiesNumberInput}
-                />
-              </View>
-              <View style={styles.propertiesInlineField}>
-                <Text style={styles.dropdownLabel}>Hold ms</Text>
-                <TextInput
-                  value={toneFollowHoldDurationInput}
-                  onChangeText={setToneFollowHoldDurationInput}
-                  keyboardType="number-pad"
-                  inputMode="numeric"
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  placeholder="400"
                   placeholderTextColor="#64748b"
                   style={styles.propertiesNumberInput}
                 />
@@ -3108,7 +3062,9 @@ const styles = StyleSheet.create({
   transposerOutputTokenActive: {
     borderWidth: 2,
     borderColor: 'rgba(56, 189, 248, 0.45)',
-    backgroundColor: 'rgba(56, 189, 248, 0.06)',
+    // Border renders on web; on native (inline Text-in-Text) the border may not apply,
+    // so background carries the visual weight. 25% opacity is visible on both platforms.
+    backgroundColor: 'rgba(56, 189, 248, 0.25)',
   },
   transposerOutputTokenMatched: {
     borderColor: '#16e05d',

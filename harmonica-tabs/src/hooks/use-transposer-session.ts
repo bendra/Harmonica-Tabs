@@ -22,7 +22,6 @@ type TransposerSessionParams = {
   audioSnapshot: DetectorSnapshot;
   toneToleranceCents: number;
   toneFollowMinConfidence: number;
-  toneFollowHoldDurationMs: number;
   isListening: boolean;
 };
 
@@ -35,7 +34,6 @@ export function useTransposerSession({
   audioSnapshot,
   toneToleranceCents,
   toneFollowMinConfidence,
-  toneFollowHoldDurationMs,
   isListening,
 }: TransposerSessionParams) {
   const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(null);
@@ -159,8 +157,6 @@ export function useTransposerSession({
         detector: audioSnapshot,
         toneToleranceCents,
         minConfidence: toneFollowMinConfidence,
-        holdDurationMs: toneFollowHoldDurationMs,
-        now: Date.now(),
       }),
     // toneFollowTick drives periodic re-evaluation — include even though value unused in factory body
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,7 +167,6 @@ export function useTransposerSession({
       audioSnapshot,
       toneToleranceCents,
       toneFollowMinConfidence,
-      toneFollowHoldDurationMs,
       toneFollowTick,
     ],
   );
@@ -190,7 +185,7 @@ export function useTransposerSession({
     if (!isListening || transposerResult.playableTokens.length === 0) return;
     const intervalId = setInterval(() => {
       setToneFollowTick((prev) => prev + 1);
-    }, 50);
+    }, 16);
 
     return () => clearInterval(intervalId);
   }, [isListening, transposerResult.playableTokens.length]);
@@ -199,7 +194,6 @@ export function useTransposerSession({
     const nextState = transposerFollowEvaluation.state;
     if (
       nextState.activeTokenIndex === transposerFollowState.activeTokenIndex &&
-      nextState.matchedSince === transposerFollowState.matchedSince &&
       nextState.waitingForRelease === transposerFollowState.waitingForRelease
     ) {
       return;

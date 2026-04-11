@@ -1,6 +1,7 @@
 git # TODO / Next Steps
 
 - Revisit tab ordering and octave handling if alternate tunings are added.
+- Investigate G harmonica octave detection bug: notes are detected one octave too low on a G harmonica (e.g. hole 6 registers as -2). Pre-existing in production, not a regression from native audio work. May be a MIDI mapping or frequency vocabulary issue in `harmonica-frequencies.ts` or `pitch.ts`.
 - Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.
 - Revisit whether the `Scales` screen should add a tablet-only two-column layout after the new size tiers have been user-tested.
@@ -25,5 +26,11 @@ git # TODO / Next Steps
 - Consider whether the library should expose an explicit “clear saved context” or “edit saved context” affordance beyond reopening the editor and toggling `Save with key/position context`.
 - Set up a Puppeteer or Playwright MCP server for live browser observation (useful for debugging resource leaks, audio lifecycle, and runtime behavior without relying on manual screenshots)
 - Consider extracting remaining App.tsx layout/caret tracking into a `useScaleLayoutTracking` hook if that section grows unwieldy
+- Improve tone-follow cursor behavior during tab playback: instead of advancing the cursor as soon as a note is held long enough, pulsate/highlight the current note while it is being held, then advance the cursor only when the tone stops or changes — and indicate whether the note was played correctly.
+- Improve arpeggio tone-follow feedback: replace the floating caret with per-note highlighting that shows which arpeggio note is currently being played (within tolerance), and add recognition of chords (multiple simultaneous notes).
 - accessibility
 - localization
+- Investigate errors encountered on ipad through idevicesyslog | grep harmonicatabs | grep \<Error\>
+- Rapid repeated-note cursor advancement: when the same note appears consecutively in a tab and is played quickly (eighth notes at moderate tempo), the cursor sometimes stalls because the inter-note gap is shorter than one audio frame (~100ms). Fix: track peak RMS since last advance and treat a drop to ~40% of peak as a note release (relative threshold, consistent across low/high notes). Expose as a "Note separation" property (20–70%, default ~40%) since technique varies by player.
+- Native audio RMS gate (currently 0.001) was tuned on one iPad — if device variation proves to be a problem, replace the fixed value with automatic noise floor calibration: measure background level for ~1 second when listening starts and set the gate at 3× that value.
+- Investigate App.tsx re-render frequency: audio frame events (~10/s) each call setDetectedFrequency, setDetectedConfidence, and setDetectedRms in sequence, likely causing the whole top-level component to re-render on every audio frame. Consider moving audio state lower in the tree or memoizing expensive child components with React.memo.

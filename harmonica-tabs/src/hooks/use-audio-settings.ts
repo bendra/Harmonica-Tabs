@@ -34,7 +34,6 @@ export function useAudioSettings() {
   const [showDebug, setShowDebug] = useState(false);
   const [toneToleranceInput, setToneToleranceInput] = useState('60');
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
-  const [toneFollowHoldDurationInput, setToneFollowHoldDurationInput] = useState('400');
   const [simFrequency, setSimFrequency] = useState('440');
 
   const toneToleranceCents = useMemo(
@@ -44,10 +43,6 @@ export function useAudioSettings() {
   const toneFollowMinConfidence = useMemo(
     () => parseBoundedNumber(toneFollowMinConfidenceInput, 0.35, 0, 1),
     [toneFollowMinConfidenceInput],
-  );
-  const toneFollowHoldDurationMs = useMemo(
-    () => parseBoundedInteger(toneFollowHoldDurationInput, 400, 1, 5000),
-    [toneFollowHoldDurationInput],
   );
   const simHz = useMemo(() => {
     const parsed = Number.parseFloat(simFrequency);
@@ -62,14 +57,10 @@ export function useAudioSettings() {
     toneFollowMinConfidenceInput,
     setToneFollowMinConfidenceInput: (value: string) =>
       setToneFollowMinConfidenceInput(sanitizeDecimalInput(value)),
-    toneFollowHoldDurationInput,
-    setToneFollowHoldDurationInput: (value: string) =>
-      setToneFollowHoldDurationInput(value.replace(/[^0-9]/g, '')),
     simFrequency,
     setSimFrequency,
     toneToleranceCents,
     toneFollowMinConfidence,
-    toneFollowHoldDurationMs,
     simHz,
   };
 }
