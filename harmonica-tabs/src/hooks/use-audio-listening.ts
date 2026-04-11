@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
 import { DetectorSnapshot } from '../logic/transposer-follow';
 import { createWebAudioPitchDetector } from '../logic/web-audio';
 import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
@@ -76,6 +75,8 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     // On native, request microphone permission before attempting to start.
     // On web, getUserMedia handles the permission prompt itself.
     if (Platform.OS !== 'web') {
+      // Load expo-av only on native so web/tests do not need Expo's native runtime globals.
+      const { Audio } = require('expo-av');
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) {
         if (!isCurrentListenSession()) return;

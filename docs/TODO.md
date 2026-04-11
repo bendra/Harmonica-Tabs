@@ -11,7 +11,8 @@ git # TODO / Next Steps
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.
 - Consider a compact current-source label on the transposer if users miss the removed source preview card.
-- Add native (iOS/Android) detector producers that feed the same shared detector snapshot used by tone follow.
+- Harden the native detector adapter against listen start/stop races: make native startup reuse one in-flight session, ensure stale listeners are removed, and guarantee cleanup when native start fails.
+- Add an Android fallback path that drops back to the existing JS/simulated listen flow when native `AudioRecord` initialization or start fails on a device, instead of surfacing a brittle native-only failure.
 - Consolidate repeated UI/runtime default values into shared default-setting constants so input defaults and fallback values stay in sync.
 - Persist tone-follow settings across sessions if they prove useful.
 - Consider a helper hint for the editor `Clean Input` flow if users need more guidance after the custom pad removal.

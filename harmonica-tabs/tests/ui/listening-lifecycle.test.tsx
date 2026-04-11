@@ -155,6 +155,20 @@ function findByTestId(root: any, testID: string) {
   return root.find((node: any) => node.props?.testID === testID);
 }
 
+function flattenStyles(style: any): any[] {
+  if (!style) return [];
+  if (Array.isArray(style)) {
+    return style.flatMap((entry) => flattenStyles(entry));
+  }
+  return [style];
+}
+
+function pressableHasActiveListenStyle(node: any) {
+  return flattenStyles(node.props?.style).some(
+    (style) => style?.backgroundColor === '#0b3b4a' && style?.borderColor === '#38bdf8',
+  );
+}
+
 function seedSavedTabs(tabs: Array<Record<string, string>>) {
   asyncStorageValues.set(
     SAVED_TAB_LIBRARY_STORAGE_KEY,
@@ -237,7 +251,7 @@ describe('App listening lifecycle', () => {
     const root = renderer.root;
 
     await act(async () => {
-      findPressableByText(root, '🎤 Listen & Highlight Notes').props.onPress();
+      findPressableByText(root, '🎤 Listen').props.onPress();
       await Promise.resolve();
     });
 
@@ -266,7 +280,7 @@ describe('App listening lifecycle', () => {
     const root = renderer.root;
 
     await act(async () => {
-      const listenButton = findPressableByText(root, '🎤 Listen & Highlight Notes');
+      const listenButton = findPressableByText(root, '🎤 Listen');
       listenButton.props.onPress();
       await Promise.resolve();
       listenButton.props.onPress();
@@ -279,9 +293,7 @@ describe('App listening lifecycle', () => {
       await Promise.resolve();
     });
 
-    expect(flattenTextChildren(findPressableByText(root, '🎤 Listen & Highlight Notes').children).trim()).toBe(
-      '🎤 Listen & Highlight Notes[Off]',
-    );
+    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Listen'))).toBe(false);
 
     await act(async () => {
       secondStart.resolve();
@@ -289,9 +301,7 @@ describe('App listening lifecycle', () => {
       await Promise.resolve();
     });
 
-    expect(flattenTextChildren(findPressableByText(root, '🎤 Listen & Highlight Notes').children).trim()).toBe(
-      '🎤 Listen & Highlight Notes[On]',
-    );
+    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Listen'))).toBe(true);
   });
 
   it('cleans up the transposer follow interval when the source tab is cleared', async () => {

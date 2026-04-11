@@ -209,6 +209,20 @@ function findByTestId(root: any, testID: string) {
   return root.find((node: any) => node.props?.testID === testID);
 }
 
+function flattenStyles(style: any): any[] {
+  if (!style) return [];
+  if (Array.isArray(style)) {
+    return style.flatMap((entry) => flattenStyles(entry));
+  }
+  return [style];
+}
+
+function pressableHasActiveListenStyle(node: any) {
+  return flattenStyles(node.props?.style).some(
+    (style) => style?.backgroundColor === '#0b3b4a' && style?.borderColor === '#38bdf8',
+  );
+}
+
 function findNodeOrder(root: any, predicate: (node: any) => boolean) {
   return root.findAll(() => true).findIndex(predicate);
 }
@@ -906,9 +920,7 @@ describe('App navigation', () => {
       findByTestId(root, 'transposer-listen-button').props.onPress();
     });
 
-    expect(flattenTextChildren(findByTestId(root, 'transposer-listen-button').children).trim()).toBe(
-      '🎤 Listen & Highlight Notes[On]',
-    );
+    expect(pressableHasActiveListenStyle(findByTestId(root, 'transposer-listen-button'))).toBe(true);
   });
 
   it('highlights the matching note on the main tab row while listening', async () => {
@@ -922,12 +934,10 @@ describe('App navigation', () => {
     expect(targetIndex).toBeGreaterThanOrEqual(0);
 
     await act(async () => {
-      findPressableByText(root, '🎤 Listen & Highlight Notes').props.onPress();
+      findPressableByText(root, '🎤 Listen').props.onPress();
       await Promise.resolve();
     });
-    expect(flattenTextChildren(findPressableByText(root, '🎤 Listen & Highlight Notes').children).trim()).toBe(
-      '🎤 Listen & Highlight Notes[On]',
-    );
+    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Listen'))).toBe(true);
 
     act(() => {
       groups.forEach((_, index) => {
