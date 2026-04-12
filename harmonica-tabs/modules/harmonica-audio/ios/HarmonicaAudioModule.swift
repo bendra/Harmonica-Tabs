@@ -7,8 +7,12 @@ public class HarmonicaAudioModule: Module {
   private var confidenceThresholds: [Float] = []
   private let fundamentalRecoveryHarmonics: [Float] = [2, 3]
   private let fundamentalRecoveryMaxDeviationCents: Float = 35
-  private let fundamentalRecoveryMinFundamentalRatio: Float = 0.1
-  private let fundamentalRecoveryMinAdvantage: Float = 1.1
+  private let lowRegisterRecoveryMaxFrequency: Float = 250
+  private let defaultFundamentalRecoveryMinFundamentalRatio: Float = 0.1
+  private let lowRegisterFundamentalRecoveryMinFundamentalRatio: Float = 0.04
+  private let defaultFundamentalRecoveryMinAdvantage: Float = 1.1
+  private let lowRegisterFundamentalRecoveryMinAdvantage: Float = 1.05
+  private var didLogFrameLength = false
 
   public func definition() -> ModuleDefinition {
     Name("HarmonicaAudio")
@@ -44,12 +48,18 @@ public class HarmonicaAudioModule: Module {
     // Use the hardware's native format — avoids an extra conversion step.
     let format = inputNode.outputFormat(forBus: 0)
     let sampleRate = format.sampleRate
+    didLogFrameLength = false
+    print("[HarmonicaAudio][iOS] sampleRate=\(sampleRate) requestedBuffer=4096")
 
     // bufferSize is a suggestion; the OS may give smaller or larger buffers.
     inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
       guard let self = self,
             let channelData = buffer.floatChannelData?[0] else { return }
       let count = Int(buffer.frameLength)
+      if !self.didLogFrameLength {
+        self.didLogFrameLength = true
+        print("[HarmonicaAudio][iOS] actualFrameLength=\(count)")
+      }
       let samples = Array(UnsafeBufferPointer(start: channelData, count: count))
       let result = self.detectNote(samples: samples, sampleRate: sampleRate)
       // frequency is Double? — nil becomes null in JavaScript via NSNull bridging.
@@ -100,6 +110,22 @@ public class HarmonicaAudioModule: Module {
     return abs(centsBetween(candidateFrequency, expectedFrequency)) <= fundamentalRecoveryMaxDeviationCents
   }
 
+  private func isLowRegisterRecoveryCandidate(_ frequency: Float) -> Bool {
+    return frequency <= lowRegisterRecoveryMaxFrequency
+  }
+
+  private func getFundamentalRecoveryMinRatio(candidateFrequency: Float) -> Float {
+    return isLowRegisterRecoveryCandidate(candidateFrequency)
+      ? lowRegisterFundamentalRecoveryMinFundamentalRatio
+      : defaultFundamentalRecoveryMinFundamentalRatio
+  }
+
+  private func getFundamentalRecoveryMinAdvantage(candidateFrequency: Float) -> Float {
+    return isLowRegisterRecoveryCandidate(candidateFrequency)
+      ? lowRegisterFundamentalRecoveryMinAdvantage
+      : defaultFundamentalRecoveryMinAdvantage
+  }
+
   private func chooseWinningNote(scores: [Float]) -> (noteIndex: Int, supportScore: Float) {
     var winnerIndex = 0
     var winnerScore = scores[0]
@@ -115,11 +141,11 @@ public class HarmonicaAudioModule: Module {
 
     for candidateIndex in 0..<winnerIndex {
       let candidateScore = scores[candidateIndex]
-      if candidateScore < winnerScore * fundamentalRecoveryMinFundamentalRatio {
+      let candidateFrequency = targetFrequencies[candidateIndex]
+      if candidateScore < winnerScore * getFundamentalRecoveryMinRatio(candidateFrequency: candidateFrequency) {
         continue
       }
 
-      let candidateFrequency = targetFrequencies[candidateIndex]
       let winnerLooksLikeHarmonic = fundamentalRecoveryHarmonics.contains { harmonic in
         isNearHarmonic(
           baseFrequency: candidateFrequency,
@@ -149,7 +175,7 @@ public class HarmonicaAudioModule: Module {
         }
       }
 
-      if familySupportScore < winnerScore * fundamentalRecoveryMinAdvantage {
+      if familySupportScore < winnerScore * getFundamentalRecoveryMinAdvantage(candidateFrequency: candidateFrequency) {
         continue
       }
 

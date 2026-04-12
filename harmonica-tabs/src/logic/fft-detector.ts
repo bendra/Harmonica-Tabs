@@ -15,8 +15,11 @@ import { HarmonicaNote, HarmonicaVocabulary } from './harmonica-frequencies';
 const HARMONIC_WEIGHTS = [1.0];
 const FUNDAMENTAL_RECOVERY_HARMONICS = [2, 3];
 const FUNDAMENTAL_RECOVERY_MAX_DEVIATION_CENTS = 35;
-const FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO = 0.1;
-const FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE = 1.1;
+const LOW_REGISTER_RECOVERY_MAX_FREQUENCY = 250;
+const DEFAULT_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO = 0.1;
+const LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO = 0.04;
+const DEFAULT_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE = 1.1;
+const LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE = 1.05;
 
 /**
  * Below this RMS level the signal is treated as silence and detection is skipped.
@@ -94,6 +97,22 @@ function isNearHarmonic(baseFrequency: number, candidateFrequency: number, harmo
   return Math.abs(centsBetween(candidateFrequency, expectedFrequency)) <= FUNDAMENTAL_RECOVERY_MAX_DEVIATION_CENTS;
 }
 
+function isLowRegisterRecoveryCandidate(note: HarmonicaNote): boolean {
+  return !note.isBend && note.frequency <= LOW_REGISTER_RECOVERY_MAX_FREQUENCY;
+}
+
+function getFundamentalRecoveryMinRatio(note: HarmonicaNote): number {
+  return isLowRegisterRecoveryCandidate(note)
+    ? LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO
+    : DEFAULT_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO;
+}
+
+function getFundamentalRecoveryMinAdvantage(note: HarmonicaNote): number {
+  return isLowRegisterRecoveryCandidate(note)
+    ? LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE
+    : DEFAULT_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE;
+}
+
 /**
  * Recovers a lower fundamental when its louder 2nd or 3rd harmonic would
  * otherwise win outright.
@@ -114,11 +133,12 @@ function chooseWinningNote(notes: HarmonicaNote[], scores: number[]): WinnerSele
 
   for (let candidateIndex = 0; candidateIndex < winnerIndex; candidateIndex++) {
     const candidateScore = scores[candidateIndex];
-    if (candidateScore < winnerScore * FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO) {
+    const candidateNote = notes[candidateIndex];
+    const minRatio = getFundamentalRecoveryMinRatio(candidateNote);
+    if (candidateScore < winnerScore * minRatio) {
       continue;
     }
 
-    const candidateNote = notes[candidateIndex];
     const winnerLooksLikeHarmonic = FUNDAMENTAL_RECOVERY_HARMONICS.some((harmonic) =>
       isNearHarmonic(candidateNote.frequency, notes[winnerIndex].frequency, harmonic),
     );
@@ -135,7 +155,7 @@ function chooseWinningNote(notes: HarmonicaNote[], scores: number[]): WinnerSele
       }
     }
 
-    if (familySupportScore < winnerScore * FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE) {
+    if (familySupportScore < winnerScore * getFundamentalRecoveryMinAdvantage(candidateNote)) {
       continue;
     }
 

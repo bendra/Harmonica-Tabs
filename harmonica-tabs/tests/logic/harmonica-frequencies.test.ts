@@ -67,6 +67,16 @@ describe('buildHarmonicaVocabulary', () => {
       const minBent = Math.min(...bent.map((n) => n.confidenceThreshold));
       expect(minBent).toBeGreaterThan(maxNatural);
     });
+
+    it('uses lower confidence thresholds for high natural notes on holes 9 and 10', () => {
+      const midNatural = vocab.naturalNotes.find((n) => n.hole === 6 && n.technique === 'blow');
+      const holeNineNatural = vocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'draw');
+      const holeTenNatural = vocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'blow');
+
+      expect(midNatural?.confidenceThreshold).toBe(0.3);
+      expect(holeNineNatural?.confidenceThreshold).toBe(0.18);
+      expect(holeTenNatural?.confidenceThreshold).toBe(0.16);
+    });
   });
 
   describe('transposition', () => {

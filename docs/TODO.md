@@ -2,6 +2,7 @@ git # TODO / Next Steps
 
 - Revisit tab ordering and octave handling if alternate tunings are added.
 - Follow up on the remaining `npm audit` vulnerabilities (currently 8: 2 moderate, 6 high) after updating direct packages (`vitest`, `expo-clipboard`). The unresolved items are still transitive Expo / React Native toolchain dependencies, so the likely clean fix is a future Expo SDK / React Native upgrade rather than ad hoc overrides.
+- Re-test detector tuning on physical web + native devices for C, E, and G harps after the latest low-register harmonic recovery and hole `9`/`10` confidence-threshold adjustments, and compare any remaining native-only issues with the new one-time capture diagnostics.
 - Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.
 - Revisit whether the `Scales` screen should add a tablet-only two-column layout after the new size tiers have been user-tested.

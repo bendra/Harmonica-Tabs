@@ -41,6 +41,7 @@ function mixSines(components: { frequency: number; amplitude: number }[], size =
 }
 
 const cVocab = buildHarmonicaVocabulary(0); // C harmonica
+const eVocab = buildHarmonicaVocabulary(4); // E harmonica
 
 describe('calculateRms', () => {
   it('returns near-zero for silence', () => {
@@ -118,13 +119,13 @@ describe('detectSingleNote', () => {
     expect(result.frequency).toBe(d4.frequency);
   });
 
-  it('recovers a low G fundamental on a G harmonica when its second harmonic is louder', () => {
+  it('recovers a very weak low G fundamental on a G harmonica when its second harmonic is louder', () => {
     const gVocab = buildHarmonicaVocabulary(7);
     const g3 = gVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'blow')!;
     const g4 = gVocab.naturalNotes.find((n) => n.hole === 4 && n.technique === 'blow')!;
     const result = detectSingleNote(
       mixSines([
-        { frequency: g3.frequency, amplitude: 0.18 },
+        { frequency: g3.frequency, amplitude: 0.12 },
         { frequency: g4.frequency, amplitude: 0.55 },
       ]),
       SAMPLE_RATE,
@@ -132,6 +133,102 @@ describe('detectSingleNote', () => {
     );
 
     expect(result.frequency).toBe(g3.frequency);
+  });
+
+  it('keeps a real G4 on a G harmonica from collapsing down when low bleed is present', () => {
+    const gVocab = buildHarmonicaVocabulary(7);
+    const g3 = gVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'blow')!;
+    const g4 = gVocab.naturalNotes.find((n) => n.hole === 4 && n.technique === 'blow')!;
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: g4.frequency, amplitude: 0.55 },
+        { frequency: g3.frequency, amplitude: 0.10 },
+      ]),
+      SAMPLE_RATE,
+      gVocab,
+    );
+
+    expect(result.frequency).toBe(g4.frequency);
+  });
+
+  it('detects a crowded high C hole 10 blow with the relaxed top-register threshold', () => {
+    const highC = cVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'blow')!;
+    const competitors = [
+      cVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'draw')!,
+      cVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'blow')!,
+      cVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'draw')!,
+      cVocab.naturalNotes.find((n) => n.hole === 8 && n.technique === 'blow')!,
+    ];
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: highC.frequency, amplitude: 0.4 },
+        ...competitors.map((note) => ({ frequency: note.frequency, amplitude: 0.33 })),
+      ]),
+      SAMPLE_RATE,
+      cVocab,
+    );
+
+    expect(result.frequency).toBe(highC.frequency);
+  });
+
+  it('detects a crowded high C hole 10 draw with the relaxed top-register threshold', () => {
+    const highDraw = cVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'draw')!;
+    const competitors = [
+      cVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'blow')!,
+      cVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'blow')!,
+      cVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'draw')!,
+      cVocab.naturalNotes.find((n) => n.hole === 8 && n.technique === 'draw')!,
+    ];
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: highDraw.frequency, amplitude: 0.4 },
+        ...competitors.map((note) => ({ frequency: note.frequency, amplitude: 0.33 })),
+      ]),
+      SAMPLE_RATE,
+      cVocab,
+    );
+
+    expect(result.frequency).toBe(highDraw.frequency);
+  });
+
+  it('detects a crowded high E hole 9 draw with the relaxed top-register threshold', () => {
+    const highDraw = eVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'draw')!;
+    const competitors = [
+      eVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'blow')!,
+      eVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'draw')!,
+      eVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'blow')!,
+      eVocab.naturalNotes.find((n) => n.hole === 8 && n.technique === 'draw')!,
+    ];
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: highDraw.frequency, amplitude: 0.4 },
+        ...competitors.map((note) => ({ frequency: note.frequency, amplitude: 0.33 })),
+      ]),
+      SAMPLE_RATE,
+      eVocab,
+    );
+
+    expect(result.frequency).toBe(highDraw.frequency);
+  });
+
+  it('detects a crowded high E hole 10 blow with the relaxed top-register threshold', () => {
+    const highBlow = eVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'blow')!;
+    const competitors = [
+      eVocab.naturalNotes.find((n) => n.hole === 10 && n.technique === 'draw')!,
+      eVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'blow')!,
+      eVocab.naturalNotes.find((n) => n.hole === 9 && n.technique === 'draw')!,
+      eVocab.naturalNotes.find((n) => n.hole === 8 && n.technique === 'blow')!,
+    ];
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: highBlow.frequency, amplitude: 0.4 },
+        ...competitors.map((note) => ({ frequency: note.frequency, amplitude: 0.33 })),
+      ]),
+      SAMPLE_RATE,
+      eVocab,
+    );
+
+    expect(result.frequency).toBe(highBlow.frequency);
   });
 
   it('returns null for a frequency far outside the vocabulary', () => {

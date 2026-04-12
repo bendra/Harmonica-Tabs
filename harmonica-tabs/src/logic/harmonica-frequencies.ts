@@ -40,6 +40,10 @@ const CONFIDENCE_THRESHOLD: Record<HarmonicaNote['technique'], number> = {
   overblow: 0.65,
   overdraw: 0.65,
 };
+const HIGH_REGISTER_NATURAL_THRESHOLD_BY_HOLE: Partial<Record<number, number>> = {
+  9: 0.18,
+  10: 0.16,
+};
 
 // Lower rank = easier technique. Used to pick the best entry when two holes
 // produce the same MIDI (e.g. hole 2 draw and hole 3 blow both produce G4).
@@ -51,6 +55,17 @@ const TECHNIQUE_RANK: Record<HarmonicaNote['technique'], number> = {
   overblow: 2,
   overdraw: 2,
 };
+
+function getConfidenceThreshold(
+  hole: number,
+  technique: HarmonicaNote['technique'],
+): number {
+  const baseThreshold = CONFIDENCE_THRESHOLD[technique];
+  const isNaturalNote = technique === 'blow' || technique === 'draw';
+  if (!isNaturalNote) return baseThreshold;
+
+  return HIGH_REGISTER_NATURAL_THRESHOLD_BY_HOLE[hole] ?? baseThreshold;
+}
 
 /**
  * Builds the detectable note vocabulary for a harmonica in the given key
@@ -76,7 +91,7 @@ export function buildHarmonicaVocabulary(harmonicaPc: number): HarmonicaVocabula
         hole: hole.hole,
         technique,
         isBend,
-        confidenceThreshold: CONFIDENCE_THRESHOLD[technique],
+        confidenceThreshold: getConfidenceThreshold(hole.hole, technique),
       });
     }
 

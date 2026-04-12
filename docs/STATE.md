@@ -18,6 +18,7 @@
 - Tabs are clickable to toggle alternates (currently only `-2` ↔ `3`).
 - Chords shown separately for Blow and Draw based on adjacent unbent holes.
 - Lower-key Richter harps (`G` through `B`) now wrap their shared MIDI layout into the lower practical octave instead of treating the instrument as `C + 7..11 semitones` in the same octave; this shared rule feeds both tab MIDI and listen/detection vocabulary.
+- Single-note detection now uses a narrow low-register harmonic-recovery rule for very low fundamentals plus more forgiving confidence thresholds on natural notes for holes `9` and `10`; the same tuning is mirrored in web and native detectors.
 - Tone follow is token-based in the transposer: only successfully transposed output tab tokens are followable/clickable.
 - Tone follow reuses the shared listen session; real microphone detection now exists on web and native mobile, with simulated Hz still used as the fallback path when mic access is unavailable or unsupported.
 - Tone follow is automatically on while listening is on, and off while listening is off.

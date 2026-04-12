@@ -3,6 +3,7 @@ package expo.modules.harmonicaaudio
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import kotlin.math.PI
@@ -23,8 +24,12 @@ class HarmonicaAudioModule : Module() {
   private val bufferFrames = 4096
   private val fundamentalRecoveryHarmonics = floatArrayOf(2f, 3f)
   private val fundamentalRecoveryMaxDeviationCents = 35f
-  private val fundamentalRecoveryMinFundamentalRatio = 0.1f
-  private val fundamentalRecoveryMinAdvantage = 1.1f
+  private val lowRegisterRecoveryMaxFrequency = 250f
+  private val defaultFundamentalRecoveryMinFundamentalRatio = 0.1f
+  private val lowRegisterFundamentalRecoveryMinFundamentalRatio = 0.04f
+  private val defaultFundamentalRecoveryMinAdvantage = 1.1f
+  private val lowRegisterFundamentalRecoveryMinAdvantage = 1.05f
+  private var didLogFrameLength = false
 
   override fun definition() = ModuleDefinition {
     Name("HarmonicaAudio")
@@ -67,6 +72,8 @@ class HarmonicaAudioModule : Module() {
       bufferBytes,
     )
 
+    didLogFrameLength = false
+    Log.d("HarmonicaAudio", "sampleRate=$sampleRate requestedBuffer=$bufferFrames bufferBytes=$bufferBytes")
     audioRecord?.startRecording()
     isCapturing = true
 
@@ -75,6 +82,10 @@ class HarmonicaAudioModule : Module() {
       while (isCapturing) {
         val read = audioRecord?.read(samples, 0, bufferFrames, AudioRecord.READ_BLOCKING) ?: break
         if (read > 0) {
+          if (!didLogFrameLength) {
+            didLogFrameLength = true
+            Log.d("HarmonicaAudio", "actualFrameLength=$read")
+          }
           val (frequency, confidence, rms) = detectNote(samples, read)
           sendEvent("onAudioFrame", mapOf(
             "frequency" to frequency,
@@ -137,6 +148,26 @@ class HarmonicaAudioModule : Module() {
     return abs(centsBetween(candidateFrequency, expectedFrequency)) <= fundamentalRecoveryMaxDeviationCents
   }
 
+  private fun isLowRegisterRecoveryCandidate(frequency: Float): Boolean {
+    return frequency <= lowRegisterRecoveryMaxFrequency
+  }
+
+  private fun getFundamentalRecoveryMinRatio(candidateFrequency: Float): Float {
+    return if (isLowRegisterRecoveryCandidate(candidateFrequency)) {
+      lowRegisterFundamentalRecoveryMinFundamentalRatio
+    } else {
+      defaultFundamentalRecoveryMinFundamentalRatio
+    }
+  }
+
+  private fun getFundamentalRecoveryMinAdvantage(candidateFrequency: Float): Float {
+    return if (isLowRegisterRecoveryCandidate(candidateFrequency)) {
+      lowRegisterFundamentalRecoveryMinAdvantage
+    } else {
+      defaultFundamentalRecoveryMinAdvantage
+    }
+  }
+
   private fun chooseWinningNote(scores: List<Float>): WinnerSelection {
     val winnerIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
     val winnerScore = scores[winnerIndex]
@@ -145,11 +176,11 @@ class HarmonicaAudioModule : Module() {
 
     for (candidateIndex in 0 until winnerIndex) {
       val candidateScore = scores[candidateIndex]
-      if (candidateScore < winnerScore * fundamentalRecoveryMinFundamentalRatio) {
+      val candidateFrequency = targetFrequencies[candidateIndex]
+      if (candidateScore < winnerScore * getFundamentalRecoveryMinRatio(candidateFrequency)) {
         continue
       }
 
-      val candidateFrequency = targetFrequencies[candidateIndex]
       val winnerLooksLikeHarmonic = fundamentalRecoveryHarmonics.any { harmonic ->
         isNearHarmonic(candidateFrequency, targetFrequencies[winnerIndex], harmonic)
       }
@@ -171,7 +202,7 @@ class HarmonicaAudioModule : Module() {
         }
       }
 
-      if (familySupportScore < winnerScore * fundamentalRecoveryMinAdvantage) {
+      if (familySupportScore < winnerScore * getFundamentalRecoveryMinAdvantage(candidateFrequency)) {
         continue
       }
 
