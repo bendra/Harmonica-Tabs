@@ -21,6 +21,15 @@ const HARMONIC_WEIGHTS = [1.0];
 const MIN_RMS = 0.005;
 
 /**
+ * One scored note from a detection frame — used only in the debug overlay.
+ * Frequency is the note's frequency in Hz; confidence is its share of total energy.
+ */
+export type DetectionCandidate = {
+  frequency: number;
+  confidence: number;
+};
+
+/**
  * Result of single-note detection. Shape matches the existing PitchUpdate type
  * so the FFT detector can be a drop-in replacement in the audio pipeline.
  */
@@ -30,6 +39,11 @@ export type SingleNoteResult = {
   /** 0–1: winner's share of total energy across all candidate notes. */
   confidence: number;
   rms: number;
+  /**
+   * Top 3 scoring notes this frame, sorted by confidence descending.
+   * Populated only when __DEV__ is true to avoid production overhead.
+   */
+  candidates: DetectionCandidate[];
 };
 
 /**
@@ -105,15 +119,15 @@ export function detectSingleNote(
 ): SingleNoteResult {
   const rms = calculateRms(input);
   if (rms < MIN_RMS) {
-    return { frequency: null, confidence: 0, rms };
+    return { frequency: null, confidence: 0, rms, candidates: [] };
   }
 
   const { allNotes } = vocabulary;
-  if (allNotes.length === 0) return { frequency: null, confidence: 0, rms };
+  if (allNotes.length === 0) return { frequency: null, confidence: 0, rms, candidates: [] };
 
   const scores = allNotes.map((note) => scoreNote(note, input, sampleRate));
   const totalScore = scores.reduce((sum, s) => sum + s, 0);
-  if (totalScore === 0) return { frequency: null, confidence: 0, rms };
+  if (totalScore === 0) return { frequency: null, confidence: 0, rms, candidates: [] };
 
   let bestIndex = 0;
   for (let i = 1; i < scores.length; i++) {
@@ -123,11 +137,19 @@ export function detectSingleNote(
   const confidence = scores[bestIndex] / totalScore;
   const winner = allNotes[bestIndex];
 
+  // Build top-3 candidates for the debug overlay (dev builds only).
+  const candidates: DetectionCandidate[] = typeof __DEV__ !== 'undefined' && __DEV__
+    ? allNotes
+        .map((note, i) => ({ frequency: note.frequency, confidence: scores[i] / totalScore }))
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 3)
+    : [];
+
   if (confidence < winner.confidenceThreshold) {
-    return { frequency: null, confidence, rms };
+    return { frequency: null, confidence, rms, candidates };
   }
 
-  return { frequency: winner.frequency, confidence, rms };
+  return { frequency: winner.frequency, confidence, rms, candidates };
 }
 
 /**

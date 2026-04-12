@@ -41,7 +41,8 @@ export function createNativeAudioPitchDetector() {
       });
     });
 
-    await HarmonicaAudioModule.start(frequencies, thresholds);
+    const info = await HarmonicaAudioModule.start(frequencies, thresholds);
+    console.log('[native-audio] started — sampleRate:', info?.sampleRate);
   }
 
   function stop() {

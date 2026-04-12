@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import { DetectorSnapshot } from '../logic/transposer-follow';
+import { DetectionCandidate } from '../logic/fft-detector';
 import { createWebAudioPitchDetector } from '../logic/web-audio';
 import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
 
@@ -20,6 +21,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
   const [detectedFrequency, setDetectedFrequency] = useState<number | null>(null);
   const [detectedConfidence, setDetectedConfidence] = useState(0);
   const [detectedRms, setDetectedRms] = useState(0);
+  const [detectedCandidates, setDetectedCandidates] = useState<DetectionCandidate[]>([]);
   const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
 
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
@@ -66,6 +68,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     setDetectedFrequency(null);
     setDetectedConfidence(0);
     setDetectedRms(0);
+    setDetectedCandidates([]);
     setLastDetectedAt(null);
 
     function isCurrentListenSession() {
@@ -95,6 +98,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
           setDetectedFrequency(update.frequency);
           setDetectedConfidence(update.confidence);
           setDetectedRms(update.rms);
+          if ('candidates' in update) setDetectedCandidates(update.candidates ?? []);
           if (update.frequency && update.confidence >= AUDIO_CONFIDENCE_GATE) {
             setLastDetectedAt(Date.now());
           }
@@ -124,6 +128,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     setDetectedFrequency(null);
     setDetectedConfidence(0);
     setDetectedRms(0);
+    setDetectedCandidates([]);
     setLastDetectedAt(null);
   }
 
@@ -134,6 +139,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     detectedFrequency,
     detectedConfidence,
     detectedRms,
+    detectedCandidates,
     lastDetectedAt,
     audioSnapshot,
     startListening,

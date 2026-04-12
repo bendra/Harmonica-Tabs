@@ -377,6 +377,7 @@ export default function App() {
     detectedFrequency,
     detectedConfidence,
     detectedRms,
+    detectedCandidates,
     lastDetectedAt,
     audioSnapshot,
     startListening,
@@ -522,6 +523,14 @@ export default function App() {
         <Text style={styles.debugText}>
           Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Status: {transposerFollowEvaluation.status}
         </Text>
+        {detectedCandidates.length > 0 && (
+          <Text style={styles.debugText}>
+            Top candidates:{' '}
+            {detectedCandidates
+              .map((c) => `${c.frequency.toFixed(1)}Hz (${(c.confidence * 100).toFixed(1)}%)`)
+              .join(' · ')}
+          </Text>
+        )}
         <View style={styles.debugRow}>
           <Text style={styles.debugLabel}>Source</Text>
           <Text style={styles.debugTextInline}>

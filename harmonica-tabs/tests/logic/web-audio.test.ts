@@ -202,6 +202,7 @@ describe('createWebAudioPitchDetector', () => {
       frequency: null,
       confidence: 0,
       rms: 0,
+      candidates: [],
     });
   });
 

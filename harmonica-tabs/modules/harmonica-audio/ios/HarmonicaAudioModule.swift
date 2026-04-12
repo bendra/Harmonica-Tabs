@@ -5,6 +5,7 @@ public class HarmonicaAudioModule: Module {
   private var audioEngine: AVAudioEngine?
   private var targetFrequencies: [Float] = []
   private var confidenceThresholds: [Float] = []
+  private var hasLoggedFirstFrame = false
 
   public func definition() -> ModuleDefinition {
     Name("HarmonicaAudio")
@@ -46,6 +47,10 @@ public class HarmonicaAudioModule: Module {
       guard let self = self,
             let channelData = buffer.floatChannelData?[0] else { return }
       let count = Int(buffer.frameLength)
+      if !self.hasLoggedFirstFrame {
+        self.hasLoggedFirstFrame = true
+        print("[HarmonicaAudio] first frame — sampleRate: \(sampleRate), bufferSize: \(count)")
+      }
       let samples = Array(UnsafeBufferPointer(start: channelData, count: count))
       let result = self.detectNote(samples: samples, sampleRate: sampleRate)
       // frequency is Double? — nil becomes null in JavaScript via NSNull bridging.
@@ -65,6 +70,7 @@ public class HarmonicaAudioModule: Module {
     audioEngine?.inputNode.removeTap(onBus: 0)
     audioEngine?.stop()
     audioEngine = nil
+    hasLoggedFirstFrame = false
     try? AVAudioSession.sharedInstance().setActive(false)
   }
 
