@@ -6,7 +6,9 @@ import android.media.MediaRecorder
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.log2
 import kotlin.math.sqrt
 
 class HarmonicaAudioModule : Module() {
@@ -19,6 +21,10 @@ class HarmonicaAudioModule : Module() {
 
   private val sampleRate = 44100
   private val bufferFrames = 4096
+  private val fundamentalRecoveryHarmonics = floatArrayOf(2f, 3f)
+  private val fundamentalRecoveryMaxDeviationCents = 35f
+  private val fundamentalRecoveryMinFundamentalRatio = 0.1f
+  private val fundamentalRecoveryMinAdvantage = 1.1f
 
   override fun definition() = ModuleDefinition {
     Name("HarmonicaAudio")
@@ -117,6 +123,69 @@ class HarmonicaAudioModule : Module() {
     val rms: Double,
   )
 
+  private data class WinnerSelection(
+    val noteIndex: Int,
+    val supportScore: Float,
+  )
+
+  private fun centsBetween(a: Float, b: Float): Float {
+    return 1200.0f * log2(a / b)
+  }
+
+  private fun isNearHarmonic(baseFrequency: Float, candidateFrequency: Float, harmonic: Float): Boolean {
+    val expectedFrequency = baseFrequency * harmonic
+    return abs(centsBetween(candidateFrequency, expectedFrequency)) <= fundamentalRecoveryMaxDeviationCents
+  }
+
+  private fun chooseWinningNote(scores: List<Float>): WinnerSelection {
+    val winnerIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
+    val winnerScore = scores[winnerIndex]
+    var selectedIndex = winnerIndex
+    var selectedSupportScore = winnerScore
+
+    for (candidateIndex in 0 until winnerIndex) {
+      val candidateScore = scores[candidateIndex]
+      if (candidateScore < winnerScore * fundamentalRecoveryMinFundamentalRatio) {
+        continue
+      }
+
+      val candidateFrequency = targetFrequencies[candidateIndex]
+      val winnerLooksLikeHarmonic = fundamentalRecoveryHarmonics.any { harmonic ->
+        isNearHarmonic(candidateFrequency, targetFrequencies[winnerIndex], harmonic)
+      }
+      if (!winnerLooksLikeHarmonic) {
+        continue
+      }
+
+      var familySupportScore = candidateScore
+      for (higherIndex in (candidateIndex + 1) until scores.size) {
+        if (scores[higherIndex] < candidateScore) {
+          continue
+        }
+
+        val supportsCandidate = fundamentalRecoveryHarmonics.any { harmonic ->
+          isNearHarmonic(candidateFrequency, targetFrequencies[higherIndex], harmonic)
+        }
+        if (supportsCandidate) {
+          familySupportScore += scores[higherIndex]
+        }
+      }
+
+      if (familySupportScore < winnerScore * fundamentalRecoveryMinAdvantage) {
+        continue
+      }
+
+      if (familySupportScore > selectedSupportScore ||
+        (familySupportScore == selectedSupportScore && candidateFrequency < targetFrequencies[selectedIndex])
+      ) {
+        selectedIndex = candidateIndex
+        selectedSupportScore = familySupportScore
+      }
+    }
+
+    return WinnerSelection(selectedIndex, selectedSupportScore)
+  }
+
   private fun detectNote(samples: FloatArray, count: Int): DetectionResult {
     // Silence gate
     var sumSq = 0f
@@ -129,14 +198,13 @@ class HarmonicaAudioModule : Module() {
     val totalScore = scores.sum()
     if (totalScore <= 0f) return DetectionResult(null, 0.0, rms.toDouble())
 
-    val bestIdx = scores.indices.maxByOrNull { scores[it] } ?: 0
-    val bestScore = scores[bestIdx]
-    val confidence = bestScore.toDouble() / totalScore.toDouble()
+    val selection = chooseWinningNote(scores)
+    val confidence = selection.supportScore.toDouble() / totalScore.toDouble()
 
-    if (confidence < confidenceThresholds[bestIdx].toDouble()) {
+    if (confidence < confidenceThresholds[selection.noteIndex].toDouble()) {
       return DetectionResult(null, confidence, rms.toDouble())
     }
 
-    return DetectionResult(targetFrequencies[bestIdx].toDouble(), confidence, rms.toDouble())
+    return DetectionResult(targetFrequencies[selection.noteIndex].toDouble(), confidence, rms.toDouble())
   }
 }

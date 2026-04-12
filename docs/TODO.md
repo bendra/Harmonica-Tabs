@@ -1,7 +1,7 @@
 git # TODO / Next Steps
 
 - Revisit tab ordering and octave handling if alternate tunings are added.
-- Investigate G harmonica octave detection bug: notes are detected one octave too low on a G harmonica (e.g. hole 6 registers as -2). Pre-existing in production, not a regression from native audio work. May be a MIDI mapping or frequency vocabulary issue in `harmonica-frequencies.ts` or `pitch.ts`.
+- Follow up on the remaining `npm audit` vulnerabilities (currently 8: 2 moderate, 6 high) after updating direct packages (`vitest`, `expo-clipboard`). The unresolved items are still transitive Expo / React Native toolchain dependencies, so the likely clean fix is a future Expo SDK / React Native upgrade rather than ad hoc overrides.
 - Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.
 - Revisit whether the `Scales` screen should add a tablet-only two-column layout after the new size tiers have been user-tested.

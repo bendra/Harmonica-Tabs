@@ -5,6 +5,10 @@ public class HarmonicaAudioModule: Module {
   private var audioEngine: AVAudioEngine?
   private var targetFrequencies: [Float] = []
   private var confidenceThresholds: [Float] = []
+  private let fundamentalRecoveryHarmonics: [Float] = [2, 3]
+  private let fundamentalRecoveryMaxDeviationCents: Float = 35
+  private let fundamentalRecoveryMinFundamentalRatio: Float = 0.1
+  private let fundamentalRecoveryMinAdvantage: Float = 1.1
 
   public func definition() -> ModuleDefinition {
     Name("HarmonicaAudio")
@@ -87,6 +91,78 @@ public class HarmonicaAudioModule: Module {
     return s2 * s2 + s1 * s1 - coeff * s1 * s2
   }
 
+  private func centsBetween(_ a: Float, _ b: Float) -> Float {
+    return 1200.0 * log2(a / b)
+  }
+
+  private func isNearHarmonic(baseFrequency: Float, candidateFrequency: Float, harmonic: Float) -> Bool {
+    let expectedFrequency = baseFrequency * harmonic
+    return abs(centsBetween(candidateFrequency, expectedFrequency)) <= fundamentalRecoveryMaxDeviationCents
+  }
+
+  private func chooseWinningNote(scores: [Float]) -> (noteIndex: Int, supportScore: Float) {
+    var winnerIndex = 0
+    var winnerScore = scores[0]
+    for index in 1..<scores.count {
+      if scores[index] > winnerScore {
+        winnerScore = scores[index]
+        winnerIndex = index
+      }
+    }
+
+    var selectedIndex = winnerIndex
+    var selectedSupportScore = winnerScore
+
+    for candidateIndex in 0..<winnerIndex {
+      let candidateScore = scores[candidateIndex]
+      if candidateScore < winnerScore * fundamentalRecoveryMinFundamentalRatio {
+        continue
+      }
+
+      let candidateFrequency = targetFrequencies[candidateIndex]
+      let winnerLooksLikeHarmonic = fundamentalRecoveryHarmonics.contains { harmonic in
+        isNearHarmonic(
+          baseFrequency: candidateFrequency,
+          candidateFrequency: targetFrequencies[winnerIndex],
+          harmonic: harmonic
+        )
+      }
+      if !winnerLooksLikeHarmonic {
+        continue
+      }
+
+      var familySupportScore = candidateScore
+      for higherIndex in (candidateIndex + 1)..<scores.count {
+        if scores[higherIndex] < candidateScore {
+          continue
+        }
+
+        let supportsCandidate = fundamentalRecoveryHarmonics.contains { harmonic in
+          isNearHarmonic(
+            baseFrequency: candidateFrequency,
+            candidateFrequency: targetFrequencies[higherIndex],
+            harmonic: harmonic
+          )
+        }
+        if supportsCandidate {
+          familySupportScore += scores[higherIndex]
+        }
+      }
+
+      if familySupportScore < winnerScore * fundamentalRecoveryMinAdvantage {
+        continue
+      }
+
+      if familySupportScore > selectedSupportScore ||
+          (familySupportScore == selectedSupportScore && candidateFrequency < targetFrequencies[selectedIndex]) {
+        selectedIndex = candidateIndex
+        selectedSupportScore = familySupportScore
+      }
+    }
+
+    return (selectedIndex, selectedSupportScore)
+  }
+
   private func detectNote(
     samples: [Float],
     sampleRate: Double
@@ -108,20 +184,12 @@ public class HarmonicaAudioModule: Module {
     let totalScore = scores.reduce(0, +)
     guard totalScore > 0 else { return (nil, 0, Double(rms)) }
 
-    var bestIdx = 0
-    var bestScore: Float = scores[0]
-    for i in 1..<scores.count {
-      if scores[i] > bestScore {
-        bestScore = scores[i]
-        bestIdx = i
-      }
-    }
-
-    let confidence = Double(bestScore / totalScore)
-    guard confidence >= Double(confidenceThresholds[bestIdx]) else {
+    let selection = chooseWinningNote(scores: scores)
+    let confidence = Double(selection.supportScore / totalScore)
+    guard confidence >= Double(confidenceThresholds[selection.noteIndex]) else {
       return (nil, confidence, Double(rms))
     }
 
-    return (Double(targetFrequencies[bestIdx]), confidence, Double(rms))
+    return (Double(targetFrequencies[selection.noteIndex]), confidence, Double(rms))
   }
 }

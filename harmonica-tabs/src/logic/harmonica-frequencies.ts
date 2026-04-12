@@ -53,8 +53,8 @@ const TECHNIQUE_RANK: Record<HarmonicaNote['technique'], number> = {
 };
 
 /**
- * Builds the detectable note vocabulary for a harmonica transposed to
- * `harmonicaPc` semitones above C (0 = C, 2 = D, 5 = F, 7 = G, etc.).
+ * Builds the detectable note vocabulary for a harmonica in the given key
+ * pitch class (0 = C, 2 = D, 5 = F, 7 = G, etc.).
  *
  * Notes that produce the same MIDI on multiple holes are deduplicated,
  * keeping the entry with the easiest technique and lowest confidence threshold.

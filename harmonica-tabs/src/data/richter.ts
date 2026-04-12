@@ -158,22 +158,44 @@ export const RICHTER_C_LAYOUT: HoleMapping[] = [
 ];
 
 /**
- * Transposes a layout by semitones, preserving hole structure.
+ * Wraps a harmonica key's pitch class to the nearest practical MIDI shift from C.
+ *
+ * Standard Richter harps are not laid out as "C plus N semitones in the same
+ * octave". Lower keys like G, Ab, A, Bb, and B sit below C, so their MIDI
+ * layout should shift down 5..1 semitones rather than up 7..11.
+ *
+ * Examples:
+ * - C (0)  ->  0
+ * - F# (6) -> +6
+ * - G (7)  -> -5
+ * - B (11) -> -1
+ */
+export function getPlayableMidiShift(semitones: number): number {
+  const normalized = normalizePc(semitones);
+  return normalized > 6 ? normalized - 12 : normalized;
+}
+
+/**
+ * Transposes a layout to a target harmonica key, preserving hole structure and
+ * keeping the instrument in its expected octave register.
  */
 export function transposeLayout(layout: HoleMapping[], semitones: number): HoleMapping[] {
+  const pitchClassShift = normalizePc(semitones);
+  const midiShift = getPlayableMidiShift(semitones);
+
   return layout.map((hole) => ({
     hole: hole.hole,
-    blow: normalizePc(hole.blow + semitones),
-    draw: normalizePc(hole.draw + semitones),
-    blowBends: hole.blowBends.map((pc) => normalizePc(pc + semitones)),
-    drawBends: hole.drawBends.map((pc) => normalizePc(pc + semitones)),
-    overblow: hole.overblow === undefined ? undefined : normalizePc(hole.overblow + semitones),
-    overdraw: hole.overdraw === undefined ? undefined : normalizePc(hole.overdraw + semitones),
-    blowMidi: hole.blowMidi + semitones,
-    drawMidi: hole.drawMidi + semitones,
-    blowBendsMidi: hole.blowBendsMidi.map((value) => value + semitones),
-    drawBendsMidi: hole.drawBendsMidi.map((value) => value + semitones),
-    overblowMidi: hole.overblowMidi === undefined ? undefined : hole.overblowMidi + semitones,
-    overdrawMidi: hole.overdrawMidi === undefined ? undefined : hole.overdrawMidi + semitones,
+    blow: normalizePc(hole.blow + pitchClassShift),
+    draw: normalizePc(hole.draw + pitchClassShift),
+    blowBends: hole.blowBends.map((pc) => normalizePc(pc + pitchClassShift)),
+    drawBends: hole.drawBends.map((pc) => normalizePc(pc + pitchClassShift)),
+    overblow: hole.overblow === undefined ? undefined : normalizePc(hole.overblow + pitchClassShift),
+    overdraw: hole.overdraw === undefined ? undefined : normalizePc(hole.overdraw + pitchClassShift),
+    blowMidi: hole.blowMidi + midiShift,
+    drawMidi: hole.drawMidi + midiShift,
+    blowBendsMidi: hole.blowBendsMidi.map((value) => value + midiShift),
+    drawBendsMidi: hole.drawBendsMidi.map((value) => value + midiShift),
+    overblowMidi: hole.overblowMidi === undefined ? undefined : hole.overblowMidi + midiShift,
+    overdrawMidi: hole.overdrawMidi === undefined ? undefined : hole.overdrawMidi + midiShift,
   }));
 }

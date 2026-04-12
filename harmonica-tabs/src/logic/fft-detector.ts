@@ -13,6 +13,10 @@ import { HarmonicaNote, HarmonicaVocabulary } from './harmonica-frequencies';
  * interference correction if needed.
  */
 const HARMONIC_WEIGHTS = [1.0];
+const FUNDAMENTAL_RECOVERY_HARMONICS = [2, 3];
+const FUNDAMENTAL_RECOVERY_MAX_DEVIATION_CENTS = 35;
+const FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO = 0.1;
+const FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE = 1.1;
 
 /**
  * Below this RMS level the signal is treated as silence and detection is skipped.
@@ -39,6 +43,11 @@ export type ChordResult = {
   /** All notes with significant energy in this frame. Empty in silence. */
   activeNotes: HarmonicaNote[];
   rms: number;
+};
+
+type WinnerSelection = {
+  noteIndex: number;
+  supportScore: number;
 };
 
 /**
@@ -76,6 +85,75 @@ function scoreNote(note: HarmonicaNote, input: Float32Array, sampleRate: number)
   return score;
 }
 
+function centsBetween(a: number, b: number): number {
+  return 1200 * Math.log2(a / b);
+}
+
+function isNearHarmonic(baseFrequency: number, candidateFrequency: number, harmonic: number): boolean {
+  const expectedFrequency = baseFrequency * harmonic;
+  return Math.abs(centsBetween(candidateFrequency, expectedFrequency)) <= FUNDAMENTAL_RECOVERY_MAX_DEVIATION_CENTS;
+}
+
+/**
+ * Recovers a lower fundamental when its louder 2nd or 3rd harmonic would
+ * otherwise win outright.
+ *
+ * This keeps the detector from snapping low notes upward (for example `1 -> 4`)
+ * while still requiring a meaningful amount of true fundamental energy before
+ * we trust the lower note.
+ */
+function chooseWinningNote(notes: HarmonicaNote[], scores: number[]): WinnerSelection {
+  let winnerIndex = 0;
+  for (let i = 1; i < scores.length; i++) {
+    if (scores[i] > scores[winnerIndex]) winnerIndex = i;
+  }
+
+  const winnerScore = scores[winnerIndex];
+  let selectedIndex = winnerIndex;
+  let selectedSupportScore = winnerScore;
+
+  for (let candidateIndex = 0; candidateIndex < winnerIndex; candidateIndex++) {
+    const candidateScore = scores[candidateIndex];
+    if (candidateScore < winnerScore * FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO) {
+      continue;
+    }
+
+    const candidateNote = notes[candidateIndex];
+    const winnerLooksLikeHarmonic = FUNDAMENTAL_RECOVERY_HARMONICS.some((harmonic) =>
+      isNearHarmonic(candidateNote.frequency, notes[winnerIndex].frequency, harmonic),
+    );
+    if (!winnerLooksLikeHarmonic) continue;
+
+    let familySupportScore = candidateScore;
+    for (let higherIndex = candidateIndex + 1; higherIndex < notes.length; higherIndex++) {
+      if (scores[higherIndex] < candidateScore) continue;
+      const supportsCandidate = FUNDAMENTAL_RECOVERY_HARMONICS.some((harmonic) =>
+        isNearHarmonic(candidateNote.frequency, notes[higherIndex].frequency, harmonic),
+      );
+      if (supportsCandidate) {
+        familySupportScore += scores[higherIndex];
+      }
+    }
+
+    if (familySupportScore < winnerScore * FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE) {
+      continue;
+    }
+
+    if (
+      familySupportScore > selectedSupportScore ||
+      (familySupportScore === selectedSupportScore && candidateNote.frequency < notes[selectedIndex].frequency)
+    ) {
+      selectedIndex = candidateIndex;
+      selectedSupportScore = familySupportScore;
+    }
+  }
+
+  return {
+    noteIndex: selectedIndex,
+    supportScore: selectedSupportScore,
+  };
+}
+
 /**
  * Calculates root-mean-square energy of an audio frame.
  */
@@ -90,9 +168,10 @@ export function calculateRms(input: Float32Array): number {
 /**
  * Detects the single strongest note in the input buffer.
  *
- * Confidence is the winner's share of total energy across all candidate notes —
- * a clean, tonal signal concentrates energy at one note (high confidence), while
- * noise spreads it across many (low confidence).
+ * Confidence is the selected note's supported share of total energy across all
+ * candidate notes. In the normal case that is just the winning note's score.
+ * For low notes with stronger 2nd/3rd harmonics, the selected note can also
+ * claim clearly-related harmonic support from higher bins.
  *
  * The winner must exceed its per-note confidenceThreshold. Bent notes have a
  * higher threshold since they are harder to play and more susceptible to
@@ -115,13 +194,9 @@ export function detectSingleNote(
   const totalScore = scores.reduce((sum, s) => sum + s, 0);
   if (totalScore === 0) return { frequency: null, confidence: 0, rms };
 
-  let bestIndex = 0;
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] > scores[bestIndex]) bestIndex = i;
-  }
-
-  const confidence = scores[bestIndex] / totalScore;
-  const winner = allNotes[bestIndex];
+  const selection = chooseWinningNote(allNotes, scores);
+  const confidence = selection.supportScore / totalScore;
+  const winner = allNotes[selection.noteIndex];
 
   if (confidence < winner.confidenceThreshold) {
     return { frequency: null, confidence, rms };

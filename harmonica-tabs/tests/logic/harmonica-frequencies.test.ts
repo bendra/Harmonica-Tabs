@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildHarmonicaVocabulary } from '../../src/logic/harmonica-frequencies';
 import { midiToFrequency } from '../../src/logic/pitch';
+import { getPlayableMidiShift } from '../../src/data/richter';
 
 describe('buildHarmonicaVocabulary', () => {
   describe('C harmonica (harmonicaPc = 0)', () => {
@@ -69,15 +70,32 @@ describe('buildHarmonicaVocabulary', () => {
   });
 
   describe('transposition', () => {
-    it('G harmonica (harmonicaPc = 7) shifts all frequencies up 7 semitones from C', () => {
+    it('wraps lower harmonica keys into the expected playable MIDI octave', () => {
+      expect(getPlayableMidiShift(0)).toBe(0);
+      expect(getPlayableMidiShift(6)).toBe(6);
+      expect(getPlayableMidiShift(7)).toBe(-5);
+      expect(getPlayableMidiShift(11)).toBe(-1);
+    });
+
+    it('G harmonica (harmonicaPc = 7) shifts pitch classes to G but wraps MIDI down to the lower octave', () => {
       const cVocab = buildHarmonicaVocabulary(0);
       const gVocab = buildHarmonicaVocabulary(7);
       expect(gVocab.naturalNotes).toHaveLength(cVocab.naturalNotes.length);
       gVocab.naturalNotes.forEach((gNote, i) => {
         const cNote = cVocab.naturalNotes[i];
-        expect(gNote.midi).toBe(cNote.midi + 7);
-        expect(gNote.frequency).toBeCloseTo(midiToFrequency(cNote.midi + 7), 5);
+        expect(gNote.midi).toBe(cNote.midi - 5);
+        expect(gNote.frequency).toBeCloseTo(midiToFrequency(cNote.midi - 5), 5);
       });
+    });
+
+    it('keeps G harmonica hole 6 above hole 2 instead of collapsing them into the same octave', () => {
+      const gVocab = buildHarmonicaVocabulary(7);
+      const holeTwoDraw = gVocab.naturalNotes.find((note) => note.hole === 2 && note.technique === 'draw');
+      const holeSixBlow = gVocab.naturalNotes.find((note) => note.hole === 6 && note.technique === 'blow');
+
+      expect(holeTwoDraw?.midi).toBe(62);
+      expect(holeSixBlow?.midi).toBe(74);
+      expect(holeSixBlow?.midi).toBe((holeTwoDraw?.midi ?? 0) + 12);
     });
 
     it('all 12 keys produce a vocabulary without errors', () => {

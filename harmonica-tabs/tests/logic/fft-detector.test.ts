@@ -88,6 +88,52 @@ describe('detectSingleNote', () => {
     }
   });
 
+  it('recovers a low C fundamental when its second harmonic is louder', () => {
+    const c4 = cVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'blow')!;
+    const c5 = cVocab.naturalNotes.find((n) => n.hole === 4 && n.technique === 'blow')!;
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: c4.frequency, amplitude: 0.18 },
+        { frequency: c5.frequency, amplitude: 0.55 },
+      ]),
+      SAMPLE_RATE,
+      cVocab,
+    );
+
+    expect(result.frequency).toBe(c4.frequency);
+  });
+
+  it('recovers a low D fundamental when its third harmonic is louder', () => {
+    const d4 = cVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'draw')!;
+    const a5 = cVocab.naturalNotes.find((n) => n.hole === 6 && n.technique === 'draw')!;
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: d4.frequency, amplitude: 0.18 },
+        { frequency: a5.frequency, amplitude: 0.55 },
+      ]),
+      SAMPLE_RATE,
+      cVocab,
+    );
+
+    expect(result.frequency).toBe(d4.frequency);
+  });
+
+  it('recovers a low G fundamental on a G harmonica when its second harmonic is louder', () => {
+    const gVocab = buildHarmonicaVocabulary(7);
+    const g3 = gVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'blow')!;
+    const g4 = gVocab.naturalNotes.find((n) => n.hole === 4 && n.technique === 'blow')!;
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: g3.frequency, amplitude: 0.18 },
+        { frequency: g4.frequency, amplitude: 0.55 },
+      ]),
+      SAMPLE_RATE,
+      gVocab,
+    );
+
+    expect(result.frequency).toBe(g3.frequency);
+  });
+
   it('returns null for a frequency far outside the vocabulary', () => {
     // 8000 Hz is well outside harmonica range (max ~2000 Hz)
     const result = detectSingleNote(sineWave(8000, 0.5), SAMPLE_RATE, cVocab);
