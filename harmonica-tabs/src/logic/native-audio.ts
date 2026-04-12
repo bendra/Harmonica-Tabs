@@ -31,6 +31,10 @@ export function createNativeAudioPitchDetector() {
     // which notes to look for without needing to rebuild them in Swift/Kotlin.
     const frequencies = vocabulary.allNotes.map((n) => n.frequency);
     const thresholds = vocabulary.allNotes.map((n) => n.confidenceThreshold);
+    const firstRegisterAliasSources = vocabulary.allNotes.map(
+      (n) => !n.isBend && (n.hole === 1 || (n.hole === 2 && n.technique === 'blow')),
+    );
+    const naturalNotes = vocabulary.allNotes.map((n) => !n.isBend);
 
     // Subscribe before starting so no frames are missed.
     subscription = HarmonicaAudioModule.addListener('onAudioFrame', (event) => {
@@ -41,7 +45,7 @@ export function createNativeAudioPitchDetector() {
       });
     });
 
-    await HarmonicaAudioModule.start(frequencies, thresholds);
+    await HarmonicaAudioModule.start(frequencies, thresholds, firstRegisterAliasSources, naturalNotes);
   }
 
   function stop() {

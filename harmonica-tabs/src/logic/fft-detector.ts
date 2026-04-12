@@ -15,11 +15,10 @@ import { HarmonicaNote, HarmonicaVocabulary } from './harmonica-frequencies';
 const HARMONIC_WEIGHTS = [1.0];
 const FUNDAMENTAL_RECOVERY_HARMONICS = [2, 3];
 const FUNDAMENTAL_RECOVERY_MAX_DEVIATION_CENTS = 35;
-const LOW_REGISTER_RECOVERY_MAX_FREQUENCY = 250;
-const DEFAULT_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO = 0.1;
-const LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO = 0.04;
-const DEFAULT_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE = 1.1;
-const LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE = 1.05;
+const FIRST_REGISTER_ALIAS_MIN_DIRECT_SHARE = 0.045;
+const FIRST_REGISTER_ALIAS_MULTI_HARMONIC_MIN_DIRECT_SHARE = 0.02;
+const FIRST_REGISTER_ALIAS_SIGNIFICANT_SUPPORT_RATIO = 0.5;
+const FIRST_REGISTER_ALIAS_MIN_ADVANTAGE = 1.0;
 
 /**
  * Below this RMS level the signal is treated as silence and detection is skipped.
@@ -51,6 +50,11 @@ export type ChordResult = {
 type WinnerSelection = {
   noteIndex: number;
   supportScore: number;
+};
+
+type HarmonicFamilySupport = {
+  supportScore: number;
+  harmonicSupportCount: number;
 };
 
 /**
@@ -97,20 +101,41 @@ function isNearHarmonic(baseFrequency: number, candidateFrequency: number, harmo
   return Math.abs(centsBetween(candidateFrequency, expectedFrequency)) <= FUNDAMENTAL_RECOVERY_MAX_DEVIATION_CENTS;
 }
 
-function isLowRegisterRecoveryCandidate(note: HarmonicaNote): boolean {
-  return !note.isBend && note.frequency <= LOW_REGISTER_RECOVERY_MAX_FREQUENCY;
+function isFirstRegisterAliasSourceCandidate(note: HarmonicaNote): boolean {
+  if (note.isBend) {
+    return false;
+  }
+
+  return note.hole === 1 || (note.hole === 2 && note.technique === 'blow');
 }
 
-function getFundamentalRecoveryMinRatio(note: HarmonicaNote): number {
-  return isLowRegisterRecoveryCandidate(note)
-    ? LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO
-    : DEFAULT_FUNDAMENTAL_RECOVERY_MIN_FUNDAMENTAL_RATIO;
-}
-
-function getFundamentalRecoveryMinAdvantage(note: HarmonicaNote): number {
-  return isLowRegisterRecoveryCandidate(note)
-    ? LOW_REGISTER_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE
-    : DEFAULT_FUNDAMENTAL_RECOVERY_MIN_ADVANTAGE;
+function buildNaturalHarmonicFamilySupport(
+  baseIndex: number,
+  baseNote: HarmonicaNote,
+  notes: HarmonicaNote[],
+  scores: number[],
+): HarmonicFamilySupport {
+  const baseScore = scores[baseIndex];
+  let supportScore = 0;
+  let harmonicSupportCount = 0;
+  for (let index = 0; index < notes.length; index++) {
+    const note = notes[index];
+    if (note.isBend) continue;
+    if (note.frequency === baseNote.frequency) {
+      supportScore += scores[index];
+      continue;
+    }
+    const supportsBase = FUNDAMENTAL_RECOVERY_HARMONICS.some((harmonic) =>
+      isNearHarmonic(baseNote.frequency, note.frequency, harmonic),
+    );
+    if (supportsBase) {
+      supportScore += scores[index];
+      if (scores[index] >= baseScore * FIRST_REGISTER_ALIAS_SIGNIFICANT_SUPPORT_RATIO) {
+        harmonicSupportCount += 1;
+      }
+    }
+  }
+  return { supportScore, harmonicSupportCount };
 }
 
 /**
@@ -121,41 +146,44 @@ function getFundamentalRecoveryMinAdvantage(note: HarmonicaNote): number {
  * while still requiring a meaningful amount of true fundamental energy before
  * we trust the lower note.
  */
-function chooseWinningNote(notes: HarmonicaNote[], scores: number[]): WinnerSelection {
+function chooseWinningNote(notes: HarmonicaNote[], scores: number[], totalScore: number): WinnerSelection {
   let winnerIndex = 0;
   for (let i = 1; i < scores.length; i++) {
     if (scores[i] > scores[winnerIndex]) winnerIndex = i;
   }
 
   const winnerScore = scores[winnerIndex];
+  const winnerNote = notes[winnerIndex];
   let selectedIndex = winnerIndex;
   let selectedSupportScore = winnerScore;
 
   for (let candidateIndex = 0; candidateIndex < winnerIndex; candidateIndex++) {
     const candidateScore = scores[candidateIndex];
     const candidateNote = notes[candidateIndex];
-    const minRatio = getFundamentalRecoveryMinRatio(candidateNote);
-    if (candidateScore < winnerScore * minRatio) {
+    if (!isFirstRegisterAliasSourceCandidate(candidateNote) || winnerNote.isBend) {
       continue;
     }
 
     const winnerLooksLikeHarmonic = FUNDAMENTAL_RECOVERY_HARMONICS.some((harmonic) =>
-      isNearHarmonic(candidateNote.frequency, notes[winnerIndex].frequency, harmonic),
+      isNearHarmonic(candidateNote.frequency, winnerNote.frequency, harmonic),
     );
     if (!winnerLooksLikeHarmonic) continue;
 
-    let familySupportScore = candidateScore;
-    for (let higherIndex = candidateIndex + 1; higherIndex < notes.length; higherIndex++) {
-      if (scores[higherIndex] < candidateScore) continue;
-      const supportsCandidate = FUNDAMENTAL_RECOVERY_HARMONICS.some((harmonic) =>
-        isNearHarmonic(candidateNote.frequency, notes[higherIndex].frequency, harmonic),
-      );
-      if (supportsCandidate) {
-        familySupportScore += scores[higherIndex];
-      }
+    const familySupport = buildNaturalHarmonicFamilySupport(candidateIndex, candidateNote, notes, scores);
+    if (familySupport.harmonicSupportCount === 0) {
+      continue;
     }
 
-    if (familySupportScore < winnerScore * getFundamentalRecoveryMinAdvantage(candidateNote)) {
+    const minDirectShare =
+      familySupport.harmonicSupportCount >= 2
+        ? FIRST_REGISTER_ALIAS_MULTI_HARMONIC_MIN_DIRECT_SHARE
+        : FIRST_REGISTER_ALIAS_MIN_DIRECT_SHARE;
+    if (candidateScore / totalScore < minDirectShare) {
+      continue;
+    }
+
+    const familySupportScore = familySupport.supportScore;
+    if (familySupportScore < selectedSupportScore * FIRST_REGISTER_ALIAS_MIN_ADVANTAGE) {
       continue;
     }
 
@@ -214,7 +242,7 @@ export function detectSingleNote(
   const totalScore = scores.reduce((sum, s) => sum + s, 0);
   if (totalScore === 0) return { frequency: null, confidence: 0, rms };
 
-  const selection = chooseWinningNote(allNotes, scores);
+  const selection = chooseWinningNote(allNotes, scores, totalScore);
   const confidence = selection.supportScore / totalScore;
   const winner = allNotes[selection.noteIndex];
 

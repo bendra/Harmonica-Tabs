@@ -135,6 +135,42 @@ describe('detectSingleNote', () => {
     expect(result.frequency).toBe(g3.frequency);
   });
 
+  it('recovers a low G draw when both -4 and -6 harmonics are stronger', () => {
+    const gVocab = buildHarmonicaVocabulary(7);
+    const a3 = gVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'draw')!;
+    const a4 = gVocab.naturalNotes.find((n) => n.hole === 4 && n.technique === 'draw')!;
+    const e5 = gVocab.naturalNotes.find((n) => n.hole === 6 && n.technique === 'draw')!;
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: a3.frequency, amplitude: 0.12 },
+        { frequency: a4.frequency, amplitude: 0.50 },
+        { frequency: e5.frequency, amplitude: 0.44 },
+      ]),
+      SAMPLE_RATE,
+      gVocab,
+    );
+
+    expect(result.frequency).toBe(a3.frequency);
+  });
+
+  it('recovers a low B blow when its fifth-hole harmonic is stronger', () => {
+    const gVocab = buildHarmonicaVocabulary(7);
+    const b3 = gVocab.naturalNotes.find((n) => n.hole === 2 && n.technique === 'blow')!;
+    const b4 = gVocab.naturalNotes.find((n) => n.hole === 5 && n.technique === 'blow')!;
+    const fs5 = gVocab.naturalNotes.find((n) => n.hole === 7 && n.technique === 'draw')!;
+    const result = detectSingleNote(
+      mixSines([
+        { frequency: b3.frequency, amplitude: 0.12 },
+        { frequency: b4.frequency, amplitude: 0.52 },
+        { frequency: fs5.frequency, amplitude: 0.18 },
+      ]),
+      SAMPLE_RATE,
+      gVocab,
+    );
+
+    expect(result.frequency).toBe(b3.frequency);
+  });
+
   it('keeps a real G4 on a G harmonica from collapsing down when low bleed is present', () => {
     const gVocab = buildHarmonicaVocabulary(7);
     const g3 = gVocab.naturalNotes.find((n) => n.hole === 1 && n.technique === 'blow')!;

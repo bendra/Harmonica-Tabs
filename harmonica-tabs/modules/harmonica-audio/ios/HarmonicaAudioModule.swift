@@ -5,13 +5,14 @@ public class HarmonicaAudioModule: Module {
   private var audioEngine: AVAudioEngine?
   private var targetFrequencies: [Float] = []
   private var confidenceThresholds: [Float] = []
+  private var firstRegisterAliasSources: [Bool] = []
+  private var naturalNotes: [Bool] = []
   private let fundamentalRecoveryHarmonics: [Float] = [2, 3]
   private let fundamentalRecoveryMaxDeviationCents: Float = 35
-  private let lowRegisterRecoveryMaxFrequency: Float = 250
-  private let defaultFundamentalRecoveryMinFundamentalRatio: Float = 0.1
-  private let lowRegisterFundamentalRecoveryMinFundamentalRatio: Float = 0.04
-  private let defaultFundamentalRecoveryMinAdvantage: Float = 1.1
-  private let lowRegisterFundamentalRecoveryMinAdvantage: Float = 1.05
+  private let firstRegisterAliasMinDirectShare: Float = 0.045
+  private let firstRegisterAliasMultiHarmonicMinDirectShare: Float = 0.02
+  private let firstRegisterAliasSignificantSupportRatio: Float = 0.5
+  private let firstRegisterAliasMinAdvantage: Float = 1.0
   private var didLogFrameLength = false
 
   public func definition() -> ModuleDefinition {
@@ -22,9 +23,11 @@ public class HarmonicaAudioModule: Module {
     // Starts microphone capture. Accepts the target frequencies and per-note
     // confidence thresholds from the JS vocabulary so detection runs natively
     // without sending raw PCM across the bridge.
-    AsyncFunction("start") { (frequencies: [Double], thresholds: [Double]) throws -> [String: Any] in
+    AsyncFunction("start") { (frequencies: [Double], thresholds: [Double], firstRegisterAliasSources: [Bool], naturalNotes: [Bool]) throws -> [String: Any] in
       self.targetFrequencies = frequencies.map { Float($0) }
       self.confidenceThresholds = thresholds.map { Float($0) }
+      self.firstRegisterAliasSources = firstRegisterAliasSources
+      self.naturalNotes = naturalNotes
       let sampleRate = try self.startCapture()
       return ["sampleRate": sampleRate]
     }
@@ -110,23 +113,47 @@ public class HarmonicaAudioModule: Module {
     return abs(centsBetween(candidateFrequency, expectedFrequency)) <= fundamentalRecoveryMaxDeviationCents
   }
 
-  private func isLowRegisterRecoveryCandidate(_ frequency: Float) -> Bool {
-    return frequency <= lowRegisterRecoveryMaxFrequency
+  private func isFirstRegisterAliasSourceCandidate(index: Int) -> Bool {
+    if index >= firstRegisterAliasSources.count || !firstRegisterAliasSources[index] {
+      return false
+    }
+
+    return true
   }
 
-  private func getFundamentalRecoveryMinRatio(candidateFrequency: Float) -> Float {
-    return isLowRegisterRecoveryCandidate(candidateFrequency)
-      ? lowRegisterFundamentalRecoveryMinFundamentalRatio
-      : defaultFundamentalRecoveryMinFundamentalRatio
+  private func buildNaturalHarmonicFamilySupport(index: Int, scores: [Float]) -> (supportScore: Float, harmonicSupportCount: Int) {
+    let baseFrequency = targetFrequencies[index]
+    let baseScore = scores[index]
+    var supportScore: Float = 0
+    var harmonicSupportCount = 0
+    for higherIndex in scores.indices {
+      if higherIndex >= naturalNotes.count || !naturalNotes[higherIndex] {
+        continue
+      }
+
+      if targetFrequencies[higherIndex] == baseFrequency {
+        supportScore += scores[higherIndex]
+        continue
+      }
+
+      let supportsBase = fundamentalRecoveryHarmonics.contains { harmonic in
+        isNearHarmonic(
+          baseFrequency: baseFrequency,
+          candidateFrequency: targetFrequencies[higherIndex],
+          harmonic: harmonic
+        )
+      }
+      if supportsBase {
+        supportScore += scores[higherIndex]
+        if scores[higherIndex] >= baseScore * firstRegisterAliasSignificantSupportRatio {
+          harmonicSupportCount += 1
+        }
+      }
+    }
+    return (supportScore, harmonicSupportCount)
   }
 
-  private func getFundamentalRecoveryMinAdvantage(candidateFrequency: Float) -> Float {
-    return isLowRegisterRecoveryCandidate(candidateFrequency)
-      ? lowRegisterFundamentalRecoveryMinAdvantage
-      : defaultFundamentalRecoveryMinAdvantage
-  }
-
-  private func chooseWinningNote(scores: [Float]) -> (noteIndex: Int, supportScore: Float) {
+  private func chooseWinningNote(scores: [Float], totalScore: Float) -> (noteIndex: Int, supportScore: Float) {
     var winnerIndex = 0
     var winnerScore = scores[0]
     for index in 1..<scores.count {
@@ -141,11 +168,11 @@ public class HarmonicaAudioModule: Module {
 
     for candidateIndex in 0..<winnerIndex {
       let candidateScore = scores[candidateIndex]
-      let candidateFrequency = targetFrequencies[candidateIndex]
-      if candidateScore < winnerScore * getFundamentalRecoveryMinRatio(candidateFrequency: candidateFrequency) {
+      if !isFirstRegisterAliasSourceCandidate(index: candidateIndex) || winnerIndex >= naturalNotes.count || !naturalNotes[winnerIndex] {
         continue
       }
 
+      let candidateFrequency = targetFrequencies[candidateIndex]
       let winnerLooksLikeHarmonic = fundamentalRecoveryHarmonics.contains { harmonic in
         isNearHarmonic(
           baseFrequency: candidateFrequency,
@@ -157,25 +184,21 @@ public class HarmonicaAudioModule: Module {
         continue
       }
 
-      var familySupportScore = candidateScore
-      for higherIndex in (candidateIndex + 1)..<scores.count {
-        if scores[higherIndex] < candidateScore {
-          continue
-        }
-
-        let supportsCandidate = fundamentalRecoveryHarmonics.contains { harmonic in
-          isNearHarmonic(
-            baseFrequency: candidateFrequency,
-            candidateFrequency: targetFrequencies[higherIndex],
-            harmonic: harmonic
-          )
-        }
-        if supportsCandidate {
-          familySupportScore += scores[higherIndex]
-        }
+      let familySupport = buildNaturalHarmonicFamilySupport(index: candidateIndex, scores: scores)
+      if familySupport.harmonicSupportCount == 0 {
+        continue
       }
 
-      if familySupportScore < winnerScore * getFundamentalRecoveryMinAdvantage(candidateFrequency: candidateFrequency) {
+      let minDirectShare =
+        familySupport.harmonicSupportCount >= 2
+          ? firstRegisterAliasMultiHarmonicMinDirectShare
+          : firstRegisterAliasMinDirectShare
+      if candidateScore / totalScore < minDirectShare {
+        continue
+      }
+
+      let familySupportScore = familySupport.supportScore
+      if familySupportScore < selectedSupportScore * firstRegisterAliasMinAdvantage {
         continue
       }
 
@@ -210,7 +233,7 @@ public class HarmonicaAudioModule: Module {
     let totalScore = scores.reduce(0, +)
     guard totalScore > 0 else { return (nil, 0, Double(rms)) }
 
-    let selection = chooseWinningNote(scores: scores)
+    let selection = chooseWinningNote(scores: scores, totalScore: totalScore)
     let confidence = Double(selection.supportScore / totalScore)
     guard confidence >= Double(confidenceThresholds[selection.noteIndex]) else {
       return (nil, confidence, Double(rms))

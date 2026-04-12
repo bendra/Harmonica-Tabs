@@ -10,7 +10,12 @@ declare class HarmonicaAudioModule extends NativeModule<HarmonicaAudioModuleEven
    * @param thresholds  - Minimum confidence threshold per frequency (same order).
    * @returns The actual sample rate the hardware is capturing at.
    */
-  start(frequencies: number[], thresholds: number[]): Promise<{ sampleRate: number }>;
+  start(
+    frequencies: number[],
+    thresholds: number[],
+    firstRegisterAliasSources: boolean[],
+    naturalNotes: boolean[],
+  ): Promise<{ sampleRate: number }>;
 
   /** Stops capture and releases audio resources. */
   stop(): void;
