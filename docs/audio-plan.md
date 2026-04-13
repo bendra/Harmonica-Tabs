@@ -53,6 +53,8 @@ Replace autocorrelation with FFT throughout. For each detection frame:
 - Mitigate by checking harmonic series: if note N is strong, down-weight nearby frequencies that could be its harmonics when evaluating higher notes
 - Bent notes excluded from chord mode eliminates the hardest interference cases
 
+*Note added after debug testing (2026-04-12):* Real harmonica signals also produce interference at perfect-fifth intervals (3:2 frequency ratio), not just octave harmonics. See "Known Issues" section for the chord detection implications and the breath-direction filter that addresses most of it.
+
 ### Native module approach
 
 Build a custom Expo native module (new territory, but the right tool):
@@ -188,3 +190,36 @@ This change affects `detectSingleNote()` only. `detectChord()` stays on Goertzel
 ### Phase 3: Re-evaluate Issue 3
 
 After Phase 2, retest E harmonica hole 10 blow. If still failing, investigate per-note threshold or microphone floor adjustments.
+
+---
+
+## Chord Detection: Interference Analysis (updated 2026-04-12)
+
+Debug testing revealed that single harmonica reeds produce energy not just at harmonics (2×, 3×) but also at **perfect-fifth intervals (3/2×)** relative to the fundamental. For example, playing B4 (hole 2 blow on G) causes strong energy at F#5 (≈ 1.5 × B4). This has implications for chord detection, which must distinguish genuine simultaneous notes from acoustic interference.
+
+### The breath-direction filter
+
+The harmonica's physical constraint provides a powerful natural filter: **you can only blow or draw at any given moment, never both simultaneously**. Therefore any real chord is all-blow or all-draw.
+
+Because every note in the vocabulary has a known technique (blow or draw), chord detection can apply this rule:
+
+1. Find all notes above the relative threshold (current behaviour)
+2. Determine breath direction from the dominant note (highest-scoring)
+3. **Discard any detected note whose technique doesn't match** the dominant note's direction
+
+This eliminates the entire category of cross-direction false positives. For example, B4 blow causing F#5 draw to score above threshold would be caught and dropped: B4 is blow, F#5 is draw, directions don't match.
+
+### Residual same-direction interference — eliminated by the adjacency rule
+
+Same-direction interference (e.g., D5 draw on hole 2 → A5 draw on hole 4) is not filterable by breath direction alone. However, standard harmonica chord technique provides a second constraint: **a chord is played by covering a contiguous range of adjacent holes**. You put your mouth over holes 2-3, or 3-4-5, never 2+4 with a gap. (Tongue blocking can produce non-adjacent chords, but this app does not need to support that advanced technique.)
+
+Applying an **adjacency rule** — all detected notes must fall on a consecutive sequence of hole numbers with no gaps — eliminates the D5+A5 false positive: hole 2 and hole 4 are not adjacent. For this false positive to survive the filter, hole 3 draw would also have to score above threshold, which is unlikely unless the player actually has their mouth over all three holes.
+
+### What this means for implementation
+
+When implementing `detectChord()` properly for the Scales view, apply two post-processing filters after the relative-threshold pass:
+
+1. **Breath-direction filter**: discard any note whose technique (blow/draw) doesn't match the dominant note. Uses `HarmonicaNote.technique`, already available in the vocabulary.
+2. **Adjacency filter**: discard any note whose hole number is not part of the largest consecutive run of detected hole numbers. Uses `HarmonicaNote.hole`, already available in the vocabulary.
+
+Together these two filters handle virtually all realistic false positives from Goertzel interference without any frequency-domain tuning.

@@ -4,9 +4,48 @@ import { DetectorSnapshot } from '../logic/transposer-follow';
 import { DetectionCandidate } from '../logic/fft-detector';
 import { createWebAudioPitchDetector } from '../logic/web-audio';
 import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
+import { frequencyToMidi } from '../logic/pitch';
 
 const AUDIO_SIGNAL_HOLD_MS = 400;
 const AUDIO_CONFIDENCE_GATE = 0.2;
+
+/**
+ * Temporal smoothing: how many recent frames to consider, and how many must
+ * agree on the same MIDI note before we commit to reporting it.
+ *
+ * At ~10 frames/sec this is a ~500ms window with a 300ms minimum agreement
+ * time — imperceptible latency for music practice, but enough to suppress
+ * single-frame flips between adjacent notes.
+ */
+const SMOOTHING_WINDOW = 5;
+const SMOOTHING_MIN_VOTES = 3;
+
+/**
+ * Given a ring buffer of recently detected frequencies (null = silence/no
+ * detection), returns the frequency of the most-voted MIDI note if it reaches
+ * the minimum vote count, or null otherwise.
+ *
+ * Comparison is by rounded MIDI number so that tiny frame-to-frame pitch drift
+ * doesn't split votes between two bins for the same note.
+ */
+function smoothedFrequency(buffer: (number | null)[]): number | null {
+  const freqsByMidi = new Map<number, number[]>();
+  for (const freq of buffer) {
+    if (freq === null) continue;
+    const midi = Math.round(frequencyToMidi(freq));
+    if (!freqsByMidi.has(midi)) freqsByMidi.set(midi, []);
+    freqsByMidi.get(midi)!.push(freq);
+  }
+
+  let bestFreqs: number[] = [];
+  for (const freqs of freqsByMidi.values()) {
+    if (freqs.length > bestFreqs.length) bestFreqs = freqs;
+  }
+
+  if (bestFreqs.length < SMOOTHING_MIN_VOTES) return null;
+  // Return the most recent frequency for the winning MIDI.
+  return bestFreqs[bestFreqs.length - 1];
+}
 
 type AudioListeningParams = {
   simHz: number | null;
@@ -27,6 +66,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
   const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
   const isMountedRef = useRef(true);
   const listenSessionRef = useRef(0);
+  const smoothingBufferRef = useRef<(number | null)[]>([]);
 
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -70,6 +110,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     setDetectedRms(0);
     setDetectedCandidates([]);
     setLastDetectedAt(null);
+    smoothingBufferRef.current = [];
 
     function isCurrentListenSession() {
       return isMountedRef.current && listenSessionRef.current === listenSession;
@@ -95,11 +136,20 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
       try {
         await detector.start((update) => {
           if (!isCurrentListenSession()) return;
-          setDetectedFrequency(update.frequency);
+
+          // Push this frame's raw detection into the ring buffer and trim.
+          const buf = smoothingBufferRef.current;
+          buf.push(update.frequency);
+          if (buf.length > SMOOTHING_WINDOW) buf.shift();
+
+          // Only commit to a frequency once it has appeared consistently.
+          const stable = smoothedFrequency(buf);
+
+          setDetectedFrequency(stable);
           setDetectedConfidence(update.confidence);
           setDetectedRms(update.rms);
           if ('candidates' in update) setDetectedCandidates(update.candidates ?? []);
-          if (update.frequency && update.confidence >= AUDIO_CONFIDENCE_GATE) {
+          if (stable && update.confidence >= AUDIO_CONFIDENCE_GATE) {
             setLastDetectedAt(Date.now());
           }
         }, vocabulary);
@@ -123,6 +173,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
   function stopListening() {
     listenSessionRef.current += 1;
     detectorRef.current?.stop();
+    smoothingBufferRef.current = [];
     setIsListening(false);
     setListenSource(null);
     setDetectedFrequency(null);
