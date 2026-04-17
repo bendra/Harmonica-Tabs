@@ -109,7 +109,9 @@ export function buildTabsForPcSet(
   harmonicaPc: number,
   notation: OverbendNotation,
 ): TabGroup[] {
-  const layout = transposeLayout(RICHTER_C_LAYOUT, harmonicaPc);
+  // Keys G–B (pc >= 7) start below C4 on hole 1; transpose down rather than up.
+  const semitones = harmonicaPc >= 7 ? harmonicaPc - 12 : harmonicaPc;
+  const layout = transposeLayout(RICHTER_C_LAYOUT, semitones);
   const tabs: TabToken[] = [];
 
   layout.forEach((hole) => {

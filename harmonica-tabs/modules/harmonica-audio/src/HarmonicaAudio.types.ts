@@ -1,14 +1,12 @@
 /**
- * Payload emitted by the native module for each audio frame processed.
- * Shape matches PitchUpdate in web-audio.ts so both paths feed the same interface.
+ * Payload emitted by the native module for each audio frame.
+ * Contains raw PCM samples; all detection runs in TypeScript.
  */
 export type AudioFrameEventPayload = {
-  /** Frequency of the detected note in Hz, or null if no note detected above threshold. */
-  frequency: number | null;
-  /** 0–1: winner's share of total Goertzel energy across all candidate notes. */
-  confidence: number;
-  /** Root-mean-square energy of the audio frame. */
-  rms: number;
+  /** Raw PCM samples as an array of floats in [-1, 1]. Length is always 4096. */
+  samples: number[];
+  /** Hardware sample rate in Hz (typically 44100 or 48000). */
+  sampleRate: number;
 };
 
 export type HarmonicaAudioModuleEvents = {

@@ -1,5 +1,3 @@
-# Project Guidance for Codex
-
 - This project is didactic; explain best practices as they come up.
 - Prefer simple, beginner-friendly steps and explanations.
 - Keep changes small and incremental.

@@ -69,14 +69,16 @@ describe('buildHarmonicaVocabulary', () => {
   });
 
   describe('transposition', () => {
-    it('G harmonica (harmonicaPc = 7) shifts all frequencies up 7 semitones from C', () => {
+    it('G harmonica (harmonicaPc = 7) shifts all frequencies down 5 semitones from C (same register)', () => {
+      // G harmonicas start at G3 (MIDI 55), one octave below what a naive +7 transpose
+      // would give. The correct offset is 7 - 12 = -5 to stay in the same register.
       const cVocab = buildHarmonicaVocabulary(0);
       const gVocab = buildHarmonicaVocabulary(7);
       expect(gVocab.naturalNotes).toHaveLength(cVocab.naturalNotes.length);
       gVocab.naturalNotes.forEach((gNote, i) => {
         const cNote = cVocab.naturalNotes[i];
-        expect(gNote.midi).toBe(cNote.midi + 7);
-        expect(gNote.frequency).toBeCloseTo(midiToFrequency(cNote.midi + 7), 5);
+        expect(gNote.midi).toBe(cNote.midi - 5);
+        expect(gNote.frequency).toBeCloseTo(midiToFrequency(cNote.midi - 5), 5);
       });
     });
 

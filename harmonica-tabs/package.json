@@ -9,7 +9,8 @@
     "web": "expo start --web",
     "build:web": "expo export -p web",
     "build:netlify": "expo export -p web && node ./scripts/netlify-headers.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "detect-offline": "tsx scripts/detect-offline.ts"
   },
   "dependencies": {
     "expo": "~54.0.33",
@@ -24,7 +25,9 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "node-wav": "^0.0.2",
     "react-test-renderer": "^19.1.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.2",
     "vitest": "^4.0.18"
   },

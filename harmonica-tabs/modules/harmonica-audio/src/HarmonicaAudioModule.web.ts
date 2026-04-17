@@ -7,7 +7,7 @@ import { HarmonicaAudioModuleEvents } from './HarmonicaAudio.types';
  * useAudioListening selects web-audio.ts on Platform.OS === 'web'.
  */
 class HarmonicaAudioModule extends NativeModule<HarmonicaAudioModuleEvents> {
-  async start(_frequencies: number[], _thresholds: number[]): Promise<{ sampleRate: number }> {
+  async start(): Promise<{ sampleRate: number }> {
     throw new Error('HarmonicaAudioModule is not available on web.');
   }
   stop(): void {}

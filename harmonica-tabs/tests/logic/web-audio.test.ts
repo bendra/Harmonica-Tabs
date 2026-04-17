@@ -200,6 +200,7 @@ describe('createWebAudioPitchDetector', () => {
     expect(secondHandler).toHaveBeenCalledTimes(1);
     expect(secondHandler).toHaveBeenCalledWith({
       frequency: null,
+      rawFrequency: null,
       confidence: 0,
       rms: 0,
       candidates: [],

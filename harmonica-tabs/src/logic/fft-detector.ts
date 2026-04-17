@@ -38,6 +38,8 @@ export type DetectionCandidate = {
 export type SingleNoteResult = {
   /** Frequency of the detected note in Hz, or null if none detected. */
   frequency: number | null;
+  /** Raw YIN fundamental in Hz before vocabulary snapping, or null if YIN found nothing. */
+  rawFrequency: number | null;
   /** 0–1: winner's share of total energy across all candidate notes. */
   confidence: number;
   rms: number;
@@ -106,46 +108,132 @@ export function calculateRms(input: Float32Array): number {
 // ---------------------------------------------------------------------------
 // YIN pitch detection — used for single-note detection
 //
-// YIN (de Cheveigné & Kawahara, 2002) works in the time domain. It finds the
-// shortest lag τ at which the signal looks like a shifted copy of itself,
-// which is the fundamental period T. The frequency is then sampleRate / T.
+// YIN (de Cheveigné & Kawahara, 2002) finds the fundamental period T as the
+// lag τ where the cumulative mean normalized difference (CMND) first dips
+// below a threshold. The frequency is then sampleRate / T.
 //
-// The key innovation over plain autocorrelation is the cumulative mean
-// normalized difference (CMND). Plain autocorrelation has strong peaks at
-// sub-multiples of the period (octave errors). The CMND normalises each lag
-// by the running mean of all shorter lags, which suppresses those sub-octave
-// peaks so the true fundamental always wins.
+// This implementation computes the YIN difference function via FFT-based
+// circular autocorrelation (the "yinfft" variant from the aubio library)
+// rather than brute-force time-domain summation. The FFT path gives each
+// spectral component a balanced, global contribution to the autocorrelation.
+// This matters for harmonica reeds: the strong 2nd harmonic inflates the
+// time-domain CMND running sum at short lags, making CMND > 1 at the true
+// fundamental — geometrically preventing detection. The FFT path avoids that
+// inflation because the autocorrelation is computed globally across the
+// spectrum, not via a sequential running mean.
 // ---------------------------------------------------------------------------
 
 /**
- * CMND threshold: a lag must produce a value below this to be accepted as the
- * fundamental period. Lower = stricter (fewer false positives, may miss quiet
- * or noisy notes). 0.10 is the value recommended in the YIN paper for music.
+ * CMND threshold: a lag is accepted as the fundamental period when its CMND
+ * first dips below this value. Lower = stricter (fewer false positives at the
+ * cost of more missed notes). 0.15 works well with the FFT-based difference
+ * function; the FFT path keeps CMND bounded so this threshold is reliably reached.
  */
-const YIN_THRESHOLD = 0.10;
+const YIN_THRESHOLD = 0.15;
 
 /**
- * Step 1 of YIN: compute the difference function.
+ * In-place radix-2 Cooley-Tukey FFT (or inverse FFT).
  *
- *   d[τ] = Σ_{j=0}^{W-1} (x[j] − x[j+τ])²
+ * `re` and `im` must have the same length, which must be a power of 2.
+ * For the forward transform pass `inverse = false`; for the inverse pass
+ * `inverse = true`. The inverse transform is not normalized — the caller
+ * divides by N to obtain the standard IFFT result.
  *
- * d[τ] is small when the signal looks like itself shifted by τ samples —
- * i.e., when τ is close to the signal's repeating period.
+ * The algorithm:
+ *   1. Bit-reversal permutation reorders samples for in-place butterfly passes.
+ *   2. Log₂(N) butterfly stages build up the DFT from length-2 sub-problems.
  *
- * W (the integration window) is the first half of the buffer, so both x[j]
- * and x[j+τ] are in-bounds for all τ up to maxLag.
+ * Only used internally by yinDifferenceFFT.
  */
-function yinDifference(input: Float32Array, maxLag: number): Float32Array {
-  const W = Math.floor(input.length / 2);
-  const d = new Float32Array(maxLag + 1);
-  // d[0] = 0 always (signal is identical to itself with zero shift).
-  for (let tau = 1; tau <= maxLag; tau++) {
-    let sum = 0;
-    for (let j = 0; j < W; j++) {
-      const delta = input[j] - input[j + tau];
-      sum += delta * delta;
+function complexFFT(re: Float32Array, im: Float32Array, inverse: boolean): void {
+  const N = re.length;
+  // Bit-reversal permutation
+  for (let i = 1, j = 0; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let tmp = re[i]; re[i] = re[j]; re[j] = tmp;
+      tmp = im[i]; im[i] = im[j]; im[j] = tmp;
     }
-    d[tau] = sum;
+  }
+  // Butterfly passes
+  for (let len = 2; len <= N; len <<= 1) {
+    const halfLen = len >> 1;
+    const ang = (inverse ? 2 : -2) * Math.PI / len;
+    const wBaseRe = Math.cos(ang);
+    const wBaseIm = Math.sin(ang);
+    for (let i = 0; i < N; i += len) {
+      let wRe = 1, wIm = 0;
+      for (let j = 0; j < halfLen; j++) {
+        const uRe = re[i + j];
+        const uIm = im[i + j];
+        const vRe = re[i + j + halfLen] * wRe - im[i + j + halfLen] * wIm;
+        const vIm = re[i + j + halfLen] * wIm + im[i + j + halfLen] * wRe;
+        re[i + j]           = uRe + vRe;
+        im[i + j]           = uIm + vIm;
+        re[i + j + halfLen] = uRe - vRe;
+        im[i + j + halfLen] = uIm - vIm;
+        const nextWRe = wRe * wBaseRe - wIm * wBaseIm;
+        wIm = wRe * wBaseIm + wIm * wBaseRe;
+        wRe = nextWRe;
+      }
+    }
+  }
+}
+
+/**
+ * Step 1 of YIN (FFT variant): compute the difference function via circular
+ * autocorrelation.
+ *
+ * The relationship between the YIN difference function d[τ] and the circular
+ * autocorrelation r[τ] is:
+ *
+ *   d[τ] = 2 × (r[0] − r[τ])
+ *
+ * r[τ] is computed as IFFT(|X(f)|²) where X(f) = FFT(windowed input).
+ * A Hann window is applied first to reduce spectral leakage.
+ *
+ * Why this is better than the time-domain formula for harmonica audio:
+ * In time-domain YIN, d[τ] = Σ(x[j]−x[j+τ])². When a strong 2nd harmonic
+ * (e.g. G6 when playing G5) makes d very small at short lags, the CMND
+ * running sum becomes tiny, inflating CMND above 1 at the true fundamental's
+ * lag — making detection impossible regardless of threshold. The FFT
+ * autocorrelation avoids this: r[τ] at the fundamental lag receives a positive
+ * contribution from every partial that is also periodic there (including the
+ * 2nd harmonic, which is periodic at twice its own period = the fundamental),
+ * keeping d[τ] and CMND in a physically meaningful range.
+ */
+function yinDifferenceFFT(input: Float32Array, maxLag: number): Float32Array {
+  const N = input.length;
+
+  // Apply Hann window to the input, place in complex arrays.
+  const re = new Float32Array(N);
+  const im = new Float32Array(N); // stays zero — input is real
+  for (let i = 0; i < N; i++) {
+    const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+    re[i] = input[i] * w;
+  }
+
+  // Forward FFT: re/im now hold X(f).
+  complexFFT(re, im, false);
+
+  // Power spectrum: |X(f)|² — replace each bin, zero the imaginary part.
+  for (let f = 0; f < N; f++) {
+    re[f] = re[f] * re[f] + im[f] * im[f];
+    im[f] = 0;
+  }
+
+  // Inverse FFT: re now holds N × r[τ] (circular autocorrelation, un-normalised).
+  complexFFT(re, im, true);
+
+  // r[0] = total windowed signal energy (after dividing by N).
+  const r0 = re[0] / N;
+
+  // d[τ] = 2 × (r[0] − r[τ]).  Clamped to ≥ 0 to absorb FFT round-off.
+  const d = new Float32Array(maxLag + 1);
+  for (let tau = 1; tau <= maxLag; tau++) {
+    d[tau] = Math.max(0, 2 * (r0 - re[tau] / N));
   }
   return d;
 }
@@ -156,10 +244,9 @@ function yinDifference(input: Float32Array, maxLag: number): Float32Array {
  *   d'[0] = 1  (by definition)
  *   d'[τ] = d[τ] × τ / Σ_{j=1}^{τ} d[j]   for τ > 0
  *
- * As τ grows the denominator (running mean × τ) grows, pulling the normalized
- * value up for sub-octave lags. The true period produces the first dip below
- * the threshold; a 2× sub-octave lag produces a shallower dip that the
- * threshold rejects.
+ * Normalizing by the running mean makes the threshold scale-invariant and
+ * keeps values in [0, 1] as long as the difference function is well-behaved.
+ * The FFT-based d[τ] above ensures this property holds for real harmonica audio.
  */
 function yinCmnd(d: Float32Array): Float32Array {
   const cmnd = new Float32Array(d.length);
@@ -190,7 +277,7 @@ function parabolicInterpolation(cmnd: Float32Array, tau: number): number {
 }
 
 /**
- * Full YIN pitch detector.
+ * Full YIN pitch detector (FFT variant).
  *
  * Returns the detected fundamental frequency in Hz, or null if the signal is
  * not sufficiently periodic (silence, noise, or a pitch outside the requested
@@ -212,10 +299,9 @@ function yinDetect(
   const minLag = Math.floor(sampleRate / maxFreq); // shortest period = highest freq
   const maxLag = Math.floor(sampleRate / minFreq); // longest  period = lowest  freq
 
-  // Need at least 2× maxLag samples so both x[j] and x[j+τ] are in-bounds.
   if (input.length < maxLag * 2) return null;
 
-  const d = yinDifference(input, maxLag);
+  const d = yinDifferenceFFT(input, maxLag);
   const cmnd = yinCmnd(d);
 
   // Step 3: find the first lag ≥ minLag where CMND dips below the threshold,
@@ -225,8 +311,7 @@ function yinDetect(
       while (tau + 1 <= maxLag && cmnd[tau + 1] < cmnd[tau]) {
         tau++;
       }
-      const refined = parabolicInterpolation(cmnd, tau);
-      return sampleRate / refined;
+      return sampleRate / parabolicInterpolation(cmnd, tau);
     }
   }
 
@@ -266,11 +351,11 @@ export function detectSingleNote(
 ): SingleNoteResult {
   const rms = calculateRms(input);
   if (rms < MIN_RMS) {
-    return { frequency: null, confidence: 0, rms, candidates: [] };
+    return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [] };
   }
 
   const { allNotes } = vocabulary;
-  if (allNotes.length === 0) return { frequency: null, confidence: 0, rms, candidates: [] };
+  if (allNotes.length === 0) return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [] };
 
   // Derive frequency bounds from the actual vocabulary so YIN's lag search
   // covers exactly the notes this harmonica can play — no more, no less.
@@ -281,7 +366,7 @@ export function detectSingleNote(
   // Detect the fundamental frequency using YIN.
   const fundamental = yinDetect(input, sampleRate, minFreq, maxFreq);
   if (fundamental === null) {
-    return { frequency: null, confidence: 0, rms, candidates: [] };
+    return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [] };
   }
 
   // Convert to fractional MIDI for cent-accurate distance comparisons.
@@ -298,12 +383,12 @@ export function detectSingleNote(
     }
   }
 
-  if (nearestNote === null) return { frequency: null, confidence: 0, rms, candidates: [] };
+  if (nearestNote === null) return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [] };
 
   // Reject if the pitch is too far from any vocabulary note.
   const tolerance = centsTolerance(nearestNote.confidenceThreshold);
   if (nearestCents > tolerance) {
-    return { frequency: null, confidence: 0, rms, candidates: [] };
+    return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [] };
   }
 
   // Confidence: 1.0 = exactly on pitch, 0.0 = at the edge of the window.
@@ -320,7 +405,7 @@ export function detectSingleNote(
         .slice(0, 3)
     : [];
 
-  return { frequency: nearestNote.frequency, confidence, rms, candidates };
+  return { frequency: nearestNote.frequency, rawFrequency: fundamental, confidence, rms, candidates };
 }
 
 /**

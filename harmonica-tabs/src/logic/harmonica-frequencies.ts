@@ -60,7 +60,10 @@ const TECHNIQUE_RANK: Record<HarmonicaNote['technique'], number> = {
  * keeping the entry with the easiest technique and lowest confidence threshold.
  */
 export function buildHarmonicaVocabulary(harmonicaPc: number): HarmonicaVocabulary {
-  const layout = transposeLayout(RICHTER_C_LAYOUT, harmonicaPc);
+  // Keys G–B (pc >= 7) start below C4 on hole 1, so we transpose down into the
+  // correct octave rather than up. G (7) → -5, Ab (8) → -4, … B (11) → -1.
+  const semitones = harmonicaPc >= 7 ? harmonicaPc - 12 : harmonicaPc;
+  const layout = transposeLayout(RICHTER_C_LAYOUT, semitones);
   const candidates: HarmonicaNote[] = [];
 
   layout.forEach((hole) => {
