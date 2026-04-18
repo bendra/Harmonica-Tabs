@@ -1,5 +1,6 @@
-git # TODO / Next Steps
+# TODO / Next Steps
 
+- Implement background noise filter (auto-calibration at listen start + properties toggle) — see `docs/NOISE_FILTER_PLAN.md`.
 - Revisit tab ordering and octave handling if alternate tunings are added.
 - Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.

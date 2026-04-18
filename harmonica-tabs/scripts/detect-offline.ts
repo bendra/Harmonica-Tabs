@@ -77,13 +77,23 @@ import { buildHarmonicaVocabulary } from '../src/logic/harmonica-frequencies';
 import { detectSingleNote } from '../src/logic/fft-detector';
 
 const FRAME_SIZE = 4096;
-const AIFC_DIR = path.resolve(process.cwd(), '../aifc');
+const SAMPLES_DIR = path.resolve(process.cwd(), '../sound-samples');
 
-// Map folder name → pitch class (semitones above C)
+// Map folder name → pitch class (semitones above C) for all 12 keys.
+// Both enharmonic spellings are listed so recordings using either name work.
 const KEY_PC: Record<string, number> = {
-  g_harmonica: 7,
-  c_harmonica: 0,
-  e_harmonica: 4,
+  c_harmonica:  0,
+  db_harmonica: 1,  cs_harmonica: 1,
+  d_harmonica:  2,
+  eb_harmonica: 3,  ds_harmonica: 3,
+  e_harmonica:  4,
+  f_harmonica:  5,
+  gb_harmonica: 6,  fs_harmonica: 6,
+  g_harmonica:  7,
+  ab_harmonica: 8,  gs_harmonica: 8,
+  a_harmonica:  9,
+  bb_harmonica: 10, as_harmonica: 10,
+  b_harmonica:  11,
 };
 
 function freqToMidi(freq: number): number {
@@ -154,10 +164,21 @@ function goertzel(frame: Float32Array, freq: number, sampleRate: number): number
 function main() {
   const results: FileResult[] = [];
 
-  for (const harmKey of ['g_harmonica', 'c_harmonica', 'e_harmonica']) {
+  // Discover all harmonica folders that exist on disk and are in the key map.
+  const availableKeys = fs.existsSync(SAMPLES_DIR)
+    ? fs.readdirSync(SAMPLES_DIR).filter(d => KEY_PC[d] !== undefined)
+    : [];
+
+  if (availableKeys.length === 0) {
+    console.warn(`No harmonica folders found in: ${SAMPLES_DIR}`);
+    console.warn('Run scripts/record-samples.sh to create recordings.');
+    return;
+  }
+
+  for (const harmKey of availableKeys.sort()) {
     const pc = KEY_PC[harmKey];
     const vocabulary = buildHarmonicaVocabulary(pc);
-    const harmDir = path.join(AIFC_DIR, harmKey, 'single_notes');
+    const harmDir = path.join(SAMPLES_DIR, harmKey, 'single_notes');
 
     if (!fs.existsSync(harmDir)) {
       console.warn(`Directory not found: ${harmDir}`);
@@ -228,7 +249,11 @@ function main() {
   }
 
   // --- Summary table ---
+  // correct/wrong_oct/wrong_note are % of active (non-silent) frames.
+  // silent is % of total frames.
   console.log('\n=== Offline Detector Results ===\n');
+  console.log('  (correct/wrong columns = % of active frames; silent = % of total)');
+  console.log();
   const hdr = [
     col('key', 4), col('take', 5), col('hole', 5), col('dir', 5),
     col('expected', 14),
@@ -239,20 +264,24 @@ function main() {
   console.log('-'.repeat(hdr.length));
 
   for (const r of results) {
+    const active = r.totalFrames - r.counts.silent;
     const row = [
       col(r.harmonica, 4), col(r.take, 5), col(r.hole, 5), col(r.dir, 5),
       col(`${r.expectedNote} ${r.expectedHz.toFixed(1)}Hz`, 14),
-      col(pct(r.counts.correct, r.totalFrames), 8, true),
-      col(pct(r.counts.wrong_octave, r.totalFrames), 10, true),
-      col(pct(r.counts.wrong_note, r.totalFrames), 11, true),
+      col(pct(r.counts.correct, active), 8, true),
+      col(pct(r.counts.wrong_octave, active), 10, true),
+      col(pct(r.counts.wrong_note, active), 11, true),
       col(pct(r.counts.silent, r.totalFrames), 7, true),
       col(r.totalFrames, 7, true),
     ].join(' ');
     console.log(row);
   }
 
-  // --- Per-frame detail for problem files (wrong_octave > 10%) ---
-  const problemFiles = results.filter(r => r.counts.wrong_octave / r.totalFrames > 0.10);
+  // --- Per-frame detail for problem files (wrong_octave > 10% of active frames) ---
+  const problemFiles = results.filter(r => {
+    const active = r.totalFrames - r.counts.silent;
+    return active > 0 && r.counts.wrong_octave / active > 0.10;
+  });
   if (problemFiles.length > 0) {
     console.log('\n=== Per-frame detail: files with >10% wrong octave ===');
     for (const r of problemFiles) {
@@ -273,7 +302,8 @@ function main() {
 
   // --- Summary stats per harmonica ---
   console.log('\n=== Summary by harmonica ===\n');
-  for (const key of ['G', 'C', 'E']) {
+  const summaryKeys = [...new Set(results.map(r => r.harmonica))].sort();
+  for (const key of summaryKeys) {
     const rows = results.filter(r => r.harmonica === key);
     if (rows.length === 0) continue;
     const total = rows.reduce((s, r) => s + r.totalFrames, 0);
@@ -281,7 +311,8 @@ function main() {
     const wrongOct = rows.reduce((s, r) => s + r.counts.wrong_octave, 0);
     const wrongNote = rows.reduce((s, r) => s + r.counts.wrong_note, 0);
     const silent = rows.reduce((s, r) => s + r.counts.silent, 0);
-    console.log(`${key}: ${pct(correct, total)} correct, ${pct(wrongOct, total)} wrong octave, ${pct(wrongNote, total)} wrong note, ${pct(silent, total)} silent  (${total} frames across ${rows.length} files)`);
+    const active = total - silent;
+    console.log(`${key}: ${pct(correct, active)} correct, ${pct(wrongOct, active)} wrong octave, ${pct(wrongNote, active)} wrong note, ${pct(silent, total)} silent  (${total} frames across ${rows.length} files)`);
   }
   console.log();
 
@@ -296,7 +327,7 @@ function main() {
   console.log(specHdr);
   console.log('-'.repeat(specHdr.length));
 
-  const gHarmDir = path.join(AIFC_DIR, 'g_harmonica', 'single_notes');
+  const gHarmDir = path.join(SAMPLES_DIR, 'g_harmonica', 'single_notes');
   if (!fs.existsSync(gHarmDir)) {
     console.log('G harmonica directory not found — skipping spectral analysis.');
   } else {
