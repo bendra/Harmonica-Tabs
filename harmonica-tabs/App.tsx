@@ -375,6 +375,7 @@ export default function App() {
     listenError,
     listenSource,
     detectedFrequency,
+    detectedRawFrequency,
     detectedConfidence,
     detectedRms,
     detectedCandidates,
@@ -518,7 +519,8 @@ export default function App() {
         <Text style={styles.debugPanelLabel}>Debug Panel</Text>
         <Text style={styles.debugText}>
           RMS: {detectedRms.toFixed(4)} · Conf: {detectedConfidence.toFixed(2)} · Hz:{' '}
-          {detectedFrequency ? detectedFrequency.toFixed(1) : '—'}
+          {detectedFrequency ? detectedFrequency.toFixed(1) : '—'} · Raw:{' '}
+          {detectedRawFrequency ? detectedRawFrequency.toFixed(1) : '—'}
         </Text>
         <Text style={styles.debugText}>
           Last detect: {lastDetectedAt ? `${now - lastDetectedAt}ms ago` : '—'} · Status: {transposerFollowEvaluation.status}

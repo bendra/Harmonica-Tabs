@@ -14,16 +14,19 @@ type PitchUpdateHandler = (update: SingleNoteResult) => void;
  */
 export function createNativeAudioPitchDetector() {
   let subscription: ReturnType<typeof HarmonicaAudioModule.addListener> | null = null;
+  let currentVocabulary: HarmonicaVocabulary | null = null;
 
   function isSupported(): boolean {
     return true;
   }
 
   async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary) {
+    currentVocabulary = vocabulary;
     // Subscribe before starting so no frames are missed.
     subscription = HarmonicaAudioModule.addListener('onAudioFrame', (event) => {
+      if (!currentVocabulary) return;
       const samples = new Float32Array(event.samples);
-      const result = detectSingleNote(samples, event.sampleRate, vocabulary);
+      const result = detectSingleNote(samples, event.sampleRate, currentVocabulary);
       onUpdate(result);
     });
 
@@ -35,7 +38,12 @@ export function createNativeAudioPitchDetector() {
     HarmonicaAudioModule.stop();
     subscription?.remove();
     subscription = null;
+    currentVocabulary = null;
   }
 
-  return { isSupported, start, stop };
+  function updateVocabulary(vocabulary: HarmonicaVocabulary) {
+    currentVocabulary = vocabulary;
+  }
+
+  return { isSupported, start, stop, updateVocabulary };
 }

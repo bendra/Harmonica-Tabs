@@ -6,6 +6,7 @@ import { HarmonicaVocabulary } from './harmonica-frequencies';
  */
 type PitchUpdate = {
   frequency: number | null;
+  rawFrequency: number | null;
   confidence: number;
   rms: number;
 };
@@ -165,7 +166,7 @@ export function createWebAudioPitchDetector() {
         resources.stream.getTracks?.().forEach((track: any) => {
           track.onended = () => {
             if (generation !== startGeneration || !running) return;
-            onUpdateRef?.({ frequency: null, confidence: 0, rms: 0 });
+            onUpdateRef?.({ frequency: null, rawFrequency: null, confidence: 0, rms: 0 });
           };
         });
 
@@ -226,5 +227,9 @@ export function createWebAudioPitchDetector() {
     void cleanupResources(resources, { clearCallback: false, resetGlobal: false });
   }
 
-  return { isSupported, start, stop };
+  function updateVocabulary(vocabulary: HarmonicaVocabulary) {
+    currentVocabulary = vocabulary;
+  }
+
+  return { isSupported, start, stop, updateVocabulary };
 }

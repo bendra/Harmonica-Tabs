@@ -60,6 +60,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
   const [detectedFrequency, setDetectedFrequency] = useState<number | null>(null);
   const [detectedConfidence, setDetectedConfidence] = useState(0);
   const [detectedRms, setDetectedRms] = useState(0);
+  const [detectedRawFrequency, setDetectedRawFrequency] = useState<number | null>(null);
   const [detectedCandidates, setDetectedCandidates] = useState<DetectionCandidate[]>([]);
   const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
 
@@ -82,6 +83,15 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
       detectorRef.current?.stop();
     };
   }, []);
+
+  // When the harmonica key changes while listening is active, push the new
+  // vocabulary to the detector immediately. Without this, the detector keeps
+  // using the vocabulary from when Listen was first pressed, which means notes
+  // below the original harmonica's frequency range are never searched for.
+  useEffect(() => {
+    if (!isListening) return;
+    (detectorRef.current as any)?.updateVocabulary?.(vocabulary);
+  }, [vocabulary, isListening]);
 
   const audioSnapshot = useMemo<DetectorSnapshot>(() => {
     const now = Date.now();
@@ -106,6 +116,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     listenSessionRef.current = listenSession;
     setListenError(null);
     setDetectedFrequency(null);
+    setDetectedRawFrequency(null);
     setDetectedConfidence(0);
     setDetectedRms(0);
     setDetectedCandidates([]);
@@ -148,7 +159,8 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
           setDetectedFrequency(stable);
           setDetectedConfidence(update.confidence);
           setDetectedRms(update.rms);
-          if ('candidates' in update) setDetectedCandidates(update.candidates ?? []);
+          if ('rawFrequency' in update) setDetectedRawFrequency((update as any).rawFrequency ?? null);
+          if ('candidates' in update) setDetectedCandidates((update as any).candidates ?? []);
           if (stable && update.confidence >= AUDIO_CONFIDENCE_GATE) {
             setLastDetectedAt(Date.now());
           }
@@ -177,6 +189,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     setIsListening(false);
     setListenSource(null);
     setDetectedFrequency(null);
+    setDetectedRawFrequency(null);
     setDetectedConfidence(0);
     setDetectedRms(0);
     setDetectedCandidates([]);
@@ -188,6 +201,7 @@ export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) 
     listenError,
     listenSource,
     detectedFrequency,
+    detectedRawFrequency,
     detectedConfidence,
     detectedRms,
     detectedCandidates,

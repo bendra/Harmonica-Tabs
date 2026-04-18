@@ -105,6 +105,24 @@ describe('detectSingleNote', () => {
     }
   });
 
+  it('detects G3 (G harmonica hole 1 blow) with G vocab but not with C vocab', () => {
+    // Regression: when listening started on C harmonica and the user switched to G,
+    // the detector kept the C vocabulary. G3 (196 Hz) is below C harmonica's lowest
+    // note (C4 = 261 Hz), so it falls outside the C-vocab YIN lag search range and
+    // is never found. The same note must be detectable when the correct vocabulary
+    // is used.
+    const gVocab = buildHarmonicaVocabulary(7);
+    const g3 = gVocab.naturalNotes.find((n) => n.midi === 55)!; // G3, hole 1 blow
+    const buf = sineWave(g3.frequency);
+
+    const withGVocab = detectSingleNote(buf, SAMPLE_RATE, gVocab);
+    expect(withGVocab.frequency).not.toBeNull();
+
+    const withCVocab = detectSingleNote(buf, SAMPLE_RATE, cVocab);
+    expect(withCVocab.frequency).toBeNull();
+    expect(withCVocab.confidence).toBe(0);
+  });
+
   it('returns null for a frequency far outside the vocabulary', () => {
     // 8000 Hz is well outside harmonica range (max ~2000 Hz)
     const result = detectSingleNote(sineWave(8000, 0.5), SAMPLE_RATE, cVocab);
