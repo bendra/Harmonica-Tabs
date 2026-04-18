@@ -11,7 +11,7 @@ Use this document to capture implementation decisions and rationale.
    - Answer: JS only for now
 
 3. Pitch detection algorithm (YIN vs autocorrelation vs other):
-   - Answer: Try Autocorrelation and see if that's good enough. then re-evaluate if neccesary
+   - Answer: FFT-based YIN (`yinfft` variant, as used by the aubio library). Autocorrelation was the original choice but was replaced after testing showed it failed on harmonica audio: strong 2nd harmonics inflate the time-domain running sum at the true fundamental's lag, pushing CMND above 1 and making detection impossible. The FFT-based autocorrelation avoids this — the autocorrelation is computed globally across the spectrum so harmonics reinforce rather than suppress the fundamental. Goertzel is still used for chord detection (where scoring multiple frequencies simultaneously is the goal).
 
 4. Frequency-to-tab mapping details (tolerance, tie-breaking, between-tabs behavior):
    - Answer: Place the caret between the two neighboring tabs by pitch and position it proportionally using cents (log frequency), not linear Hz. If the detected frequency falls between `f_low` and `f_high`, compute `t = (c - c_low) / (c_high - c_low)` where `c = 1200 * log2(f / 440) + 6900`, and place the caret at `t` between those two chips. If below/above the displayed range, pin to the ends. If multiple tabs share a pitch, treat them as one stop for caret placement.

@@ -123,73 +123,38 @@ This sequence means steps 1–3 are pure JS/web work and can be done and tested 
 
 ---
 
-## Status: Implemented — and revised based on testing (2026-04-12)
+## Status: Implemented and stable (updated 2026-04-17)
 
-Steps 1–5 above were completed. The result: `harmonica-frequencies.ts`, `fft-detector.ts`, `native-audio.ts`, and the native iOS/Android modules all exist and work. The Goertzel algorithm (an efficient single-bin DFT, equivalent to "FFT for one frequency at a time") was chosen for both modes and is implemented consistently in TypeScript, Swift, and Kotlin.
+Steps 1–5 above were completed. `harmonica-frequencies.ts`, `fft-detector.ts`, `native-audio.ts`, and the native iOS/Android modules all exist and work.
 
-Testing across C, G, and E harmonicas revealed two failure modes that need to be addressed before this can be considered production-ready. The issues and proposed fixes are described below.
+The original plan used Goertzel for single-note detection. After testing this was replaced with FFT-based YIN (`detectSingleNote`). Goertzel remains for chord detection (`detectChord`), where scoring multiple frequencies simultaneously is the goal.
 
----
-
-## Known Issues and Proposed Fixes
-
-### Issue 1: Octave errors (G harmonica, systematic — worst on native)
-
-**What happens**: On the G harmonica, every note from hole 4 upward is detected as the same pitch class one octave too low. Hole 4 blow (G5 = 784 Hz) registers as hole 1 blow (G4 = 392 Hz), hole 5 blow (B5) registers as hole 2 blow (B4), and so on. The shift is exact and consistent.
-
-**Why**: The original plan chose Goertzel/FFT over autocorrelation partly because "autocorrelation finds one fundamental." That reasoning is correct for chord detection. But for single-note detection it has a blind spot: Goertzel scores each known frequency independently and picks the winner. It does not understand that G4 and G5 are related. Real harmonica reeds — especially at higher frequencies — can vibrate not just at their fundamental but also at a sub-harmonic (half the frequency). When a G5 reed produces some energy at G4, the Goertzel filter at G4 can outscore G5 and win. The algorithm is not broken; it is being given a harder signal than the original design assumed.
-
-Note: the harmonic interference handling described in "Architecture" above was never implemented. The code comment in `fft-detector.ts` actually explains why harmonics were deliberately removed — to prevent a *different* octave error (harmonic energy from a lower note boosting a higher note's score). The sub-harmonic problem is the mirror image of that, and Goertzel has no way to resolve it.
-
-**Fix: replace Goertzel with YIN for single-note detection.**
-
-The YIN algorithm (used by the aubio library and every serious open-source tuner, including [qiuxiang/tuner](https://github.com/qiuxiang/tuner)) works in the time domain rather than the frequency domain. It finds the shortest repeating period in the waveform — which is always the true fundamental, not a sub-harmonic. Its key step, the cumulative mean normalized difference (CMND), specifically suppresses sub-octave false peaks. It can be implemented in ~80 lines and ported to Swift and Kotlin.
-
-The architecture after this change:
-```
-audio frame
-  → YIN → fundamental frequency (e.g. 784 Hz)
-  → find nearest note in vocabulary (e.g. G5 = hole 4 blow)
-  → confidence = how close the YIN frequency is to that note (in cents)
-  → apply per-note threshold
-  → emit result
-```
-
-This change affects `detectSingleNote()` only. `detectChord()` stays on Goertzel — Goertzel is genuinely the right tool for chord detection (it can score multiple frequencies simultaneously), and YIN is a single-pitch estimator.
-
-### Issue 2: "Flitting" between notes (C harmonica hole 1, G harmonica lower holes)
-
-**What happens**: Hole 1 on C oscillates between holes 1 and 4 (C4 and C5) frame-by-frame. Some lower G harmonica holes flicker between neighbors.
-
-**Why**: Each frame is detected independently. When the signal is at a borderline confidence level, adjacent frames can pick different winners. The existing `AUDIO_SIGNAL_HOLD_MS = 400` holds the *last accepted* detection visible on screen, but does not stabilize detection itself.
-
-**Fix: add temporal smoothing upstream of the UI.** Maintain a short ring buffer (e.g. 5 frames) and only commit to a note when it appears in at least 3 of the last 5 frames. This adds ~50 ms of latency at typical frame rates, which is imperceptible for music practice.
-
-### Issue 3: E harmonica hole 10 blow never registers
-
-**What happens**: The highest note on an E harmonica (E6 ≈ 1319 Hz) is never detected on any platform.
-
-**Why**: Likely a combination of microphone sensitivity at the upper edge of its response curve, and the confidence voting becoming less reliable when fewer notes compete in that frequency range. This should be re-evaluated after the YIN change is in place, since YIN handles high frequencies differently than Goertzel voting.
+The native detection architecture also changed from the original plan. Rather than porting detection logic to Swift/Kotlin (Option B in the plan above), the native module now sends raw 4096-sample PCM frames to JS (Option A), and `detectSingleNote()` in `fft-detector.ts` runs on both web and native. This gives a single detection implementation that is easier to maintain and debug.
 
 ---
 
-## Revised Implementation Plan
+## Resolved Issues
 
-### Phase 1: Temporal smoothing (small, safe, independent of algorithm change)
+### Issue 1: G harmonica notes detected one octave low (FIXED)
 
-- **File**: `src/hooks/use-audio-listening.ts`
-- Add a ring buffer of the last 5 detected MIDI values; only emit when the same MIDI appears ≥ 3 times.
-- No change to the detector itself. No native code changes.
+**Root cause**: A vocabulary bug, not an algorithm issue. `buildHarmonicaVocabulary` was transposing G harmonica notes by +7 semitones (giving G4 as hole 1 blow), but a real G harmonica starts at G3. The correct offset for keys G–B (pc ≥ 7) is `pc − 12` so they stay in the same register as the C harmonica.
 
-### Phase 2: Replace Goertzel with YIN for single-note detection
+**Fix**: One-line change in `harmonica-frequencies.ts` and the same correction in `tabs.ts` (the tab display uses an independent transposition):
+```typescript
+const semitones = harmonicaPc >= 7 ? harmonicaPc - 12 : harmonicaPc;
+```
 
-- **`src/logic/fft-detector.ts`**: add `yinDetect(input, sampleRate, minFreq, maxFreq)` returning the fundamental Hz or null. Rewrite `detectSingleNote()` to call YIN first, then find the nearest vocabulary note.
-- **`modules/harmonica-audio/ios/HarmonicaAudioModule.swift`**: port YIN to Swift, replacing the Goertzel scoring loop in `detectNote()`.
-- **`modules/harmonica-audio/android/.../HarmonicaAudioModule.kt`**: same port to Kotlin.
+This was confirmed by running `aubiopitch` on the G harmonica recordings: aubio detected ~395 Hz (G4) for hole 4 blow, matching the corrected vocabulary, not the original G5.
 
-### Phase 3: Re-evaluate Issue 3
+### Issue 2: "Flitting" between notes (open)
 
-After Phase 2, retest E harmonica hole 10 blow. If still failing, investigate per-note threshold or microphone floor adjustments.
+**What happens**: Some notes oscillate between neighbors frame-by-frame at borderline confidence levels. The existing `AUDIO_SIGNAL_HOLD_MS` holds the last accepted detection visible on screen but does not stabilize detection itself.
+
+**Proposed fix**: Ring buffer of the last 5 frames; commit only when the same MIDI appears ≥ 3 times (~50 ms added latency). Not yet implemented.
+
+### Issue 3: E harmonica hole 10 blow (open)
+
+The highest E harmonica note (E6 ≈ 1319 Hz) is rarely detected. Re-evaluate after further device testing — may require microphone gain or threshold adjustment for the top of the range.
 
 ---
 

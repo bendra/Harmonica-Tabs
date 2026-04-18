@@ -13,7 +13,6 @@ This document describes the app as it exists today. It is intentionally practica
 
 Out of scope today:
 - Alternate tunings/instrument types.
-- Native mobile microphone pipeline (web implementation exists; non-web falls back to simulated Hz).
 
 ## 2. Runtime and Entry Points
 
@@ -37,7 +36,9 @@ Out of scope today:
 - `saved-tab-library.ts`: saved-tab repository with backend-aware persistence, native legacy migration, saved-context normalization, sorting, title helpers, and persistence service.
 - `transposer.ts`: parses transposer input and produces both render segments and playable output-token metadata.
 - `transposer-follow.ts`: pure cursor-advance state machine for tone-follow behavior.
-- `web-audio.ts`: web microphone pitch detector (autocorrelation-like approach + EMA smoothing).
+- `web-audio.ts`: web microphone pitch detector (wraps Web Audio API; feeds raw PCM frames to `fft-detector.ts`).
+- `fft-detector.ts`: FFT-based YIN pitch detector (`detectSingleNote`) and Goertzel-based chord detector (`detectChord`). Platform-agnostic; used by both web and native paths.
+- `native-audio.ts`: native module wrapper with the same `{ isSupported, start, stop }` interface as `web-audio.ts`. The native module sends raw PCM to JS; detection runs in `fft-detector.ts`.
 
 ### UI layer
 - `App.tsx`: all view state, controls, layout measurement, selection behavior, and rendering.
@@ -77,7 +78,7 @@ Derived values (`useMemo`) drive most rendering:
 
 ### C) Live pitch-to-tab feedback
 1. User starts listening.
-2. Web: `createWebAudioPitchDetector().start(...)` streams pitch updates.
+2. Web: `createWebAudioPitchDetector().start(...)` streams pitch updates. Native: `createNativeAudioPitchDetector().start(...)` does the same via the custom Expo module. Both call `detectSingleNote()` in `fft-detector.ts` and emit a `SingleNoteResult`.
 3. App computes closest tab(s) and interpolation `t` via `matchFrequencyToTabs`.
 4. Caret is drawn between measured chip centers (or aligned to active row on wrap).
 5. In-tune visual threshold uses `±10` cents (`toneToleranceCents`).
@@ -169,7 +170,7 @@ There is no sync between platforms — web app storage and native SQLite are ind
   - saved-context open-prompt behavior and editor toggle defaults/restoration.
 
 Current gap:
-- No automated tests yet for `arpeggios.ts`, `pitch.ts`, or web audio detector behavior.
+- No automated tests yet for `arpeggios.ts` or `pitch.ts`.
 
 ## 9. Contributor Playbook (What You Need to Contribute Usefully)
 
@@ -196,7 +197,7 @@ Current gap:
 
 - `App.tsx` is still large and mixes orchestration + rendering + interaction details.
 - Layout-measurement logic is duplicated across main and arpeggio tab rows.
-- Pitch detection is web-only and intentionally lightweight (accuracy/stability tradeoffs).
+- Pitch detection runs on web (Web Audio API) and native iOS/Android (raw PCM via custom Expo module). Both paths use the same `fft-detector.ts` implementation.
 - Some data/logic assumptions are implicit (for example, technique ranking and alternate handling conventions).
 
 ## 11. Working Agreement While Exploring
