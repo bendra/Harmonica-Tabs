@@ -15,6 +15,8 @@ const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
 
 type TransposerSessionParams = {
   savedTabs: SavedTabRecord[];
+  transposerSourceTabId: string | null;
+  transposerOctaveOffset: number;
   harmonicaPc: number;
   targetRootPc: number;
   notation: OverbendNotation;
@@ -27,6 +29,8 @@ type TransposerSessionParams = {
 
 export function useTransposerSession({
   savedTabs,
+  transposerSourceTabId,
+  transposerOctaveOffset,
   harmonicaPc,
   targetRootPc,
   notation,
@@ -36,8 +40,6 @@ export function useTransposerSession({
   toneFollowMinConfidence,
   isListening,
 }: TransposerSessionParams) {
-  const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(null);
-  const [transposerOctaveOffset, setTransposerOctaveOffset] = useState(0);
   const [transposerFollowState, setTransposerFollowState] = useState<TransposerFollowState>(
     createTransposerFollowState(null),
   );
@@ -178,10 +180,6 @@ export function useTransposerSession({
   }, [transposerResult.playableTokens]);
 
   useEffect(() => {
-    setTransposerOctaveOffset(0);
-  }, [transposerSourceTabId, harmonicaPc, targetRootPc]);
-
-  useEffect(() => {
     if (!isListening || transposerResult.playableTokens.length === 0) return;
     const intervalId = setInterval(() => {
       setToneFollowTick((prev) => prev + 1);
@@ -223,10 +221,6 @@ export function useTransposerSession({
   }
 
   return {
-    transposerSourceTabId,
-    setTransposerSourceTabId,
-    transposerOctaveOffset,
-    setTransposerOctaveOffset,
     transposerFollowState,
     transposerOutputViewportHeight,
     setTransposerOutputViewportHeight,

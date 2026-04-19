@@ -4,6 +4,7 @@ import { SCALE_DEFINITIONS } from '../data/scales';
 import { noteToPc, normalizePc, pcToNote, NoteName } from '../data/notes';
 import { buildTabsForScale, OverbendNotation, ScaleSelection, TabGroup } from '../logic/tabs';
 import { buildArpeggioSections } from '../logic/arpeggios';
+import { DEFAULT_MUSICAL_SELECTION } from '../config/default-settings';
 
 export function formatScaleLabel(rootPc: number, scaleId: string, preferFlats: boolean): string {
   const scaleDef = SCALE_DEFINITIONS.find((item) => item.id === scaleId);
@@ -21,7 +22,14 @@ export type DropdownOption<T> = {
   value: T;
 };
 
+export type HarmonicaNoteLabelStyle = 'standard' | 'flat' | 'sharp';
 export type NoteLabelStyle = 'flat' | 'sharp';
+
+export function getHarmonicaKeyPreferFlats(style: HarmonicaNoteLabelStyle, harmonicaPc: number) {
+  if (style === 'flat') return true;
+  if (style === 'sharp') return false;
+  return HARMONICA_KEYS.find((key) => key.pc === harmonicaPc)?.preferFlats ?? false;
+}
 
 export function formatOrdinal(value: number) {
   const mod100 = value % 100;
@@ -74,16 +82,24 @@ export function getPreferredTabOption(group: TabGroup, gAltPreference: '-2' | '3
 export type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 
 export function useMusicalSelection() {
-  const [harmonicaKey, setHarmonicaKey] = useState<HarmonicaKey>(HARMONICA_KEYS[0]);
-  const [harmonicaKeyLabelStyle, setHarmonicaKeyLabelStyle] = useState<NoteLabelStyle>('flat');
-  const [targetKeyLabelStyle, setTargetKeyLabelStyle] = useState<NoteLabelStyle>('flat');
-  const [notation, setNotation] = useState<OverbendNotation>('apostrophe');
-  const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>('1-2-3');
-  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>('-2');
+  const [harmonicaKey, setHarmonicaKey] = useState<HarmonicaKey>(
+    HARMONICA_KEYS.find((key) => key.pc === DEFAULT_MUSICAL_SELECTION.harmonicaKeyPc) ?? HARMONICA_KEYS[0],
+  );
+  const [harmonicaKeyLabelStyle, setHarmonicaKeyLabelStyle] = useState<HarmonicaNoteLabelStyle>(
+    DEFAULT_MUSICAL_SELECTION.harmonicaKeyLabelStyle,
+  );
+  const [targetKeyLabelStyle, setTargetKeyLabelStyle] = useState<NoteLabelStyle>(
+    DEFAULT_MUSICAL_SELECTION.targetKeyLabelStyle,
+  );
+  const [notation, setNotation] = useState<OverbendNotation>(DEFAULT_MUSICAL_SELECTION.notation);
+  const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>(
+    DEFAULT_MUSICAL_SELECTION.positionKeyFilter,
+  );
+  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>(DEFAULT_MUSICAL_SELECTION.gAltPreference);
   const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(null);
   const [scaleRoot, setScaleRoot] = useState<NoteName>('C');
   const [scaleId, setScaleId] = useState<string>(SCALE_DEFINITIONS[0].id);
-  const harmonicaKeyPreferFlats = harmonicaKeyLabelStyle === 'flat';
+  const harmonicaKeyPreferFlats = getHarmonicaKeyPreferFlats(harmonicaKeyLabelStyle, harmonicaKey.pc);
   const targetKeyPreferFlats = targetKeyLabelStyle === 'flat';
 
   const scale = useMemo(
@@ -109,10 +125,10 @@ export function useMusicalSelection() {
   const harmonicaKeyDropdownOptions = useMemo<DropdownOption<number>[]>(
     () =>
       HARMONICA_KEYS.map((key) => ({
-        label: pcToNote(key.pc, harmonicaKeyPreferFlats),
+        label: harmonicaKeyLabelStyle === 'standard' ? key.label : pcToNote(key.pc, harmonicaKeyLabelStyle === 'flat'),
         value: key.pc,
       })),
-    [harmonicaKeyPreferFlats],
+    [harmonicaKeyLabelStyle],
   );
 
   const scaleKeyOptions = useMemo(

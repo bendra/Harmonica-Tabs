@@ -1,13 +1,17 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import { Platform } from 'react-native';
 import { DetectorSnapshot } from '../logic/transposer-follow';
 import { DetectionCandidate } from '../logic/fft-detector';
 import { createWebAudioPitchDetector } from '../logic/web-audio';
 import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
 import { frequencyToMidi } from '../logic/pitch';
-
-const AUDIO_SIGNAL_HOLD_MS = 400;
-const AUDIO_CONFIDENCE_GATE = 0.2;
+import { DEFAULT_AUDIO_SETTINGS } from '../config/default-settings';
 
 /**
  * Temporal smoothing: how many recent frames to consider, and how many must
@@ -43,7 +47,6 @@ function smoothedFrequency(buffer: (number | null)[]): number | null {
   }
 
   if (bestFreqs.length < SMOOTHING_MIN_VOTES) return null;
-  // Return the most recent frequency for the winning MIDI.
   return bestFreqs[bestFreqs.length - 1];
 }
 
@@ -52,162 +55,281 @@ type AudioListeningParams = {
   harmonicaPc: number;
 };
 
-export function useAudioListening({ simHz, harmonicaPc }: AudioListeningParams) {
-  const vocabulary = useMemo(() => buildHarmonicaVocabulary(harmonicaPc), [harmonicaPc]);
-  const [isListening, setIsListening] = useState(false);
-  const [listenError, setListenError] = useState<string | null>(null);
-  const [listenSource, setListenSource] = useState<'web' | 'sim' | null>(null);
-  const [detectedFrequency, setDetectedFrequency] = useState<number | null>(null);
-  const [detectedConfidence, setDetectedConfidence] = useState(0);
-  const [detectedRms, setDetectedRms] = useState(0);
-  const [detectedRawFrequency, setDetectedRawFrequency] = useState<number | null>(null);
-  const [detectedCandidates, setDetectedCandidates] = useState<DetectionCandidate[]>([]);
-  const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
+type AudioListeningState = {
+  isListening: boolean;
+  listenError: string | null;
+  listenSource: 'web' | 'sim' | null;
+  detectedFrequency: number | null;
+  detectedRawFrequency: number | null;
+  detectedConfidence: number;
+  detectedRms: number;
+  detectedCandidates: DetectionCandidate[];
+  lastDetectedAt: number | null;
+};
 
-  const detectorRef = useRef<ReturnType<typeof createWebAudioPitchDetector> | null>(null);
-  const isMountedRef = useRef(true);
-  const listenSessionRef = useRef(0);
-  const smoothingBufferRef = useRef<(number | null)[]>([]);
+type AudioListeningValue = AudioListeningState & {
+  audioSnapshot: DetectorSnapshot;
+  startListening: () => Promise<void>;
+  stopListening: () => void;
+};
 
-  useEffect(() => {
+type AudioListeningStore = ReturnType<typeof createAudioListeningStore>;
+
+const AudioListeningContext = createContext<AudioListeningStore | null>(null);
+
+function createInitialState(): AudioListeningState {
+  return {
+    isListening: false,
+    listenError: null,
+    listenSource: null,
+    detectedFrequency: null,
+    detectedRawFrequency: null,
+    detectedConfidence: 0,
+    detectedRms: 0,
+    detectedCandidates: [],
+    lastDetectedAt: null,
+  };
+}
+
+function createAudioListeningStore(initialParams: AudioListeningParams) {
+  let params = initialParams;
+  let state = createInitialState();
+  let detector: ReturnType<typeof createWebAudioPitchDetector> | null = null;
+  let isDisposed = false;
+  let listenSession = 0;
+  let smoothingBuffer: (number | null)[] = [];
+  let snapshot: AudioListeningValue;
+  const listeners = new Set<() => void>();
+
+  function emit() {
+    listeners.forEach((listener) => listener());
+  }
+
+  function refreshSnapshot() {
+    snapshot = {
+      ...state,
+      audioSnapshot: getAudioSnapshot(),
+      startListening,
+      stopListening,
+    };
+  }
+
+  function setState(updates: Partial<AudioListeningState>) {
+    state = { ...state, ...updates };
+    refreshSnapshot();
+    emit();
+  }
+
+  function resetDetectionState() {
+    setState({
+      detectedFrequency: null,
+      detectedRawFrequency: null,
+      detectedConfidence: 0,
+      detectedRms: 0,
+      detectedCandidates: [],
+      lastDetectedAt: null,
+    });
+  }
+
+  function ensureDetector() {
+    if (detector) return detector;
     if (Platform.OS === 'web') {
-      detectorRef.current = createWebAudioPitchDetector();
-    } else {
-      // Dynamic require prevents the native module from being bundled on web.
-      const { createNativeAudioPitchDetector } = require('../logic/native-audio');
-      detectorRef.current = createNativeAudioPitchDetector();
+      detector = createWebAudioPitchDetector();
+      return detector;
     }
-    return () => {
-      isMountedRef.current = false;
-      listenSessionRef.current += 1;
-      detectorRef.current?.stop();
-    };
-  }, []);
 
-  // When the harmonica key changes while listening is active, push the new
-  // vocabulary to the detector immediately. Without this, the detector keeps
-  // using the vocabulary from when Listen was first pressed, which means notes
-  // below the original harmonica's frequency range are never searched for.
-  useEffect(() => {
-    if (!isListening) return;
-    (detectorRef.current as any)?.updateVocabulary?.(vocabulary);
-  }, [vocabulary, isListening]);
+    const { createNativeAudioPitchDetector } = require('../logic/native-audio');
+    detector = createNativeAudioPitchDetector();
+    return detector;
+  }
 
-  const audioSnapshot = useMemo<DetectorSnapshot>(() => {
+  function getAudioSnapshot(): DetectorSnapshot {
     const now = Date.now();
-    const hasHold = lastDetectedAt !== null && now - lastDetectedAt < AUDIO_SIGNAL_HOLD_MS;
+    const hasHold =
+      state.lastDetectedAt !== null && now - state.lastDetectedAt < DEFAULT_AUDIO_SETTINGS.signalHoldMs;
     const effectiveWebFrequency =
-      detectedConfidence >= AUDIO_CONFIDENCE_GATE && detectedFrequency
-        ? detectedFrequency
+      state.detectedConfidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate && state.detectedFrequency
+        ? state.detectedFrequency
         : hasHold
-          ? detectedFrequency
+          ? state.detectedFrequency
           : null;
+
     return {
-      frequency: !isListening ? null : listenSource === 'web' ? effectiveWebFrequency : simHz,
-      confidence: !isListening ? 0 : listenSource === 'web' ? detectedConfidence : simHz ? 1 : 0,
-      rms: detectedRms,
-      source: isListening ? listenSource : null,
-      lastDetectedAt,
+      frequency: !state.isListening ? null : state.listenSource === 'web' ? effectiveWebFrequency : params.simHz,
+      confidence: !state.isListening ? 0 : state.listenSource === 'web' ? state.detectedConfidence : params.simHz ? 1 : 0,
+      rms: state.detectedRms,
+      source: state.isListening ? state.listenSource : null,
+      lastDetectedAt: state.lastDetectedAt,
     };
-  }, [detectedConfidence, detectedRms, detectedFrequency, isListening, lastDetectedAt, listenSource, simHz]);
+  }
+
+  function getSnapshot(): AudioListeningValue {
+    return snapshot;
+  }
+
+  function subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+
+  function setParams(nextParams: AudioListeningParams) {
+    const simHzChanged = params.simHz !== nextParams.simHz;
+    const harmonicaChanged = params.harmonicaPc !== nextParams.harmonicaPc;
+    params = nextParams;
+
+    if (!state.isListening) return;
+    if (state.listenSource === 'sim' && simHzChanged) {
+      refreshSnapshot();
+      emit();
+      return;
+    }
+
+    if (state.listenSource === 'web' && harmonicaChanged) {
+      const nextVocabulary = buildHarmonicaVocabulary(nextParams.harmonicaPc);
+      (detector as { updateVocabulary?: (vocabulary: ReturnType<typeof buildHarmonicaVocabulary>) => void } | null)
+        ?.updateVocabulary?.(nextVocabulary);
+    }
+  }
 
   async function startListening() {
-    const listenSession = listenSessionRef.current + 1;
-    listenSessionRef.current = listenSession;
-    setListenError(null);
-    setDetectedFrequency(null);
-    setDetectedRawFrequency(null);
-    setDetectedConfidence(0);
-    setDetectedRms(0);
-    setDetectedCandidates([]);
-    setLastDetectedAt(null);
-    smoothingBufferRef.current = [];
+    const currentListenSession = listenSession + 1;
+    listenSession = currentListenSession;
+    setState({
+      isListening: state.isListening,
+      listenError: null,
+      detectedFrequency: null,
+      detectedRawFrequency: null,
+      detectedConfidence: 0,
+      detectedRms: 0,
+      detectedCandidates: [],
+      lastDetectedAt: null,
+    });
+    smoothingBuffer = [];
 
     function isCurrentListenSession() {
-      return isMountedRef.current && listenSessionRef.current === listenSession;
+      return !isDisposed && listenSession === currentListenSession;
     }
 
-    // On native, request microphone permission before attempting to start.
-    // On web, getUserMedia handles the permission prompt itself.
     if (Platform.OS !== 'web') {
-      // Load expo-av only on native so web/tests do not need Expo's native runtime globals.
       const { Audio } = require('expo-av');
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) {
         if (!isCurrentListenSession()) return;
-        setListenError('Microphone permission denied');
-        setListenSource('sim');
-        setIsListening(true);
+        setState({
+          isListening: true,
+          listenError: 'Microphone permission denied',
+          listenSource: 'sim',
+        });
         return;
       }
     }
 
-    const detector = detectorRef.current;
-    if (detector?.isSupported()) {
+    const activeDetector = ensureDetector();
+    const vocabulary = buildHarmonicaVocabulary(params.harmonicaPc);
+    if (activeDetector?.isSupported()) {
       try {
-        await detector.start((update) => {
+        await activeDetector.start((update) => {
           if (!isCurrentListenSession()) return;
 
-          // Push this frame's raw detection into the ring buffer and trim.
-          const buf = smoothingBufferRef.current;
-          buf.push(update.frequency);
-          if (buf.length > SMOOTHING_WINDOW) buf.shift();
-
-          // Only commit to a frequency once it has appeared consistently.
-          const stable = smoothedFrequency(buf);
-
-          setDetectedFrequency(stable);
-          setDetectedConfidence(update.confidence);
-          setDetectedRms(update.rms);
-          if ('rawFrequency' in update) setDetectedRawFrequency((update as any).rawFrequency ?? null);
-          if ('candidates' in update) setDetectedCandidates((update as any).candidates ?? []);
-          if (stable && update.confidence >= AUDIO_CONFIDENCE_GATE) {
-            setLastDetectedAt(Date.now());
+          const nextBuffer = [...smoothingBuffer, update.frequency];
+          if (nextBuffer.length > SMOOTHING_WINDOW) {
+            nextBuffer.shift();
           }
+          smoothingBuffer = nextBuffer;
+
+          const stable = smoothedFrequency(nextBuffer);
+          const nextCandidates = Array.isArray((update as { candidates?: DetectionCandidate[] }).candidates)
+            ? (update as { candidates?: DetectionCandidate[] }).candidates ?? []
+            : [];
+          const nextRawFrequency =
+            typeof (update as { rawFrequency?: number | null }).rawFrequency === 'number'
+              ? (update as { rawFrequency?: number | null }).rawFrequency ?? null
+              : null;
+          setState({
+            detectedFrequency: stable,
+            detectedRawFrequency: nextRawFrequency,
+            detectedConfidence: update.confidence,
+            detectedRms: update.rms,
+            detectedCandidates: nextCandidates,
+            lastDetectedAt:
+              stable && update.confidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate ? Date.now() : state.lastDetectedAt,
+          });
         }, vocabulary);
         if (!isCurrentListenSession()) return;
-        setListenSource('web');
+        setState({
+          isListening: true,
+          listenSource: 'web',
+        });
       } catch {
         if (!isCurrentListenSession()) return;
-        setListenError('Mic blocked or unavailable (using sim)');
-        setListenSource('sim');
+        setState({
+          isListening: true,
+          listenError: 'Mic blocked or unavailable (using sim)',
+          listenSource: 'sim',
+        });
       }
     } else {
       if (!isCurrentListenSession()) return;
-      setListenError('Mic not supported on this platform (using sim)');
-      setListenSource('sim');
+      setState({
+        isListening: true,
+        listenError: 'Mic not supported on this platform (using sim)',
+        listenSource: 'sim',
+      });
     }
-
-    if (!isCurrentListenSession()) return;
-    setIsListening(true);
   }
 
   function stopListening() {
-    listenSessionRef.current += 1;
-    detectorRef.current?.stop();
-    smoothingBufferRef.current = [];
-    setIsListening(false);
-    setListenSource(null);
-    setDetectedFrequency(null);
-    setDetectedRawFrequency(null);
-    setDetectedConfidence(0);
-    setDetectedRms(0);
-    setDetectedCandidates([]);
-    setLastDetectedAt(null);
+    listenSession += 1;
+    detector?.stop();
+    smoothingBuffer = [];
+    resetDetectionState();
+    setState({
+      isListening: false,
+      listenSource: null,
+    });
   }
 
+  function dispose() {
+    isDisposed = true;
+    listenSession += 1;
+    detector?.stop();
+    listeners.clear();
+  }
+
+  refreshSnapshot();
+
   return {
-    isListening,
-    listenError,
-    listenSource,
-    detectedFrequency,
-    detectedRawFrequency,
-    detectedConfidence,
-    detectedRms,
-    detectedCandidates,
-    lastDetectedAt,
-    audioSnapshot,
-    startListening,
-    stopListening,
+    subscribe,
+    getSnapshot,
+    setParams,
+    dispose,
   };
+}
+
+export function AudioListeningProvider({
+  simHz,
+  harmonicaPc,
+  children,
+}: AudioListeningParams & { children: React.ReactNode }) {
+  const storeRef = useRef<AudioListeningStore | null>(null);
+  if (!storeRef.current) {
+    storeRef.current = createAudioListeningStore({ simHz, harmonicaPc });
+  }
+
+  useEffect(() => {
+    storeRef.current?.setParams({ simHz, harmonicaPc });
+  }, [simHz, harmonicaPc]);
+
+  useEffect(() => () => storeRef.current?.dispose(), []);
+
+  return React.createElement(AudioListeningContext.Provider, { value: storeRef.current }, children);
+}
+
+export function useAudioListening() {
+  const store = useContext(AudioListeningContext);
+  if (!store) {
+    throw new Error('useAudioListening must be used within AudioListeningProvider.');
+  }
+
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 }
