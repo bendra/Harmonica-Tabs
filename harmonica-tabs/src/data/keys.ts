@@ -18,25 +18,25 @@ export type HarmonicaKey = {
 const FLAT_KEYS = new Set<NoteName>(['F', 'Bb', 'Eb', 'Ab', 'Db']);
 
 /**
- * Canonical chromatic key order used by dropdowns and position math.
+ * Harmonica selector order from highest-tuned to lowest-tuned harp.
  */
 const KEY_ORDER: NoteName[] = [
-  'C',
-  'Db',
-  'D',
-  'Eb',
-  'E',
-  'F',
   'F#',
-  'G',
-  'Ab',
-  'A',
-  'Bb',
+  'F',
+  'E',
+  'Eb',
+  'D',
+  'Db',
+  'C',
   'B',
+  'Bb',
+  'A',
+  'Ab',
+  'G',
 ];
 
 /**
- * Harmonica keys shown in the app dropdown in circle-of-fifths order.
+ * Harmonica keys shown in the app dropdown.
  */
 export const HARMONICA_KEYS: HarmonicaKey[] = KEY_ORDER.map((label) => ({
   label,

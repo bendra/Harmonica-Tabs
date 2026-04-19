@@ -339,4 +339,48 @@ describe('App listening lifecycle', () => {
       renderer.unmount();
     });
   });
+
+  it('keeps debug-panel detector updates working while the shared audio state lives below App', async () => {
+    detectorMockState.isSupported = true;
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findPressableByText(root, '⚙').props.onPress();
+    });
+    act(() => {
+      findPressableByText(root, 'Show debug').props.onPress();
+    });
+    act(() => {
+      findPressableByText(root, '←').props.onPress();
+    });
+
+    await act(async () => {
+      findPressableByText(root, '🎤 Listen').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(detectorMockState.updateHandlers).toHaveLength(1);
+
+    await act(async () => {
+      for (let index = 0; index < 3; index += 1) {
+        detectorMockState.updateHandlers[0]({ frequency: 440, confidence: 0.91, rms: 0.02 });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const debugLine = root.find(
+      (node: any) =>
+        node.type === 'Text' &&
+        flattenTextChildren(node.children).includes('RMS: 0.0200 · Conf: 0.91 · Hz: 440.0'),
+    );
+
+    expect(debugLine).toBeTruthy();
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
 });

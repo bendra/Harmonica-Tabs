@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { AUDIO_SETTINGS_LIMITS, DEFAULT_AUDIO_SETTINGS } from '../config/default-settings';
 
 function sanitizeDecimalInput(value: string): string {
   let sawDot = false;
@@ -31,17 +32,31 @@ function parseBoundedInteger(value: string, fallback: number, min: number, max: 
 }
 
 export function useAudioSettings() {
-  const [showDebug, setShowDebug] = useState(false);
-  const [toneToleranceInput, setToneToleranceInput] = useState('60');
-  const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState('0.35');
-  const [simFrequency, setSimFrequency] = useState('440');
+  const [showDebug, setShowDebug] = useState<boolean>(DEFAULT_AUDIO_SETTINGS.showDebug);
+  const [toneToleranceInput, setToneToleranceInput] = useState<string>(DEFAULT_AUDIO_SETTINGS.toneToleranceInput);
+  const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState<string>(
+    DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput,
+  );
+  const [simFrequency, setSimFrequency] = useState<string>(DEFAULT_AUDIO_SETTINGS.simFrequencyInput);
 
   const toneToleranceCents = useMemo(
-    () => parseBoundedNumber(toneToleranceInput, 60, 1, 120),
+    () =>
+      parseBoundedNumber(
+        toneToleranceInput,
+        DEFAULT_AUDIO_SETTINGS.toneToleranceCents,
+        AUDIO_SETTINGS_LIMITS.toneToleranceCents.min,
+        AUDIO_SETTINGS_LIMITS.toneToleranceCents.max,
+      ),
     [toneToleranceInput],
   );
   const toneFollowMinConfidence = useMemo(
-    () => parseBoundedNumber(toneFollowMinConfidenceInput, 0.35, 0, 1),
+    () =>
+      parseBoundedNumber(
+        toneFollowMinConfidenceInput,
+        DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidence,
+        AUDIO_SETTINGS_LIMITS.toneFollowMinConfidence.min,
+        AUDIO_SETTINGS_LIMITS.toneFollowMinConfidence.max,
+      ),
     [toneFollowMinConfidenceInput],
   );
   const simHz = useMemo(() => {

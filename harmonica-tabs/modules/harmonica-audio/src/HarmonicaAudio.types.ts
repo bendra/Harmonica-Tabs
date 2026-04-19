@@ -12,3 +12,8 @@ export type AudioFrameEventPayload = {
 export type HarmonicaAudioModuleEvents = {
   onAudioFrame: (payload: AudioFrameEventPayload) => void;
 };
+
+export type HarmonicaAudioViewProps = {
+  url?: string;
+  onLoad?: (event: { nativeEvent: { url?: string } }) => void;
+};

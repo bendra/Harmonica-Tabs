@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestRenderer, { act } from 'react-test-renderer';
 import { resetReactNativeMocks, scrollToSpy, setReactNativeWindowDimensions } from './react-native.mock';
 import { SAVED_TAB_LIBRARY_STORAGE_KEY } from '../../src/logic/saved-tab-library';
-import { HARMONICA_KEYS } from '../../src/data/keys';
+import { noteToPc } from '../../src/data/notes';
 import { buildTabsForScale } from '../../src/logic/tabs';
 
 const { asyncStorageMock, asyncStorageValues, savedTabDb } = vi.hoisted(() => {
@@ -470,26 +470,57 @@ describe('App navigation', () => {
     expect(readStyleNumber(findTransposerOutputTextNode(wideRoot).props.style, 'fontSize')).toBe(18);
   });
 
-  it('shows flat spellings by default for harmonica and target key dropdowns', async () => {
+  it('shows standard harp spellings and flat target spellings by default', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     const renderer = await renderApp();
     const root = renderer.root;
 
-    chooseHarmonicaKey(root, 11);
-
     expect(findDropdownByLabel(root, 'Harmonica key').props.options).toEqual(
-      expect.arrayContaining([expect.objectContaining({ label: 'Db' })]),
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'Db' }),
+        expect.objectContaining({ label: 'F#' }),
+      ]),
     );
     expect(findDropdownByLabel(root, 'Harmonica key').props.options).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ label: 'C#' })]),
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'C#' }),
+        expect.objectContaining({ label: 'Gb' }),
+      ]),
     );
+
+    chooseHarmonicaKey(root, 11);
+
     expect(findDropdownByLabel(root, 'Target Position/Key').props.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: '2nd / Gb' }),
         expect.objectContaining({ label: '3rd / Db' }),
       ]),
     );
+  });
+
+  it('shows harmonica keys from highest to lowest while keeping C selected by default', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+    const options = findDropdownByLabel(root, 'Harmonica key').props.options;
+
+    expect(options.map((option: { label: string }) => option.label)).toEqual([
+      'F#',
+      'F',
+      'E',
+      'Eb',
+      'D',
+      'Db',
+      'C',
+      'B',
+      'Bb',
+      'A',
+      'Ab',
+      'G',
+    ]);
+    expect(findDropdownByLabel(root, 'Harmonica key').props.value).toBe(noteToPc('C'));
   });
 
   it('lets properties switch harmonica and target dropdown spellings to sharps', async () => {
@@ -928,7 +959,7 @@ describe('App navigation', () => {
 
     const renderer = await renderApp();
     const root = renderer.root;
-    const groups = buildTabsForScale({ rootPc: 0, scaleId: 'major' }, HARMONICA_KEYS[0].pc, 'apostrophe');
+    const groups = buildTabsForScale({ rootPc: 0, scaleId: 'major' }, noteToPc('C'), 'apostrophe');
     const targetIndex = groups.findIndex((group) => group.midi === 69);
 
     expect(targetIndex).toBeGreaterThanOrEqual(0);

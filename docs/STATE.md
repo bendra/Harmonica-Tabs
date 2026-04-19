@@ -13,12 +13,14 @@
 - Standard 10-hole Richter tuning only.
 - Overbends excluded on holes 2, 3, and 8.
 - Overbend notation selectable: `'` or `°`.
-- Harmonica-key labels and target/scale note labels each have a user-selectable flat/sharp display style; both default to flats.
+- Harmonica keys are shown in the selector from highest-tuned to lowest-tuned (`F#` down to `G`), while the default selected harp remains `C`.
+- Harmonica-key labels have a user-selectable `standard` / `flat` / `sharp` display style, defaulting to `standard`; target/scale note labels still use a separate flat/sharp display style that defaults to flats.
 - Tabs default to `-2` instead of `3` when they are the same pitch.
 - Tabs are clickable to toggle alternates (currently only `-2` ↔ `3`).
 - Chords shown separately for Blow and Draw based on adjacent unbent holes.
 - Tone follow is token-based in the transposer: only successfully transposed output tab tokens are followable/clickable.
 - Tone follow reuses the shared listen session; real microphone detection now exists on web and native mobile, with simulated Hz still used as the fallback path when mic access is unavailable or unsupported.
+- Shared listening now lives behind an audio-listening provider/store so detector frame updates re-render only the subscribed listening UI instead of the whole top-level `App`.
 - Tone follow is automatically on while listening is on, and off while listening is off.
 - Repeated identical output notes require a release before the cursor can advance again.
 - When tone follow matches the last playable transposer note, the cursor wraps back to the first playable note.
@@ -44,6 +46,7 @@
 - Top-level workspace switcher exposes `Scales` and `Tabs`.
 - `Scales` contains the former visualizer flow: Harmonica key, Target Position/Key, Scale Name, Arpeggios, listen/debug, and generated tabs/arpeggios.
 - `Scales` now scales spacing, control sizes, card padding, and tab/arpeggio typography across compact, regular, and wide layouts while staying single-column.
+- The `Scales` workspace and `Tabs -> Transpose` now own their own live listening subscriptions, while `App.tsx` keeps the slower navigation/editor state.
 - On wider screens, the `Scales` content can use a centered max-width shell, but compact and regular widths stay aligned with the full workspace width.
 - On `Scales`, only the results list scrolls when content is long; the workspace navigation remains visible.
 - Entering `Tabs` shows `Library` until a source tab is opened; afterward, returning to `Tabs` shows `Transpose` for that active source.
@@ -66,7 +69,7 @@
 - Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
 - When the editor toggle is on, it also shows a compact summary of the saved context such as `C harp • 2nd / G`.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
-- The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling, target-key spelling, and tone-follow settings for tolerance, minimum confidence, and hold duration.
+- The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling (`standard`, `flat`, `sharp`), target-key spelling (`flat`, `sharp`), and tone-follow settings for tolerance, minimum confidence, and hold duration.
 - Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
 - Properties screen is still separate via gear button.
 
