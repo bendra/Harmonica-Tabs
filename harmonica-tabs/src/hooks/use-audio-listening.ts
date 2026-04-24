@@ -21,8 +21,8 @@ import { DEFAULT_AUDIO_SETTINGS } from '../config/default-settings';
  * time — imperceptible latency for music practice, but enough to suppress
  * single-frame flips between adjacent notes.
  */
-const SMOOTHING_WINDOW = 5;
-const SMOOTHING_MIN_VOTES = 3;
+const SMOOTHING_WINDOW = 1;
+const SMOOTHING_MIN_VOTES = 1;
 
 /**
  * Given a ring buffer of recently detected frequencies (null = silence/no
@@ -53,6 +53,7 @@ function smoothedFrequency(buffer: (number | null)[]): number | null {
 type AudioListeningParams = {
   simHz: number | null;
   harmonicaPc: number;
+  nativeFrameIntervalMs: number;
 };
 
 type AudioListeningState = {
@@ -175,7 +176,13 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
   function setParams(nextParams: AudioListeningParams) {
     const simHzChanged = params.simHz !== nextParams.simHz;
     const harmonicaChanged = params.harmonicaPc !== nextParams.harmonicaPc;
+    const frameIntervalChanged = params.nativeFrameIntervalMs !== nextParams.nativeFrameIntervalMs;
     params = nextParams;
+
+    if (frameIntervalChanged) {
+      (detector as { updateFrameIntervalMs?: (ms: number) => void } | null)
+        ?.updateFrameIntervalMs?.(nextParams.nativeFrameIntervalMs);
+    }
 
     if (!state.isListening) return;
     if (state.listenSource === 'sim' && simHzChanged) {
@@ -309,16 +316,17 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
 export function AudioListeningProvider({
   simHz,
   harmonicaPc,
+  nativeFrameIntervalMs,
   children,
 }: AudioListeningParams & { children: React.ReactNode }) {
   const storeRef = useRef<AudioListeningStore | null>(null);
   if (!storeRef.current) {
-    storeRef.current = createAudioListeningStore({ simHz, harmonicaPc });
+    storeRef.current = createAudioListeningStore({ simHz, harmonicaPc, nativeFrameIntervalMs });
   }
 
   useEffect(() => {
-    storeRef.current?.setParams({ simHz, harmonicaPc });
-  }, [simHz, harmonicaPc]);
+    storeRef.current?.setParams({ simHz, harmonicaPc, nativeFrameIntervalMs });
+  }, [simHz, harmonicaPc, nativeFrameIntervalMs]);
 
   useEffect(() => () => storeRef.current?.dispose(), []);
 

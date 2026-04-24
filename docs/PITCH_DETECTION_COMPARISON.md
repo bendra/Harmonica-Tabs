@@ -2,260 +2,239 @@
 
 ## Goal
 
-This note compares the open-source app in [`tuner/`](/workspaces/codespaces-blank/tuner) with the current pitch-detection path in [`harmonica-tabs/`](/workspaces/codespaces-blank/harmonica-tabs), with special attention to why `tuner` can feel more reliable for note detection on a G harmonica.
+This note compares the open-source app in `tuner/` with the current pitch-detection path in
+`harmonica-tabs/`, with special attention to why `tuner` can feel more reliable for note
+detection on a harmonica.
 
 This is source-based analysis only. No production code was changed.
 
 ## Short Version
 
-`tuner` uses a mature external pitch detector from `aubio` and then maps the returned frequency onto ordinary chromatic notes. Its pipeline is simple and mostly general-purpose.
+`tuner` uses aubio's pitch detector and maps the returned frequency onto chromatic notes. Its
+pipeline is simple and mostly general-purpose.
 
-`harmonica-tabs` uses a custom YIN-based detector, then snaps the result into a harmonica-specific vocabulary, then adds multiple layers of smoothing, confidence gating, hold behavior, and app-specific matching rules.
+`harmonica-tabs` uses a custom FFT-based YIN detector, then snaps the result into a
+harmonica-specific vocabulary, then applies confidence gating and a signal hold before the
+result drives UI behavior.
 
-That means:
-
-- `harmonica-tabs` has more musical context, which is good when the raw pitch is already correct.
-- `harmonica-tabs` also has more places where a mostly-correct signal can be rejected, delayed, or made to look confidently wrong.
-- If the first-stage pitch estimate lands on the wrong octave, the harmonica vocabulary can turn that into a valid-looking harmonica note instead of exposing uncertainty.
-- The current automated tests prove the detector works on pure sine waves, but they do not prove it works well on real harmonica timbre.
-
-My current read is that the problem is probably not just "the detector algorithm is bad." It is more likely a combination of:
-
-1. Real-world pitch estimation being harder than the test coverage reflects.
-2. Harmonica-specific snapping making octave mistakes look authoritative.
-3. Extra smoothing and gating making the final app feel less responsive or less reliable than the raw detector actually is.
+Both apps now use the same underlying algorithm family (FFT-based autocorrelation YIN, called
+`yinfft` in aubio). The performance gap is therefore less about the core algorithm and more
+about the layers around it.
 
 ## How `tuner` Works
 
 The pitch path in `tuner` is compact:
 
-1. It opens the microphone with `getUserMedia`.
-2. It creates a `ScriptProcessor` with a `4096`-sample buffer.
-3. For each audio callback, it passes the raw channel buffer to `aubio.Pitch("default", 4096, 1, sampleRate)`.
-4. It converts the returned frequency to a chromatic MIDI note and cents offset.
-5. The UI updates after the same note name is seen twice in a row.
+1. Opens the microphone with `getUserMedia`.
+2. Creates a `ScriptProcessor` with a 4096-sample buffer.
+3. For each audio callback, passes the raw channel buffer to
+   `aubio.Pitch("default", 4096, 1, sampleRate)`.
+4. Converts the returned frequency to a chromatic MIDI note and cents offset.
+5. Updates the UI only after the **same note name** appears twice in a row.
 
 Relevant files:
 
-- [`tuner/app/tuner.js`](/workspaces/codespaces-blank/tuner/app/tuner.js)
-- [`tuner/app/app.js`](/workspaces/codespaces-blank/tuner/app/app.js)
+- `tuner/app/tuner.js`
+- `tuner/app/app.js`
 
 Important characteristics:
 
-- The actual pitch estimation is outsourced to `aubio`, not implemented in this repo.
+- `aubio.Pitch("default", ...)` resolves to **`yinfft`** — the FFT-based autocorrelation YIN
+  variant. This is the same algorithm family used in `harmonica-tabs`.
+- The actual `yinfft` implementation is C code compiled to WebAssembly. It is mature, heavily
+  tested on real-world audio, and runs off the main thread in WASM.
 - The app is chromatic, not harmonica-aware.
-- It does not try to decide which harmonica hole or technique produced the note.
-- It does only light stabilization in the UI: note-name repetition, not majority-vote smoothing over several frames.
-
-One important honesty note: from local source alone, I can see that `aubio.Pitch("default", ...)` is used, but I cannot prove which exact aubio backend algorithm that resolves to in this build without external documentation or stepping into the bundled library.
+- Stabilization is light: the UI only updates when the same note **name** (e.g. "C", "G#")
+  appears twice consecutively. Note name ignores octave, so C3 and C4 both satisfy a "C"
+  repeat — a loose check.
+- There is no confidence gate. Any non-zero frequency returned by aubio is accepted.
+- There is no tolerance window. If aubio returns a frequency 80 cents from any standard note,
+  the UI shows that note anyway.
+- There is no signal hold. When aubio returns 0 (silence), the UI shows nothing.
 
 ## How `harmonica-tabs` Works
 
-`harmonica-tabs` has a more layered pipeline.
-
 ### 1. It builds a harmonica-specific note vocabulary
 
-The app starts from the transposed Richter layout and builds the full set of playable notes for the selected harp key, including bends and overbends. Duplicate MIDI values are collapsed to the "easiest" technique.
+The app starts from the transposed Richter layout and builds the full set of playable notes for
+the selected harp key, including bends and overbends. Duplicate MIDI values are collapsed to the
+"easiest" technique.
 
-Relevant file:
+Relevant file: `harmonica-tabs/src/logic/harmonica-frequencies.ts`
 
-- [`harmonica-tabs/src/logic/harmonica-frequencies.ts`](/workspaces/codespaces-blank/harmonica-tabs/src/logic/harmonica-frequencies.ts)
+### 2. It runs a custom FFT-based YIN detector
 
-This is musically useful, but it means the detector is not answering "what pitch exists in the microphone?" It is answering "which allowed harmonica note is closest?"
+For single-note detection, `harmonica-tabs` uses a custom TypeScript implementation of the
+`yinfft` algorithm — the same algorithm that aubio uses as its default. The FFT autocorrelation
+path was specifically chosen (over time-domain YIN) because harmonica harmonics caused the
+time-domain CMND running sum to inflate above 1 at the true fundamental's lag, making detection
+impossible.
 
-### 2. It runs a custom YIN-based single-note detector
+Relevant file: `harmonica-tabs/src/logic/fft-detector.ts`
 
-For single-note detection, `harmonica-tabs` uses a custom time-domain YIN implementation. The comments explicitly say Goertzel was moved out of single-note detection because harmonica harmonics and subharmonics caused wrong-note picks.
+Key constants:
 
-Relevant file:
-
-- [`harmonica-tabs/src/logic/fft-detector.ts`](/workspaces/codespaces-blank/harmonica-tabs/src/logic/fft-detector.ts)
+- `MIN_RMS = 0.005` — silence gate, applied before YIN runs. Same value on web and native
+  (both platforms share this TypeScript code).
+- `YIN_THRESHOLD = 0.15` — the CMND threshold below which a lag is accepted as a fundamental.
+  This is the same default threshold used by aubio's `yinfft`.
 
 The detector:
 
 - rejects low-RMS frames,
-- derives min/max search range from the harmonica vocabulary,
-- estimates a fundamental with YIN,
+- derives the lag search range from the harmonica vocabulary (min/max note frequencies ±10%),
+- estimates the fundamental with FFT-based YIN,
 - finds the nearest vocabulary note in cents,
-- rejects the result if it is outside a technique-specific tolerance window,
-- returns the snapped vocabulary frequency, not the raw detected fundamental.
+- rejects the result if it is outside a per-technique tolerance window,
+- returns the **snapped vocabulary frequency**, not the raw detected fundamental.
 
-That last point matters a lot. If the raw estimate is one octave low but still close to a legal note on the current harp, the app can report a clean, valid harmonica pitch.
+That last point matters. If the raw estimate is one octave low but still within tolerance of a
+legal harmonica note, the app reports that note confidently.
 
-### 3. It applies additional app-level smoothing and gating
+### 3. It applies a confidence gate
 
-After the detector returns a per-frame result, `useAudioListening` adds another layer:
+After detection, a confidence value is computed as:
 
-- a 5-frame smoothing window,
-- at least 3 votes for the same rounded MIDI value,
-- a confidence gate of `0.2`,
-- a 400 ms hold period for the last detected signal.
+```
+confidence = 1 - (nearestCents / centsTolerance)
+```
 
-Relevant file:
+where `centsTolerance` is 50 cents for natural notes, ~36 cents for bends, ~25 cents for
+overblows.
 
-- [`harmonica-tabs/src/hooks/use-audio-listening.ts`](/workspaces/codespaces-blank/harmonica-tabs/src/hooks/use-audio-listening.ts)
+The app then applies a `confidenceGate` of `0.2`, meaning any detection where the YIN
+fundamental lands more than 40 cents from the nearest vocabulary note is rejected entirely.
 
-This is a reasonable anti-jitter strategy, but it also means the note shown in the UI is not the raw detector output. It is a processed version that can:
+Relevant file: `harmonica-tabs/src/config/default-settings.ts` (`confidenceGate: 0.2`)
 
-- lag behind fast pitch changes,
-- suppress short correct detections if they do not win the vote window,
-- keep a stale pitch alive briefly after the player has changed notes,
-- make octave flips feel "sticky" if the wrong octave dominates several recent frames.
+### 4. It applies a 400 ms signal hold
 
-### 4. It then matches that frequency into UI behaviors
+After a high-confidence detection, the last detected frequency is held for 400 ms. During that
+window, if confidence drops below the gate, the snapshot continues to report the held note.
+This affects tone-follow advancement.
 
-The resulting frequency is fed into tab matching, in-tune highlighting, and transposer follow behavior.
+Relevant file: `harmonica-tabs/src/hooks/use-audio-listening.ts` (`signalHoldMs: 400`)
 
-Relevant files:
+### 5. Per-frame results now surface directly
 
-- [`harmonica-tabs/src/logic/pitch.ts`](/workspaces/codespaces-blank/harmonica-tabs/src/logic/pitch.ts)
-- [`harmonica-tabs/src/logic/transposer-follow.ts`](/workspaces/codespaces-blank/harmonica-tabs/src/logic/transposer-follow.ts)
-- [`harmonica-tabs/App.tsx`](/workspaces/codespaces-blank/harmonica-tabs/App.tsx)
+As of recent work, `SMOOTHING_WINDOW = 1` and `SMOOTHING_MIN_VOTES = 1`. The smoothing buffer
+effectively passes through the current frame's detection directly. There is no longer any
+multi-frame vote accumulation that could delay or suppress a correct single-frame result.
 
-So by the time a user sees a note, several layers have already interpreted the signal.
+This is a significant change from the earlier state described in previous versions of this
+document (SMOOTHING_WINDOW was 5, SMOOTHING_MIN_VOTES was 3), which caused a
+systematic one-note lag when playing at moderate tempo.
 
-## Biggest Architectural Difference
+## What Changed in This Investigation Round
 
-The central difference is:
+| Parameter | Before | After |
+|---|---|---|
+| `SMOOTHING_WINDOW` | 5 | 1 |
+| `SMOOTHING_MIN_VOTES` | 3 | 1 |
+| Native frame throttle | none | 40 ms Swift floor + configurable JS interval |
+| Progressive queue buildup | present | fixed |
 
-- `tuner` is a general pitch app that asks, "What note am I hearing?"
-- `harmonica-tabs` is a harmonica UX that asks, "Which allowed harmonica note should this frame count as?"
+The smoothing changes removed the largest source of UI lag (multi-frame vote accumulation
+that caused old notes to persist). The throttle changes fixed a growing queue buildup on
+native that caused latency to increase unboundedly over time.
 
-That is an important product difference, not just an implementation detail.
+## Remaining Gaps
 
-The harmonica-aware approach has real benefits:
+After the above changes, the detected performance gap between `tuner` and `harmonica-tabs` is
+narrower but still present. The most plausible remaining causes, in order of likely impact:
 
-- it can reject impossible notes,
-- it can map directly to tabs,
-- it can use stricter tolerances for bends and overbends,
-- it can drive tone-follow behavior directly.
+### 1. The confidence gate creates a second filter above the YIN threshold
 
-But it also creates a failure mode that `tuner` largely avoids:
+YIN already rejects frames where no CMND dip below 0.15 is found. The confidence gate of 0.2
+then rejects any frame where the snapped note is more than 40 cents from the YIN fundamental.
 
-- if the raw pitch estimate is wrong, `harmonica-tabs` may still snap it to a plausible harmonica note and present that as a confident result.
+This means two independent rejection stages:
+- Stage 1 (YIN): no periodic pitch found
+- Stage 2 (confidence gate): pitch found but too far from nearest vocabulary note
 
-In a plain tuner, a bad raw pitch estimate is easier to spot because the system is not trying to reinterpret it through instrument rules.
+Tuner has only stage 1 (implicit in aubio returning 0). Stage 2 silently drops detections that
+a human would consider "close enough," particularly during note onset, note release, and
+expressive playing with embouchure variation.
 
-## Why `tuner` May Feel Better on G Harmonica
+**Experiment**: set `confidenceGate` to `0.0` in `default-settings.ts` and observe whether
+more correct notes surface (at the cost of potentially more false positives).
 
-I do not think the source supports saying "aubio is definitely better in all ways." But it does support several plausible reasons that `tuner` feels better in practice.
+### 2. The centsTolerance window itself may be too tight
 
-### 1. `tuner` likely exposes the raw detector more directly
+For natural notes the effective acceptance window after the confidence gate is applied is:
 
-Its UI applies only a small amount of stabilization. `harmonica-tabs` adds vocabulary snapping, confidence filtering, vote smoothing, and hold logic before the note becomes user-visible.
+```
+tolerance × (1 − confidenceGate) = 50 × 0.8 = 40 cents
+```
 
-So even if the raw detectors were equally good, `tuner` could still feel more accurate because less interpretation happens after detection.
+A real harmonica reed played with any vibrato or embouchure drift can easily be 30–45 cents
+sharp or flat while still being unambiguously the intended note. Notes near the edge of this
+window get rejected without the user knowing.
 
-### 2. G harmonica makes octave mistakes more damaging
+**Experiment**: increase natural-note `confidenceThreshold` from `0.3` to a lower value in
+`harmonica-frequencies.ts`, which widens the `centsTolerance` for those notes.
 
-The repo already has an explicit TODO about G harmonica notes being detected one octave too low.
+### 3. The signal hold can propagate a wrong detection for 400 ms
 
-Relevant file:
+With `SMOOTHING_WINDOW = 1`, a wrong detection now corrects immediately on the next frame.
+But the 400 ms signal hold in `getAudioSnapshot` means the tone-follow snapshot continues
+to report the held (wrong) note for up to 400 ms after confidence drops below the gate.
 
-- [`docs/TODO.md`](/workspaces/codespaces-blank/docs/TODO.md)
+In practice: play a wrong note briefly, confidence drops, hold kicks in. The tone-follow
+cursor can advance to the wrong tab position and remain there for up to 400 ms before
+self-correcting.
 
-That aligns with a classic low-note problem: lower fundamentals are harder to estimate robustly from real reed timbre, especially when strong harmonics or breath noise are present.
+**Experiment**: reduce `signalHoldMs` from 400 to 100–150 ms and observe whether tone-follow
+becomes more self-correcting without losing note continuity during brief breath pauses.
 
-Even though the custom YIN implementation is intended to reduce octave errors, real instruments are harsher than clean test tones.
+### 4. C/WASM vs TypeScript for the same algorithm
 
-### 3. Vocabulary snapping can hide detector ambiguity
+Both apps now use `yinfft`. The difference is that aubio's implementation is optimized C code
+compiled to WebAssembly, while `harmonica-tabs` uses a TypeScript implementation. Both follow
+the same mathematical specification, but:
 
-`harmonica-tabs` does not surface "I heard something around here, but I am unsure." It snaps to the nearest allowed note if it is within tolerance.
+- aubio's implementation has had years of production use and edge-case hardening on real
+  instrument recordings.
+- The TypeScript implementation was validated on sine waves; real harmonica timbre may expose
+  edge cases not yet encountered.
 
-That is useful for gameplay-like UX, but it can make a detector bug feel worse:
+This is the hardest gap to close without a significant architectural change (e.g. adding aubio
+as a WASM dependency). It is worth investigating only after the simpler parameter changes
+above have been tested.
 
-- a chromatic tuner may flicker between uncertain values,
-- a harmonica-aware app may show the wrong hole/note confidently.
+### 5. Tuner's note-name stabilization is more permissive on octaves
 
-### 4. Majority-vote smoothing can promote the wrong answer
+Tuner updates the display when the same note **name** appears twice ("G", "B"). This means
+G3 and G4 both satisfy "G" — the check ignores octave.
 
-If the raw detector oscillates between the correct pitch and a lower-octave candidate, the 5-frame / 3-vote smoothing step can turn that unstable stream into a stable wrong answer.
+For a chromatic tuner this is appropriate. For harmonica-tabs it is not directly applicable
+(G3 and G4 are different holes), but it does mean tuner is less sensitive to octave-estimation
+instability in the underlying detector. `harmonica-tabs` snaps to a specific MIDI note, so
+an octave error produces a visibly wrong tab position rather than a stabilized note name.
 
-This is especially relevant if the wrong octave is slightly easier for the detector to find during attack or on quieter frames.
+## Cross-Platform Notes
 
-### 5. Real-world coverage is weaker than the code comments suggest
+Both web and native now share the same `MIN_RMS = 0.005` silence gate (defined in
+`fft-detector.ts`, which runs on both platforms). Earlier versions of this document incorrectly
+stated that iOS used a different RMS threshold.
 
-The tests for `harmonica-tabs` use generated sine waves, including a G harmonica vocabulary test.
+On native iOS, the audio chain additionally includes:
+- A 40 ms Swift-side frame emission floor (`HarmonicaAudioModule.swift`)
+- A configurable JS-side interval (default 80 ms, exposed in the debug properties panel)
 
-Relevant file:
-
-- [`harmonica-tabs/tests/logic/fft-detector.test.ts`](/workspaces/codespaces-blank/harmonica-tabs/tests/logic/fft-detector.test.ts)
-
-That proves:
-
-- the YIN implementation can identify ideal frequencies,
-- the note vocabulary mapping logic works on ideal inputs,
-- the G harmonica note list itself is not obviously broken.
-
-It does not prove:
-
-- correct behavior on real harmonica recordings,
-- stable octave selection on reed-rich timbre,
-- stable detection during attack/transient phases,
-- comparable behavior between web, iOS, and Android microphone input.
-
-## Cross-Platform Note
-
-`harmonica-tabs` uses the same overall YIN approach on web, iOS, and Android, but not perfectly identical runtime conditions.
-
-Relevant files:
-
-- [`harmonica-tabs/src/logic/web-audio.ts`](/workspaces/codespaces-blank/harmonica-tabs/src/logic/web-audio.ts)
-- [`harmonica-tabs/modules/harmonica-audio/ios/HarmonicaAudioModule.swift`](/workspaces/codespaces-blank/harmonica-tabs/modules/harmonica-audio/ios/HarmonicaAudioModule.swift)
-- [`harmonica-tabs/modules/harmonica-audio/android/src/main/java/expo/modules/harmonicaaudio/HarmonicaAudioModule.kt`](/workspaces/codespaces-blank/harmonica-tabs/modules/harmonica-audio/android/src/main/java/expo/modules/harmonicaaudio/HarmonicaAudioModule.kt)
-
-Notable detail:
-
-- web and Android use an RMS silence gate of `0.005`,
-- iOS uses `0.001`.
-
-That inconsistency alone does not explain the G issue, but it is a reminder that the app’s behavior is not purely algorithmic. Platform capture details and thresholds also matter.
-
-## My Best Current Explanation
-
-Based on source alone, the most likely story is:
-
-1. `harmonica-tabs` has a reasonable custom detector design.
-2. Its idealized tests are too easy compared with real harmonica audio.
-3. On real G harmonica notes, some frames likely land on the wrong octave.
-4. The harmonica-specific snap-to-vocabulary step converts those octave mistakes into valid note outputs.
-5. The smoothing layer then stabilizes whichever octave wins enough recent frames.
-6. The user experiences that final stabilized result as "unreliable detection," even if the deeper issue starts earlier in the pipeline.
-
-That would also explain why a simpler chromatic tuner can feel better even without any harmonica-specific intelligence.
-
-## What This Comparison Suggests For Future Investigation
-
-Without changing code yet, I would investigate in this order:
-
-1. Log the raw fundamental from YIN before vocabulary snapping.
-2. Log the snapped note chosen from the harmonica vocabulary.
-3. Log the pre-smoothing stream versus the final smoothed frequency.
-gi5. Compare the same real sample through `tuner` and `harmonica-tabs` frame by frame.
-
-That order is beginner-friendly and low-risk because it separates:
-
-- raw pitch estimation,
-- note snapping,
-- smoothing,
-- UI interpretation.
-
-If we skip that separation, it will be very hard to tell whether the real bug is:
-
-- the detector,
-- the vocabulary mapping,
-- the smoothing thresholds,
-- or the final UI matching logic.
-
-For a proposed first-pass recording format, see [`docs/RECORDING_DATASET_SPEC.md`](/workspaces/codespaces-blank/docs/RECORDING_DATASET_SPEC.md).
+These controls are visible in Properties → Show debug → "Frame interval (ms)". They do not
+affect detection quality, only throughput.
 
 ## Bottom Line
 
-`tuner` is better at one narrow job: general note detection with a mature external detector and very little post-processing.
+`tuner` feels better for two remaining reasons, in descending order of impact:
 
-`harmonica-tabs` is trying to do a harder job: note detection plus harmonica-specific interpretation plus tone-follow UX.
+1. **No second confidence gate.** It accepts any non-silent pitch from aubio. `harmonica-tabs`
+   silently rejects detections that are "too far" from the nearest vocabulary note, which
+   includes many notes played with embouchure variation or during onset.
 
-So the comparison does not point to one simple conclusion like "replace YIN" or "copy `tuner` exactly." The stronger conclusion is:
+2. **Production-hardened C/WASM implementation.** Same algorithm, but aubio has been tested
+   on real-world instrument recordings far more extensively than the custom TypeScript version.
 
-- `tuner` is probably winning because its signal path is simpler and less opinionated after raw detection.
-- `harmonica-tabs` is more likely losing reliability in the interaction between raw pitch estimation, harmonica-specific snapping, and smoothing than in any one isolated file.
+The most impactful low-risk experiment is lowering or removing the `confidenceGate` and
+observing whether correct detections increase more than false positives do.

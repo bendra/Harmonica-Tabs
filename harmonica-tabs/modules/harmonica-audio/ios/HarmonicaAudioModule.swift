@@ -6,6 +6,13 @@ public class HarmonicaAudioModule: Module {
   private var sampleAccumulator: [Float] = []
   private let targetFrameCount = 4096
 
+  // Throttle: emit at most one frame every 150 ms so the JS bridge event queue
+  // never builds up. The JS thread (React + YIN detection) runs on the same
+  // thread as the bridge dispatcher; if we emit faster than JS can process,
+  // events queue up and latency grows unboundedly over time.
+  private let minFrameIntervalSeconds: TimeInterval = 0.04
+  private var lastFrameSentAt: Date = .distantPast
+
   public func definition() -> ModuleDefinition {
     Name("HarmonicaAudio")
 
@@ -51,6 +58,18 @@ public class HarmonicaAudioModule: Module {
       self.sampleAccumulator.append(contentsOf: incoming)
 
       if self.sampleAccumulator.count >= self.targetFrameCount {
+        let now = Date()
+        guard now.timeIntervalSince(self.lastFrameSentAt) >= self.minFrameIntervalSeconds else {
+          // Too soon — drop older samples, keeping the freshest audio so the
+          // next emitted frame isn't stale.
+          let keepCount = self.targetFrameCount - 1
+          if self.sampleAccumulator.count > keepCount {
+            self.sampleAccumulator = Array(self.sampleAccumulator.suffix(keepCount))
+          }
+          return
+        }
+        self.lastFrameSentAt = now
+
         var frame = Array(self.sampleAccumulator.prefix(self.targetFrameCount))
         self.sampleAccumulator.removeFirst(self.targetFrameCount)
 
@@ -77,6 +96,7 @@ public class HarmonicaAudioModule: Module {
     audioEngine?.stop()
     audioEngine = nil
     sampleAccumulator = []
+    lastFrameSentAt = .distantPast
     try? AVAudioSession.sharedInstance().setActive(false)
   }
 }

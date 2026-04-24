@@ -1285,6 +1285,9 @@ export default function App() {
     toneToleranceCents,
     toneFollowMinConfidence,
     simHz,
+    nativeFrameIntervalMsInput,
+    setNativeFrameIntervalMsInput,
+    nativeFrameIntervalMs,
   } = useAudioSettings();
   const {
     savedTabs,
@@ -1842,6 +1845,25 @@ export default function App() {
                 <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
               </Pressable>
             </View>
+            {showDebug && Platform.OS !== 'web' && (
+              <View style={styles.propertiesInlineFields}>
+                <View style={styles.propertiesInlineField}>
+                  <Text style={styles.dropdownLabel}>Frame interval (ms)</Text>
+                  <TextInput
+                    value={nativeFrameIntervalMsInput}
+                    onChangeText={setNativeFrameIntervalMsInput}
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    placeholder={String(DEFAULT_AUDIO_SETTINGS.nativeFrameIntervalMs)}
+                    placeholderTextColor="#64748b"
+                    style={styles.propertiesNumberInput}
+                  />
+                </View>
+              </View>
+            )}
             <Text style={styles.propertiesTitle}>Tone Follow</Text>
             <View style={styles.propertiesInlineFields}>
               <View style={styles.propertiesInlineField}>
@@ -2158,7 +2180,7 @@ export default function App() {
   }
 
   return (
-    <AudioListeningProvider simHz={simHz} harmonicaPc={harmonicaKey.pc}>
+    <AudioListeningProvider simHz={simHz} harmonicaPc={harmonicaKey.pc} nativeFrameIntervalMs={nativeFrameIntervalMs}>
       <SafeAreaView style={styles.safeArea}>
         {isTabsLibraryScreen || isScalesScreen ? (
           <View style={styles.staticContainer}>{renderMainContent()}</View>

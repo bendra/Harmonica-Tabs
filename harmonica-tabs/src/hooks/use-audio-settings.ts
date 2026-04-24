@@ -38,6 +38,9 @@ export function useAudioSettings() {
     DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput,
   );
   const [simFrequency, setSimFrequency] = useState<string>(DEFAULT_AUDIO_SETTINGS.simFrequencyInput);
+  const [nativeFrameIntervalMsInput, setNativeFrameIntervalMsInput] = useState<string>(
+    DEFAULT_AUDIO_SETTINGS.nativeFrameIntervalMsInput,
+  );
 
   const toneToleranceCents = useMemo(
     () =>
@@ -64,6 +67,17 @@ export function useAudioSettings() {
     return Number.isFinite(parsed) ? parsed : null;
   }, [simFrequency]);
 
+  const nativeFrameIntervalMs = useMemo(
+    () =>
+      parseBoundedInteger(
+        nativeFrameIntervalMsInput,
+        DEFAULT_AUDIO_SETTINGS.nativeFrameIntervalMs,
+        AUDIO_SETTINGS_LIMITS.nativeFrameIntervalMs.min,
+        AUDIO_SETTINGS_LIMITS.nativeFrameIntervalMs.max,
+      ),
+    [nativeFrameIntervalMsInput],
+  );
+
   return {
     showDebug,
     setShowDebug,
@@ -77,5 +91,8 @@ export function useAudioSettings() {
     toneToleranceCents,
     toneFollowMinConfidence,
     simHz,
+    nativeFrameIntervalMsInput,
+    setNativeFrameIntervalMsInput: (value: string) => setNativeFrameIntervalMsInput(sanitizeDecimalInput(value)),
+    nativeFrameIntervalMs,
   };
 }

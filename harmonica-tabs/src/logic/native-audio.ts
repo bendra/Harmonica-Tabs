@@ -15,6 +15,11 @@ type PitchUpdateHandler = (update: SingleNoteResult) => void;
 export function createNativeAudioPitchDetector() {
   let subscription: ReturnType<typeof HarmonicaAudioModule.addListener> | null = null;
   let currentVocabulary: HarmonicaVocabulary | null = null;
+  // JS-side frame rate limit. Works in tandem with the Swift-side throttle:
+  // the effective rate is max(jsInterval, swiftFloor). Lets us tune responsiveness
+  // at runtime without a native rebuild.
+  let frameIntervalMs = 80;
+  let lastProcessedAt = 0;
 
   function isSupported(): boolean {
     return true;
@@ -22,9 +27,17 @@ export function createNativeAudioPitchDetector() {
 
   async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary) {
     currentVocabulary = vocabulary;
+    // Remove any existing subscription before adding a new one. If start() is
+    // called twice (e.g. rapid listen toggle), the old listener would otherwise
+    // keep firing, doubling the processing work on every frame.
+    subscription?.remove();
+    subscription = null;
     // Subscribe before starting so no frames are missed.
     subscription = HarmonicaAudioModule.addListener('onAudioFrame', (event) => {
       if (!currentVocabulary) return;
+      const now = Date.now();
+      if (now - lastProcessedAt < frameIntervalMs) return;
+      lastProcessedAt = now;
       const samples = new Float32Array(event.samples);
       const result = detectSingleNote(samples, event.sampleRate, currentVocabulary);
       onUpdate(result);
@@ -39,11 +52,16 @@ export function createNativeAudioPitchDetector() {
     subscription?.remove();
     subscription = null;
     currentVocabulary = null;
+    lastProcessedAt = 0;
   }
 
   function updateVocabulary(vocabulary: HarmonicaVocabulary) {
     currentVocabulary = vocabulary;
   }
 
-  return { isSupported, start, stop, updateVocabulary };
+  function updateFrameIntervalMs(ms: number) {
+    frameIntervalMs = ms;
+  }
+
+  return { isSupported, start, stop, updateVocabulary, updateFrameIntervalMs };
 }

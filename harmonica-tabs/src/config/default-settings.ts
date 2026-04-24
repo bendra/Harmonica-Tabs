@@ -18,6 +18,10 @@ export const AUDIO_SETTINGS_LIMITS = {
     min: 0,
     max: 1,
   },
+  nativeFrameIntervalMs: {
+    min: 20,
+    max: 500,
+  },
 } as const;
 
 export const DEFAULT_AUDIO_SETTINGS = {
@@ -29,4 +33,6 @@ export const DEFAULT_AUDIO_SETTINGS = {
   simFrequencyInput: '440',
   signalHoldMs: 400,
   confidenceGate: 0.2,
+  nativeFrameIntervalMsInput: '80',
+  nativeFrameIntervalMs: 80,
 } as const;
