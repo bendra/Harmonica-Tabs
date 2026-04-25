@@ -42,6 +42,7 @@ import { useAudioSettings } from './src/hooks/use-audio-settings';
 import { AudioListeningProvider, useAudioListening } from './src/hooks/use-audio-listening';
 import { useTransposerSession } from './src/hooks/use-transposer-session';
 import { useTabEditor, SaveTabMode, TabsSubview } from './src/hooks/use-tab-editor';
+import { LatencySnapshot } from './src/logic/audio-latency';
 
 function getLayoutTier(shortEdge: number): LayoutTier {
   if (shortEdge < 420) return 'compact';
@@ -144,6 +145,10 @@ function getScalesLayoutMetrics(layoutTier: LayoutTier) {
         arpeggioTabGap: 2,
       };
   }
+}
+
+function formatLatencyMs(value: number | null) {
+  return value === null ? '—' : `${value.toFixed(1)}ms`;
 }
 
 
@@ -384,8 +389,10 @@ function ToneFollowDebugPanel(props: {
   simFrequency: string;
   setSimFrequency: (value: string) => void;
   followStatus: string;
+  latencySnapshot: LatencySnapshot | null;
 }) {
   const now = Date.now();
+  const latency = props.latencySnapshot;
 
   return (
     <View style={styles.debugPanel}>
@@ -399,6 +406,31 @@ function ToneFollowDebugPanel(props: {
         Last detect: {props.lastDetectedAt ? `${now - props.lastDetectedAt}ms ago` : '—'} · Status:{' '}
         {props.followStatus}
       </Text>
+      {latency && (
+        <>
+          <Text style={styles.debugText}>
+            Frame: {formatLatencyMs(latency.frameDurationMs)} · Detect: {formatLatencyMs(latency.detectorDurationMs)} · Votes:{' '}
+            {latency.smoothingVotes}/{latency.smoothingMinVotes} · Gate: {latency.confidencePassed ? 'pass' : 'wait'}
+          </Text>
+          <Text style={styles.debugText}>
+            This note: Raw {formatLatencyMs(latency.current.captureToRawMs)} · Snap {formatLatencyMs(latency.current.rawToSnappedMs)} · Smooth{' '}
+            {formatLatencyMs(latency.current.snappedToSmoothedMs)} · UI {formatLatencyMs(latency.current.smoothedToUiMs)}
+          </Text>
+          <Text style={styles.debugText}>
+            Totals: UI {formatLatencyMs(latency.current.captureToUiMs)} · Tuner baseline {formatLatencyMs(latency.current.captureToTunerBaselineMs)} · Gap{' '}
+            {formatLatencyMs(latency.current.gapVsTunerBaselineMs)}
+          </Text>
+          <Text style={styles.debugText}>
+            Avg ({latency.completedEpisodeCount}): UI {formatLatencyMs(latency.averages.captureToUiMs)} · Tuner baseline{' '}
+            {formatLatencyMs(latency.averages.captureToTunerBaselineMs)} · Gap {formatLatencyMs(latency.averages.gapVsTunerBaselineMs)}
+          </Text>
+          <Text style={styles.debugText}>
+            Labels: Raw {latency.rawLabel ?? '—'} · Snap {latency.snappedLabel ?? '—'} · Stable {latency.stableLabel ?? '—'} · Tuner{' '}
+            {latency.tunerBaselineLabel ?? '—'}
+          </Text>
+          <Text style={styles.debugText}>Window: {latency.smoothingWindowLabels.join(' · ') || '—'}</Text>
+        </>
+      )}
       {props.detectedCandidates.length > 0 && (
         <Text style={styles.debugText}>
           Top candidates:{' '}
@@ -452,6 +484,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
     detectedCandidates,
     lastDetectedAt,
     audioSnapshot,
+    latencySnapshot,
     startListening,
     stopListening,
   } = useAudioListening();
@@ -642,6 +675,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
               simFrequency={props.simFrequency}
               setSimFrequency={props.setSimFrequency}
               followStatus={props.transposerFollowStatus}
+              latencySnapshot={latencySnapshot}
             />
           )}
         </View>
@@ -882,6 +916,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
     detectedCandidates,
     lastDetectedAt,
     audioSnapshot,
+    latencySnapshot,
     startListening,
     stopListening,
   } = useAudioListening();
@@ -991,6 +1026,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
             simFrequency={props.simFrequency}
             setSimFrequency={props.setSimFrequency}
             followStatus={transposerFollowEvaluation.status}
+            latencySnapshot={latencySnapshot}
           />
         )}
         <View style={styles.transposerLibraryRow}>

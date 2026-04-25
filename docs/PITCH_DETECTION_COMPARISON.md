@@ -231,7 +231,7 @@ Without changing code yet, I would investigate in this order:
 1. Log the raw fundamental from YIN before vocabulary snapping.
 2. Log the snapped note chosen from the harmonica vocabulary.
 3. Log the pre-smoothing stream versus the final smoothed frequency.
-gi5. Compare the same real sample through `tuner` and `harmonica-tabs` frame by frame.
+4. Compare the same real sample through `tuner` and `harmonica-tabs` frame by frame.
 
 That order is beginner-friendly and low-risk because it separates:
 
@@ -259,3 +259,92 @@ So the comparison does not point to one simple conclusion like "replace YIN" or 
 
 - `tuner` is probably winning because its signal path is simpler and less opinionated after raw detection.
 - `harmonica-tabs` is more likely losing reliability in the interaction between raw pitch estimation, harmonica-specific snapping, and smoothing than in any one isolated file.
+
+## Side-by-Side Video Verification Protocol
+
+This is the recommended manual verification flow for responsiveness because it is hard to play and read the debug panel at the same time.
+
+### Setup
+
+1. Put `tuner` and `harmonica-tabs` side by side on the same screen if possible.
+2. In `harmonica-tabs`, enable the debug panel so timing lines are visible while listening.
+3. Keep the same harmonica, microphone distance, and room setup for the whole recording.
+4. Record screen and audio together so the playback shows both apps and the note attack timing.
+
+### Recording Script
+
+Use a short, repeatable script instead of improvising:
+
+1. One stable sustained note.
+2. Two medium repeated notes of the same pitch.
+3. Four fast repeated notes of the same pitch.
+4. A quick alternation between two adjacent notes.
+
+That script gives coverage for:
+
+- steady-state latency,
+- repeated-note responsiveness,
+- and note-change responsiveness.
+
+### Playback Review
+
+Replay the recording at `0.25x` speed or frame-step if your player supports it.
+
+For each note group, compare:
+
+1. When the note attack is audible in the recording.
+2. When `tuner` visibly switches note.
+3. When `harmonica-tabs` visibly switches note.
+4. What the `harmonica-tabs` debug panel says at that moment.
+
+### What To Look For
+
+For a sustained note:
+
+- If `Raw` changes quickly but the visible note arrives later, the delay is probably after raw detection.
+- If `Detect` is small but `Totals: UI` is large, the problem is probably not detector CPU time.
+
+For repeated fast notes:
+
+- If `tuner` switches notes but `harmonica-tabs` stays on the old note, watch `Votes`.
+- If `Votes` gets stuck at `1/3` or `2/3`, smoothing is likely blocking the update.
+- If `Raw` changes but `Stable` does not, the delay is likely in smoothing rather than pitch estimation.
+
+For wrong or sticky notes:
+
+- If `Snap` is already wrong, the issue starts before smoothing.
+- If `Snap` is right but the visible note is late or stale, the issue is more likely smoothing or gating.
+
+### How To Use The Numbers
+
+The most useful panel lines are:
+
+- `Frame`
+- `Detect`
+- `This note`
+- `Totals`
+- `Window`
+
+Interpret them like this:
+
+- `Frame` is how much audio each callback covers. At `4096` samples and `44.1kHz`, this is about `93ms`.
+- `Detect` is how long the detector itself took to process one frame.
+- If `Detect` is small relative to `Frame`, CPU time is probably not the main bottleneck.
+- If `Totals: UI` is much larger than the tuner-style baseline, the extra delay is likely happening after raw detection, usually in smoothing or gating.
+
+### Suggested Review Worksheet
+
+For each clip or note group, write down:
+
+1. Pattern played.
+2. Whether `tuner` reacted early / same / late relative to the audio attack.
+3. Whether `harmonica-tabs` `Raw` reacted early / same / late.
+4. Whether `harmonica-tabs` visible note reacted early / same / late.
+5. Whether `Votes` reached `3/3` quickly or got stuck below that.
+6. Best current guess: detector, snapping, smoothing, or confidence/hold logic.
+
+The goal is not just "it feels delayed." The goal is to identify whether the delay appears:
+
+- before `Raw`,
+- between `Raw` and `Snap`,
+- or between `Snap` and visible UI.

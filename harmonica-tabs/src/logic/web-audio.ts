@@ -1,5 +1,6 @@
 import { detectSingleNote } from './fft-detector';
 import { HarmonicaVocabulary } from './harmonica-frequencies';
+import { PitchUpdateTrace } from './audio-latency';
 
 /**
  * Streaming pitch detector update emitted from the microphone loop.
@@ -9,6 +10,7 @@ type PitchUpdate = {
   rawFrequency: number | null;
   confidence: number;
   rms: number;
+  trace?: PitchUpdateTrace | null;
 };
 
 type PitchUpdateHandler = (update: PitchUpdate) => void;
@@ -27,6 +29,13 @@ export function createWebAudioPitchDetector() {
   let generation = 0;
   let onUpdateRef: PitchUpdateHandler | null = null;
   let currentVocabulary: HarmonicaVocabulary | null = null;
+
+  function nowMs() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  }
 
   async function cleanupResources(
     resources: {
@@ -174,8 +183,22 @@ export function createWebAudioPitchDetector() {
           if (generation !== startGeneration || !running || !resources.audioContext) return;
           const input = event.inputBuffer?.getChannelData(0);
           if (!input || !currentVocabulary) return;
+          const callbackAtMs = nowMs();
+          const detectorStartAtMs = callbackAtMs;
           const result = detectSingleNote(input, resources.audioContext.sampleRate, currentVocabulary);
-          onUpdateRef?.(result);
+          const detectorEndAtMs = nowMs();
+          const frameDurationMs = (input.length / resources.audioContext.sampleRate) * 1000;
+          onUpdateRef?.({
+            ...result,
+            trace: {
+              frameDurationMs,
+              callbackAtMs,
+              estimatedFrameStartAtMs: callbackAtMs - frameDurationMs,
+              detectorStartAtMs,
+              detectorEndAtMs,
+              detectorDurationMs: detectorEndAtMs - detectorStartAtMs,
+            },
+          });
         };
 
         resources.source.connect(resources.processor);

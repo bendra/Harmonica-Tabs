@@ -93,7 +93,18 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState, savedTabDb } = 
       startQueue: [] as Array<() => Promise<void>>,
       startSpy: vi.fn(),
       stopSpy: vi.fn(),
-      updateHandlers: [] as Array<(update: { frequency: number | null; confidence: number; rms: number }) => void>,
+      updateHandlers: [] as Array<
+        (
+          update: {
+            frequency: number | null;
+            rawFrequency?: number | null;
+            confidence: number;
+            rms: number;
+            candidates?: Array<{ frequency: number; confidence: number }>;
+            trace?: Record<string, number | null>;
+          },
+        ) => void
+      >,
     },
   };
 });
@@ -106,7 +117,18 @@ vi.mock('../../src/logic/app-storage', () => ({
 vi.mock('../../src/logic/web-audio', () => ({
   createWebAudioPitchDetector: () => ({
     isSupported: () => detectorMockState.isSupported,
-    start: (onUpdate: (update: { frequency: number | null; confidence: number; rms: number }) => void) => {
+    start: (
+      onUpdate: (
+        update: {
+          frequency: number | null;
+          rawFrequency?: number | null;
+          confidence: number;
+          rms: number;
+          candidates?: Array<{ frequency: number; confidence: number }>;
+          trace?: Record<string, number | null>;
+        },
+      ) => void,
+    ) => {
       detectorMockState.updateHandlers.push(onUpdate);
       detectorMockState.startSpy(onUpdate);
       const nextStart = detectorMockState.startQueue.shift();
@@ -365,7 +387,20 @@ describe('App listening lifecycle', () => {
 
     await act(async () => {
       for (let index = 0; index < 3; index += 1) {
-        detectorMockState.updateHandlers[0]({ frequency: 440, confidence: 0.91, rms: 0.02 });
+        detectorMockState.updateHandlers[0]({
+          frequency: 440,
+          rawFrequency: 440,
+          confidence: 0.91,
+          rms: 0.02,
+          trace: {
+            frameDurationMs: 93,
+            callbackAtMs: 100 + index * 93,
+            estimatedFrameStartAtMs: 7 + index * 93,
+            detectorStartAtMs: 96 + index * 93,
+            detectorEndAtMs: 100 + index * 93,
+            detectorDurationMs: 4,
+          },
+        });
       }
       await Promise.resolve();
       await Promise.resolve();
@@ -378,6 +413,13 @@ describe('App listening lifecycle', () => {
     );
 
     expect(debugLine).toBeTruthy();
+    expect(
+      root.find(
+        (node: any) =>
+          node.type === 'Text' &&
+          flattenTextChildren(node.children).includes('Totals: UI 279.0ms · Tuner baseline 186.0ms · Gap 93.0ms'),
+      ),
+    ).toBeTruthy();
 
     act(() => {
       renderer.unmount();

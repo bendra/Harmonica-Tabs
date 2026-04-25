@@ -12,6 +12,7 @@ import { createWebAudioPitchDetector } from '../logic/web-audio';
 import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
 import { frequencyToMidi } from '../logic/pitch';
 import { DEFAULT_AUDIO_SETTINGS } from '../config/default-settings';
+import { createLatencyProfiler, LatencySnapshot, PitchUpdateTrace } from '../logic/audio-latency';
 
 /**
  * Temporal smoothing: how many recent frames to consider, and how many must
@@ -50,6 +51,21 @@ function smoothedFrequency(buffer: (number | null)[]): number | null {
   return bestFreqs[bestFreqs.length - 1];
 }
 
+function smoothingVoteCount(buffer: (number | null)[]): number {
+  const votesByMidi = new Map<number, number>();
+  for (const freq of buffer) {
+    if (freq === null) continue;
+    const midi = Math.round(frequencyToMidi(freq));
+    votesByMidi.set(midi, (votesByMidi.get(midi) ?? 0) + 1);
+  }
+
+  let bestVotes = 0;
+  for (const votes of votesByMidi.values()) {
+    if (votes > bestVotes) bestVotes = votes;
+  }
+  return bestVotes;
+}
+
 type AudioListeningParams = {
   simHz: number | null;
   harmonicaPc: number;
@@ -69,6 +85,7 @@ type AudioListeningState = {
 
 type AudioListeningValue = AudioListeningState & {
   audioSnapshot: DetectorSnapshot;
+  latencySnapshot: LatencySnapshot | null;
   startListening: () => Promise<void>;
   stopListening: () => void;
 };
@@ -98,6 +115,8 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
   let isDisposed = false;
   let listenSession = 0;
   let smoothingBuffer: (number | null)[] = [];
+  let latencyProfiler = createLatencyProfiler();
+  let latencySnapshot: LatencySnapshot | null = latencyProfiler.getSnapshot();
   let snapshot: AudioListeningValue;
   const listeners = new Set<() => void>();
 
@@ -109,6 +128,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     snapshot = {
       ...state,
       audioSnapshot: getAudioSnapshot(),
+      latencySnapshot,
       startListening,
       stopListening,
     };
@@ -121,6 +141,8 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
   }
 
   function resetDetectionState() {
+    latencyProfiler.reset();
+    latencySnapshot = latencyProfiler.getSnapshot();
     setState({
       detectedFrequency: null,
       detectedRawFrequency: null,
@@ -205,6 +227,8 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
       lastDetectedAt: null,
     });
     smoothingBuffer = [];
+    latencyProfiler.reset();
+    latencySnapshot = latencyProfiler.getSnapshot();
 
     function isCurrentListenSession() {
       return !isDisposed && listenSession === currentListenSession;
@@ -238,6 +262,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
           smoothingBuffer = nextBuffer;
 
           const stable = smoothedFrequency(nextBuffer);
+          const votes = smoothingVoteCount(nextBuffer);
           const nextCandidates = Array.isArray((update as { candidates?: DetectionCandidate[] }).candidates)
             ? (update as { candidates?: DetectionCandidate[] }).candidates ?? []
             : [];
@@ -245,6 +270,19 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
             typeof (update as { rawFrequency?: number | null }).rawFrequency === 'number'
               ? (update as { rawFrequency?: number | null }).rawFrequency ?? null
               : null;
+          const nextTrace =
+            (update as { trace?: PitchUpdateTrace | null }).trace ?? null;
+          latencySnapshot = latencyProfiler.update({
+            trace: nextTrace,
+            rawFrequency: nextRawFrequency,
+            snappedFrequency: update.frequency,
+            stableFrequency: stable,
+            confidence: update.confidence,
+            confidenceGate: DEFAULT_AUDIO_SETTINGS.confidenceGate,
+            smoothingWindow: nextBuffer,
+            smoothingVotes: votes,
+            smoothingMinVotes: SMOOTHING_MIN_VOTES,
+          });
           setState({
             detectedFrequency: stable,
             detectedRawFrequency: nextRawFrequency,
@@ -293,6 +331,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     isDisposed = true;
     listenSession += 1;
     detector?.stop();
+    latencyProfiler.reset();
     listeners.clear();
   }
 

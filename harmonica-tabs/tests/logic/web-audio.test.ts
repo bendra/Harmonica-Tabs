@@ -198,13 +198,23 @@ describe('createWebAudioPitchDetector', () => {
 
     expect(firstHandler).not.toHaveBeenCalled();
     expect(secondHandler).toHaveBeenCalledTimes(1);
-    expect(secondHandler).toHaveBeenCalledWith({
-      frequency: null,
-      rawFrequency: null,
-      confidence: 0,
-      rms: 0,
-      candidates: [],
-    });
+    expect(secondHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frequency: null,
+        rawFrequency: null,
+        confidence: 0,
+        rms: 0,
+        candidates: [],
+        trace: expect.objectContaining({
+          frameDurationMs: expect.any(Number),
+          callbackAtMs: expect.any(Number),
+          estimatedFrameStartAtMs: expect.any(Number),
+          detectorStartAtMs: expect.any(Number),
+          detectorEndAtMs: expect.any(Number),
+          detectorDurationMs: expect.any(Number),
+        }),
+      }),
+    );
   });
 
   it('ignores saved track-end handlers after stop clears the session', async () => {
