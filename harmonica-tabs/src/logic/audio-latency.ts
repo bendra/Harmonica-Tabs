@@ -13,8 +13,10 @@ type LatencyEpisode = {
   frameStartAtMs: number | null;
   rawDetectedAtMs: number | null;
   snappedDetectedAtMs: number | null;
-  smoothedDetectedAtMs: number | null;
-  uiCommittedAtMs: number | null;
+  stableDetectedAtMs: number | null;
+  stableUiCommittedAtMs: number | null;
+  responsiveDetectedAtMs: number | null;
+  responsiveUiCommittedAtMs: number | null;
   tunerBaselineAtMs: number | null;
   committedNoteName: string | null;
   lastTunerCandidate: string | null;
@@ -32,8 +34,10 @@ export type LatencyMetrics = {
 };
 
 export type LatencySnapshot = {
-  current: LatencyMetrics;
-  averages: LatencyMetrics;
+  stableCurrent: LatencyMetrics;
+  stableAverages: LatencyMetrics;
+  responsiveCurrent: LatencyMetrics;
+  responsiveAverages: LatencyMetrics;
   frameDurationMs: number | null;
   detectorDurationMs: number | null;
   smoothingWindowLabels: string[];
@@ -43,6 +47,7 @@ export type LatencySnapshot = {
   rawLabel: string | null;
   snappedLabel: string | null;
   stableLabel: string | null;
+  responsiveLabel: string | null;
   tunerBaselineLabel: string | null;
   completedEpisodeCount: number;
 };
@@ -52,6 +57,7 @@ export type LatencyProfilerInput = {
   rawFrequency: number | null;
   snappedFrequency: number | null;
   stableFrequency: number | null;
+  responsiveFrequency: number | null;
   confidence: number;
   confidenceGate: number;
   smoothingWindow: (number | null)[];
@@ -81,12 +87,18 @@ function durationOrNull(start: number | null, end: number | null): number | null
   return Math.max(0, end - start);
 }
 
-function computeMetrics(episode: LatencyEpisode): LatencyMetrics {
+function computeMetrics(
+  episode: LatencyEpisode,
+  options: {
+    committedAtMs: number | null;
+    uiCommittedAtMs: number | null;
+  },
+): LatencyMetrics {
   const captureToRawMs = durationOrNull(episode.frameStartAtMs, episode.rawDetectedAtMs);
   const rawToSnappedMs = durationOrNull(episode.rawDetectedAtMs, episode.snappedDetectedAtMs);
-  const snappedToSmoothedMs = durationOrNull(episode.snappedDetectedAtMs, episode.smoothedDetectedAtMs);
-  const smoothedToUiMs = durationOrNull(episode.smoothedDetectedAtMs, episode.uiCommittedAtMs);
-  const captureToUiMs = durationOrNull(episode.frameStartAtMs, episode.uiCommittedAtMs);
+  const snappedToSmoothedMs = durationOrNull(episode.snappedDetectedAtMs, options.committedAtMs);
+  const smoothedToUiMs = durationOrNull(options.committedAtMs, options.uiCommittedAtMs);
+  const captureToUiMs = durationOrNull(episode.frameStartAtMs, options.uiCommittedAtMs);
   const captureToTunerBaselineMs = durationOrNull(episode.frameStartAtMs, episode.tunerBaselineAtMs);
   return {
     captureToRawMs,
@@ -108,8 +120,11 @@ function averageMetric(values: Array<number | null>): number | null {
   return filtered.reduce((sum, value) => sum + value, 0) / filtered.length;
 }
 
-function averageMetrics(history: LatencyEpisode[]): LatencyMetrics {
-  const metrics = history.map((episode) => computeMetrics(episode));
+function averageMetrics(
+  history: LatencyEpisode[],
+  options: (episode: LatencyEpisode) => { committedAtMs: number | null; uiCommittedAtMs: number | null },
+): LatencyMetrics {
+  const metrics = history.map((episode) => computeMetrics(episode, options(episode)));
   return {
     captureToRawMs: averageMetric(metrics.map((item) => item.captureToRawMs)),
     rawToSnappedMs: averageMetric(metrics.map((item) => item.rawToSnappedMs)),
@@ -126,8 +141,10 @@ function createEpisode(startAtMs: number | null): LatencyEpisode {
     frameStartAtMs: startAtMs,
     rawDetectedAtMs: null,
     snappedDetectedAtMs: null,
-    smoothedDetectedAtMs: null,
-    uiCommittedAtMs: null,
+    stableDetectedAtMs: null,
+    stableUiCommittedAtMs: null,
+    responsiveDetectedAtMs: null,
+    responsiveUiCommittedAtMs: null,
     tunerBaselineAtMs: null,
     committedNoteName: null,
     lastTunerCandidate: null,
@@ -136,19 +153,31 @@ function createEpisode(startAtMs: number | null): LatencyEpisode {
 }
 
 function hasSignal(input: LatencyProfilerInput): boolean {
-  return input.rawFrequency !== null || input.snappedFrequency !== null || input.stableFrequency !== null;
+  return (
+    input.rawFrequency !== null ||
+    input.snappedFrequency !== null ||
+    input.stableFrequency !== null ||
+    input.responsiveFrequency !== null
+  );
 }
 
 function hasMeaningfulEpisode(episode: LatencyEpisode): boolean {
-  const metrics = computeMetrics(episode);
-  return Object.values(metrics).some((value) => value !== null);
+  const stableMetrics = computeMetrics(episode, {
+    committedAtMs: episode.stableDetectedAtMs,
+    uiCommittedAtMs: episode.stableUiCommittedAtMs,
+  });
+  const responsiveMetrics = computeMetrics(episode, {
+    committedAtMs: episode.responsiveDetectedAtMs,
+    uiCommittedAtMs: episode.responsiveUiCommittedAtMs,
+  });
+  return [...Object.values(stableMetrics), ...Object.values(responsiveMetrics)].some((value) => value !== null);
 }
 
 export function createLatencyProfiler() {
   let activeEpisode: LatencyEpisode | null = null;
   let completedEpisodes: LatencyEpisode[] = [];
   let snapshot: LatencySnapshot = {
-    current: {
+    stableCurrent: {
       captureToRawMs: null,
       rawToSnappedMs: null,
       snappedToSmoothedMs: null,
@@ -157,7 +186,25 @@ export function createLatencyProfiler() {
       captureToTunerBaselineMs: null,
       gapVsTunerBaselineMs: null,
     },
-    averages: {
+    stableAverages: {
+      captureToRawMs: null,
+      rawToSnappedMs: null,
+      snappedToSmoothedMs: null,
+      smoothedToUiMs: null,
+      captureToUiMs: null,
+      captureToTunerBaselineMs: null,
+      gapVsTunerBaselineMs: null,
+    },
+    responsiveCurrent: {
+      captureToRawMs: null,
+      rawToSnappedMs: null,
+      snappedToSmoothedMs: null,
+      smoothedToUiMs: null,
+      captureToUiMs: null,
+      captureToTunerBaselineMs: null,
+      gapVsTunerBaselineMs: null,
+    },
+    responsiveAverages: {
       captureToRawMs: null,
       rawToSnappedMs: null,
       snappedToSmoothedMs: null,
@@ -175,6 +222,7 @@ export function createLatencyProfiler() {
     rawLabel: null,
     snappedLabel: null,
     stableLabel: null,
+    responsiveLabel: null,
     tunerBaselineLabel: null,
     completedEpisodeCount: 0,
   };
@@ -189,7 +237,7 @@ export function createLatencyProfiler() {
     completedEpisodes = [];
     snapshot = {
       ...snapshot,
-      current: {
+      stableCurrent: {
         captureToRawMs: null,
         rawToSnappedMs: null,
         snappedToSmoothedMs: null,
@@ -198,7 +246,25 @@ export function createLatencyProfiler() {
         captureToTunerBaselineMs: null,
         gapVsTunerBaselineMs: null,
       },
-      averages: {
+      stableAverages: {
+        captureToRawMs: null,
+        rawToSnappedMs: null,
+        snappedToSmoothedMs: null,
+        smoothedToUiMs: null,
+        captureToUiMs: null,
+        captureToTunerBaselineMs: null,
+        gapVsTunerBaselineMs: null,
+      },
+      responsiveCurrent: {
+        captureToRawMs: null,
+        rawToSnappedMs: null,
+        snappedToSmoothedMs: null,
+        smoothedToUiMs: null,
+        captureToUiMs: null,
+        captureToTunerBaselineMs: null,
+        gapVsTunerBaselineMs: null,
+      },
+      responsiveAverages: {
         captureToRawMs: null,
         rawToSnappedMs: null,
         snappedToSmoothedMs: null,
@@ -216,6 +282,7 @@ export function createLatencyProfiler() {
       rawLabel: null,
       snappedLabel: null,
       stableLabel: null,
+      responsiveLabel: null,
       tunerBaselineLabel: null,
       completedEpisodeCount: 0,
     };
@@ -225,8 +292,10 @@ export function createLatencyProfiler() {
     const signalPresent = hasSignal(input);
     const startAtMs = input.trace?.estimatedFrameStartAtMs ?? input.trace?.callbackAtMs ?? null;
     const rawNoteName = chromaticNoteName(input.rawFrequency ?? input.snappedFrequency);
+    const candidateNoteName = chromaticNoteName(input.snappedFrequency ?? input.rawFrequency);
     const stableNoteName = chromaticNoteName(input.stableFrequency);
-    const confidencePassed = input.stableFrequency !== null && input.confidence >= input.confidenceGate;
+    const responsiveNoteName = chromaticNoteName(input.responsiveFrequency);
+    const confidencePassed = input.snappedFrequency !== null && input.confidence >= input.confidenceGate;
     const stageAtMs = input.trace?.detectorEndAtMs ?? input.trace?.callbackAtMs ?? null;
 
     if (!signalPresent) {
@@ -235,10 +304,10 @@ export function createLatencyProfiler() {
     } else {
       const shouldStartNewEpisode =
         activeEpisode === null ||
-        (activeEpisode.uiCommittedAtMs !== null &&
-          stableNoteName !== null &&
+        ((activeEpisode.stableUiCommittedAtMs !== null || activeEpisode.responsiveUiCommittedAtMs !== null) &&
+          candidateNoteName !== null &&
           activeEpisode.committedNoteName !== null &&
-          stableNoteName !== activeEpisode.committedNoteName);
+          candidateNoteName !== activeEpisode.committedNoteName);
 
       if (shouldStartNewEpisode) {
         finalizeActiveEpisode();
@@ -258,8 +327,12 @@ export function createLatencyProfiler() {
           activeEpisode.snappedDetectedAtMs = stageAtMs;
         }
 
-        if (input.stableFrequency !== null && activeEpisode.smoothedDetectedAtMs === null) {
-          activeEpisode.smoothedDetectedAtMs = stageAtMs;
+        if (input.stableFrequency !== null && activeEpisode.stableDetectedAtMs === null) {
+          activeEpisode.stableDetectedAtMs = stageAtMs;
+        }
+
+        if (input.responsiveFrequency !== null && activeEpisode.responsiveDetectedAtMs === null) {
+          activeEpisode.responsiveDetectedAtMs = stageAtMs;
         }
 
         if (rawNoteName === null) {
@@ -279,16 +352,49 @@ export function createLatencyProfiler() {
           activeEpisode.tunerBaselineAtMs = stageAtMs;
         }
 
-        if (confidencePassed && activeEpisode.uiCommittedAtMs === null) {
-          activeEpisode.uiCommittedAtMs = stageAtMs;
+        if (
+          confidencePassed &&
+          activeEpisode.stableUiCommittedAtMs === null &&
+          input.stableFrequency !== null
+        ) {
+          activeEpisode.stableUiCommittedAtMs = stageAtMs;
           activeEpisode.committedNoteName = stableNoteName;
+        }
+
+        if (
+          confidencePassed &&
+          activeEpisode.responsiveUiCommittedAtMs === null &&
+          input.responsiveFrequency !== null
+        ) {
+          activeEpisode.responsiveUiCommittedAtMs = stageAtMs;
+          activeEpisode.committedNoteName = responsiveNoteName;
         }
       }
     }
 
     snapshot = {
-      current: activeEpisode ? computeMetrics(activeEpisode) : snapshot.current,
-      averages: averageMetrics(completedEpisodes),
+      stableCurrent:
+        activeEpisode
+          ? computeMetrics(activeEpisode, {
+              committedAtMs: activeEpisode.stableDetectedAtMs,
+              uiCommittedAtMs: activeEpisode.stableUiCommittedAtMs,
+            })
+          : snapshot.stableCurrent,
+      stableAverages: averageMetrics(completedEpisodes, (episode) => ({
+        committedAtMs: episode.stableDetectedAtMs,
+        uiCommittedAtMs: episode.stableUiCommittedAtMs,
+      })),
+      responsiveCurrent:
+        activeEpisode
+          ? computeMetrics(activeEpisode, {
+              committedAtMs: activeEpisode.responsiveDetectedAtMs,
+              uiCommittedAtMs: activeEpisode.responsiveUiCommittedAtMs,
+            })
+          : snapshot.responsiveCurrent,
+      responsiveAverages: averageMetrics(completedEpisodes, (episode) => ({
+        committedAtMs: episode.responsiveDetectedAtMs,
+        uiCommittedAtMs: episode.responsiveUiCommittedAtMs,
+      })),
       frameDurationMs: input.trace?.frameDurationMs ?? snapshot.frameDurationMs,
       detectorDurationMs: input.trace?.detectorDurationMs ?? snapshot.detectorDurationMs,
       smoothingWindowLabels: input.smoothingWindow.map((frequency) => formatNoteLabel(frequency) ?? '—'),
@@ -298,6 +404,7 @@ export function createLatencyProfiler() {
       rawLabel: formatNoteLabel(input.rawFrequency),
       snappedLabel: formatNoteLabel(input.snappedFrequency),
       stableLabel: formatNoteLabel(input.stableFrequency),
+      responsiveLabel: formatNoteLabel(input.responsiveFrequency),
       tunerBaselineLabel: activeEpisode?.lastTunerCandidate ?? null,
       completedEpisodeCount: completedEpisodes.length,
     };

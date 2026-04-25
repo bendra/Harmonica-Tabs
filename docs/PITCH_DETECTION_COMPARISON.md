@@ -249,6 +249,25 @@ If we skip that separation, it will be very hard to tell whether the real bug is
 
 For a proposed first-pass recording format, see [`docs/RECORDING_DATASET_SPEC.md`](/workspaces/codespaces-blank/docs/RECORDING_DATASET_SPEC.md).
 
+## Evidence From `debug-04-25` Screenshots
+
+The `debug-04-25` screenshot series provides concrete side-by-side evidence from low-, middle-, and high-register note transitions. In the low and middle examples, the browser tuner switches to the new note before `harmonica-tabs`, while the `harmonica-tabs` debug panel already shows the new note in `Raw` and `Snap`. This strongly suggests that a major part of the visible lag is happening after first-stage pitch detection, most likely in smoothing/stabilization. The highest-register example is less clean and may involve a separate pitch-estimation or octave-selection issue.
+
+Relevant low- and middle-register examples:
+
+- `G3 -> A3` at `00:00:12:08` (`G3-To-A3-3.png`): `tuner` already shows `A3 / 222.1 Hz`, while `harmonica-tabs` still visibly shows `G3 / 196.0 Hz`. Debug panel: `Raw: 221.3`, `Labels: Raw A3 · Snap A3 · Stable G3 · Tuner A`, `Window: G3 · G3 · G3 · G3 · A3`, `Votes: 4/3`. Interpretation: the new note is already detected and snapped, but the visible stable note is still the old one.
+- `A3 -> G3` at `00:00:13:11` (`A3-To-G3-3.png`): `tuner` already shows `G3 / 196.4 Hz`, while `harmonica-tabs` still visibly shows `A3 / 220.0 Hz`. Debug panel: `Raw: 195.9`, `Labels: Raw G3 · Snap G3 · Stable A3 · Tuner G`, `Window: A3 · A3 · A3 · G3 · G3`, `Votes: 3/3`. Interpretation: same pattern in reverse; raw and snapped note have already changed, but the visible stable note is still stale.
+- `E5 -> F5` at `00:00:46:26` (`E5-To-F5-2.png`): `tuner` already shows `F5 / 708.4 Hz`, while `harmonica-tabs` still visibly shows `E5 / 659.3 Hz`. Debug panel: `Raw: 707.3`, `Labels: Raw F5 · Snap F5 · Stable E5 · Tuner F`, `Window: E5 · E5 · E5 · E5 · F5`, `Votes: 4/3`. Interpretation: strong middle-register confirmation that the lag is after detection, not before it.
+- `E5 -> F5` at `00:00:46:30` (`E5-To-F5-4.png`): `tuner` still shows `F5`, while `harmonica-tabs` still visibly shows `E5`. Debug panel: `Raw: 708.5`, `Labels: Raw F5 · Snap F5 · Stable E5 · Tuner F`, `Window: E5 · E5 · E5 · F5 · F5`, `Votes: 3/3`. Interpretation: even after additional confirming frames, the stable display can still lag behind the already-correct raw/snapped result.
+- `F5 -> E5` at `00:00:47:10` (`F5-To-E5-3.png`): `tuner` already shows `E5 / 670.8 Hz`, while `harmonica-tabs` still visibly shows `F5 / 698.5 Hz`. Debug panel: `Raw: 670.7`, `Labels: Raw E5 · Snap E5 · Stable F5 · Tuner E`, `Window: F5 · F5 · F5 · E5 · E5`, `Votes: 4/3`. Interpretation: same post-detection lag in the opposite direction.
+- `F5 -> E5` at `00:00:47:14` (`F5-To-E5-4.png`): `tuner` still shows `E5 / 670.9 Hz`, while `harmonica-tabs` still visibly shows `F5 / 698.5 Hz`. Debug panel: `Raw: 670.7`, `Labels: Raw E5 · Snap E5 · Stable F5 · Tuner E`, `Window: F5 · F5 · E5 · E5 · E5`, `Votes: 3/3`. Interpretation: again, the app has already recognized the new note internally before the visible stable note catches up.
+
+High-register caution:
+
+- `F7 -> A#7` at `00:00:12:53` (`F7-To-A#7-4.png`): `tuner` shows `A#4 / 474.1 Hz`, while `harmonica-tabs` still visibly shows `F7 / 2793.8 Hz`. Debug panel: `Raw: 2368.5`, `Labels: Raw D7 · Snap D7 · Stable F7 · Tuner D`, `Window: F7 · F7 · F7 · D7 · D7`, `Votes: 3/3`. Interpretation: this does **not** look like a pure smoothing delay. The disagreement appears before smoothing, because `Raw` and `Snap` are already on a different note than the intended target. This should be documented separately as a possible high-register pitch-estimation or octave-selection issue. In this case `tuner` may be reacting faster while still landing on the wrong note, so its speed alone should not be treated as evidence that its result is better.
+
+Taken together, the low- and middle-register screenshot sequences are strong evidence that `harmonica-tabs` often identifies the new note before it updates the visible stable note. That makes smoothing/stabilization the leading explanation for the visible delay in ordinary note transitions. The highest-register example should remain flagged as a potentially separate problem, because it looks more like a pitch/register-selection disagreement than a simple smoothing delay.
+
 ## Bottom Line
 
 `tuner` is better at one narrow job: general note detection with a mature external detector and very little post-processing.

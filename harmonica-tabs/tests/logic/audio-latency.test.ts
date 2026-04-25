@@ -21,6 +21,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: 440,
       snappedFrequency: 440,
       stableFrequency: null,
+      responsiveFrequency: null,
       confidence: 0.9,
       confidenceGate: 0.2,
       smoothingWindow: [440],
@@ -33,6 +34,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: 440,
       snappedFrequency: 440,
       stableFrequency: null,
+      responsiveFrequency: 440,
       confidence: 0.9,
       confidenceGate: 0.2,
       smoothingWindow: [440, 440],
@@ -45,6 +47,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: 440,
       snappedFrequency: 440,
       stableFrequency: 440,
+      responsiveFrequency: 440,
       confidence: 0.9,
       confidenceGate: 0.2,
       smoothingWindow: [440, 440, 440],
@@ -52,15 +55,17 @@ describe('createLatencyProfiler', () => {
       smoothingMinVotes: 3,
     });
 
-    expect(snapshot.current.captureToRawMs).toBe(93);
-    expect(snapshot.current.rawToSnappedMs).toBe(0);
-    expect(snapshot.current.snappedToSmoothedMs).toBe(186);
-    expect(snapshot.current.smoothedToUiMs).toBe(0);
-    expect(snapshot.current.captureToUiMs).toBe(279);
-    expect(snapshot.current.captureToTunerBaselineMs).toBe(186);
-    expect(snapshot.current.gapVsTunerBaselineMs).toBe(93);
+    expect(snapshot.stableCurrent.captureToRawMs).toBe(93);
+    expect(snapshot.stableCurrent.rawToSnappedMs).toBe(0);
+    expect(snapshot.stableCurrent.snappedToSmoothedMs).toBe(186);
+    expect(snapshot.stableCurrent.smoothedToUiMs).toBe(0);
+    expect(snapshot.stableCurrent.captureToUiMs).toBe(279);
+    expect(snapshot.stableCurrent.captureToTunerBaselineMs).toBe(186);
+    expect(snapshot.stableCurrent.gapVsTunerBaselineMs).toBe(93);
+    expect(snapshot.responsiveCurrent.captureToUiMs).toBe(186);
     expect(snapshot.tunerBaselineLabel).toBe('A');
     expect(snapshot.stableLabel).toBe('A4');
+    expect(snapshot.responsiveLabel).toBe('A4');
   });
 
   it('finalizes completed episodes into rolling averages after signal drops', () => {
@@ -71,6 +76,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: 440,
       snappedFrequency: 440,
       stableFrequency: null,
+      responsiveFrequency: null,
       confidence: 0.8,
       confidenceGate: 0.2,
       smoothingWindow: [440],
@@ -82,6 +88,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: 440,
       snappedFrequency: 440,
       stableFrequency: 440,
+      responsiveFrequency: 440,
       confidence: 0.8,
       confidenceGate: 0.2,
       smoothingWindow: [440, 440, 440],
@@ -93,6 +100,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: null,
       snappedFrequency: null,
       stableFrequency: null,
+      responsiveFrequency: null,
       confidence: 0,
       confidenceGate: 0.2,
       smoothingWindow: [],
@@ -105,6 +113,7 @@ describe('createLatencyProfiler', () => {
       rawFrequency: 523.25,
       snappedFrequency: 523.25,
       stableFrequency: 523.25,
+      responsiveFrequency: 523.25,
       confidence: 0.9,
       confidenceGate: 0.2,
       smoothingWindow: [523.25, 523.25, 523.25],
@@ -113,7 +122,8 @@ describe('createLatencyProfiler', () => {
     });
 
     expect(snapshot.completedEpisodeCount).toBe(1);
-    expect(snapshot.averages.captureToUiMs).toBe(200);
-    expect(snapshot.averages.captureToTunerBaselineMs).toBe(200);
+    expect(snapshot.stableAverages.captureToUiMs).toBe(200);
+    expect(snapshot.stableAverages.captureToTunerBaselineMs).toBe(200);
+    expect(snapshot.responsiveAverages.captureToUiMs).toBe(200);
   });
 });

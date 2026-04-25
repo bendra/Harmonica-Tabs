@@ -420,6 +420,87 @@ describe('App listening lifecycle', () => {
           flattenTextChildren(node.children).includes('Totals: UI 279.0ms · Tuner baseline 186.0ms · Gap 93.0ms'),
       ),
     ).toBeTruthy();
+    expect(
+      root.find(
+        (node: any) =>
+          node.type === 'Text' &&
+          flattenTextChildren(node.children).includes('Labels: Raw A4 · Snap A4 · Stable A4 · Responsive A4 · Tuner A'),
+      ),
+    ).toBeTruthy();
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('uses the responsive commit path in Tabs before the stable path catches up', async () => {
+    detectorMockState.isSupported = true;
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findPressableByText(root, '⚙').props.onPress();
+    });
+    act(() => {
+      findPressableByText(root, 'Show debug').props.onPress();
+    });
+    act(() => {
+      findPressableByText(root, '←').props.onPress();
+    });
+
+    goToTabs(root);
+    await openLibraryTab(root, 'source');
+
+    await act(async () => {
+      findByTestId(root, 'transposer-listen-button').props.onPress();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      for (let index = 0; index < 2; index += 1) {
+        detectorMockState.updateHandlers[0]({
+          frequency: 440,
+          rawFrequency: 440,
+          confidence: 0.91,
+          rms: 0.02,
+          trace: {
+            frameDurationMs: 93,
+            callbackAtMs: 100 + index * 93,
+            estimatedFrameStartAtMs: 7 + index * 93,
+            detectorStartAtMs: 96 + index * 93,
+            detectorEndAtMs: 100 + index * 93,
+            detectorDurationMs: 4,
+          },
+        });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      root.find(
+        (node: any) =>
+          node.type === 'Text' &&
+          flattenTextChildren(node.children).includes('Labels: Raw A4 · Snap A4 · Stable — · Responsive A4 · Tuner A'),
+      ),
+    ).toBeTruthy();
+    expect(
+      root.find(
+        (node: any) =>
+          node.type === 'Text' &&
+          flattenTextChildren(node.children).includes('This note: Raw 93.0ms · Snap 0.0ms · Responsive 93.0ms · UI 0.0ms'),
+      ),
+    ).toBeTruthy();
 
     act(() => {
       renderer.unmount();

@@ -24,6 +24,7 @@ import { createLatencyProfiler, LatencySnapshot, PitchUpdateTrace } from '../log
  */
 const SMOOTHING_WINDOW = 5;
 const SMOOTHING_MIN_VOTES = 3;
+const RESPONSIVE_MIN_CONSECUTIVE_FRAMES = 2;
 
 /**
  * Given a ring buffer of recently detected frequencies (null = silence/no
@@ -33,7 +34,7 @@ const SMOOTHING_MIN_VOTES = 3;
  * Comparison is by rounded MIDI number so that tiny frame-to-frame pitch drift
  * doesn't split votes between two bins for the same note.
  */
-function smoothedFrequency(buffer: (number | null)[]): number | null {
+export function smoothedFrequency(buffer: (number | null)[]): number | null {
   const freqsByMidi = new Map<number, number[]>();
   for (const freq of buffer) {
     if (freq === null) continue;
@@ -66,6 +67,59 @@ function smoothingVoteCount(buffer: (number | null)[]): number {
   return bestVotes;
 }
 
+function roundedMidi(frequency: number | null): number | null {
+  if (frequency === null || !Number.isFinite(frequency)) return null;
+  return Math.round(frequencyToMidi(frequency));
+}
+
+type ResponsiveCommitState = {
+  candidateMidi: number | null;
+  consecutiveFrames: number;
+  committedFrequency: number | null;
+};
+
+export function createResponsiveCommitState(): ResponsiveCommitState {
+  return {
+    candidateMidi: null,
+    consecutiveFrames: 0,
+    committedFrequency: null,
+  };
+}
+
+export function nextResponsiveFrequency(
+  state: ResponsiveCommitState,
+  snappedFrequency: number | null,
+  confidence: number,
+  confidenceGate: number,
+) {
+  const snappedMidi = roundedMidi(snappedFrequency);
+  if (snappedMidi === null || confidence < confidenceGate) {
+    return {
+      nextState: createResponsiveCommitState(),
+      frequency: null,
+    };
+  }
+
+  const consecutiveFrames =
+    snappedMidi === state.candidateMidi ? state.consecutiveFrames + 1 : 1;
+  const committedMidi = roundedMidi(state.committedFrequency);
+  const frequency =
+    consecutiveFrames >= RESPONSIVE_MIN_CONSECUTIVE_FRAMES
+      ? snappedFrequency
+      : committedMidi === snappedMidi
+        ? snappedFrequency
+        : state.committedFrequency;
+
+  return {
+    nextState: {
+      candidateMidi: snappedMidi,
+      consecutiveFrames,
+      committedFrequency: frequency,
+    },
+    frequency,
+  };
+}
+
 type AudioListeningParams = {
   simHz: number | null;
   harmonicaPc: number;
@@ -76,15 +130,22 @@ type AudioListeningState = {
   listenError: string | null;
   listenSource: 'web' | 'sim' | null;
   detectedFrequency: number | null;
+  detectedStableFrequency: number | null;
+  detectedResponsiveFrequency: number | null;
+  detectedSnappedFrequency: number | null;
   detectedRawFrequency: number | null;
   detectedConfidence: number;
   detectedRms: number;
   detectedCandidates: DetectionCandidate[];
   lastDetectedAt: number | null;
+  lastStableDetectedAt: number | null;
+  lastResponsiveDetectedAt: number | null;
 };
 
 type AudioListeningValue = AudioListeningState & {
   audioSnapshot: DetectorSnapshot;
+  stableAudioSnapshot: DetectorSnapshot;
+  responsiveAudioSnapshot: DetectorSnapshot;
   latencySnapshot: LatencySnapshot | null;
   startListening: () => Promise<void>;
   stopListening: () => void;
@@ -100,11 +161,16 @@ function createInitialState(): AudioListeningState {
     listenError: null,
     listenSource: null,
     detectedFrequency: null,
+    detectedStableFrequency: null,
+    detectedResponsiveFrequency: null,
+    detectedSnappedFrequency: null,
     detectedRawFrequency: null,
     detectedConfidence: 0,
     detectedRms: 0,
     detectedCandidates: [],
     lastDetectedAt: null,
+    lastStableDetectedAt: null,
+    lastResponsiveDetectedAt: null,
   };
 }
 
@@ -115,6 +181,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
   let isDisposed = false;
   let listenSession = 0;
   let smoothingBuffer: (number | null)[] = [];
+  let responsiveCommitState = createResponsiveCommitState();
   let latencyProfiler = createLatencyProfiler();
   let latencySnapshot: LatencySnapshot | null = latencyProfiler.getSnapshot();
   let snapshot: AudioListeningValue;
@@ -125,9 +192,13 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
   }
 
   function refreshSnapshot() {
+    const stableAudioSnapshot = getAudioSnapshot('stable');
+    const responsiveAudioSnapshot = getAudioSnapshot('responsive');
     snapshot = {
       ...state,
-      audioSnapshot: getAudioSnapshot(),
+      audioSnapshot: stableAudioSnapshot,
+      stableAudioSnapshot,
+      responsiveAudioSnapshot,
       latencySnapshot,
       startListening,
       stopListening,
@@ -145,11 +216,16 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     latencySnapshot = latencyProfiler.getSnapshot();
     setState({
       detectedFrequency: null,
+      detectedStableFrequency: null,
+      detectedResponsiveFrequency: null,
+      detectedSnappedFrequency: null,
       detectedRawFrequency: null,
       detectedConfidence: 0,
       detectedRms: 0,
       detectedCandidates: [],
       lastDetectedAt: null,
+      lastStableDetectedAt: null,
+      lastResponsiveDetectedAt: null,
     });
   }
 
@@ -165,15 +241,20 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     return detector;
   }
 
-  function getAudioSnapshot(): DetectorSnapshot {
+  function getAudioSnapshot(path: 'stable' | 'responsive'): DetectorSnapshot {
     const now = Date.now();
+    const isStablePath = path === 'stable';
+    const detectedFrequency = isStablePath ? state.detectedStableFrequency : state.detectedResponsiveFrequency;
+    const lastDetectedAt = isStablePath ? state.lastStableDetectedAt : state.lastResponsiveDetectedAt;
     const hasHold =
-      state.lastDetectedAt !== null && now - state.lastDetectedAt < DEFAULT_AUDIO_SETTINGS.signalHoldMs;
+      isStablePath &&
+      lastDetectedAt !== null &&
+      now - lastDetectedAt < DEFAULT_AUDIO_SETTINGS.signalHoldMs;
     const effectiveWebFrequency =
-      state.detectedConfidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate && state.detectedFrequency
-        ? state.detectedFrequency
+      state.detectedConfidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate && detectedFrequency
+        ? detectedFrequency
         : hasHold
-          ? state.detectedFrequency
+          ? detectedFrequency
           : null;
 
     return {
@@ -181,7 +262,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
       confidence: !state.isListening ? 0 : state.listenSource === 'web' ? state.detectedConfidence : params.simHz ? 1 : 0,
       rms: state.detectedRms,
       source: state.isListening ? state.listenSource : null,
-      lastDetectedAt: state.lastDetectedAt,
+      lastDetectedAt,
     };
   }
 
@@ -220,13 +301,19 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
       isListening: state.isListening,
       listenError: null,
       detectedFrequency: null,
+      detectedStableFrequency: null,
+      detectedResponsiveFrequency: null,
+      detectedSnappedFrequency: null,
       detectedRawFrequency: null,
       detectedConfidence: 0,
       detectedRms: 0,
       detectedCandidates: [],
       lastDetectedAt: null,
+      lastStableDetectedAt: null,
+      lastResponsiveDetectedAt: null,
     });
     smoothingBuffer = [];
+    responsiveCommitState = createResponsiveCommitState();
     latencyProfiler.reset();
     latencySnapshot = latencyProfiler.getSnapshot();
 
@@ -263,6 +350,14 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
 
           const stable = smoothedFrequency(nextBuffer);
           const votes = smoothingVoteCount(nextBuffer);
+          const responsiveCommit = nextResponsiveFrequency(
+            responsiveCommitState,
+            update.frequency,
+            update.confidence,
+            DEFAULT_AUDIO_SETTINGS.confidenceGate,
+          );
+          responsiveCommitState = responsiveCommit.nextState;
+          const responsive = responsiveCommit.frequency;
           const nextCandidates = Array.isArray((update as { candidates?: DetectionCandidate[] }).candidates)
             ? (update as { candidates?: DetectionCandidate[] }).candidates ?? []
             : [];
@@ -277,6 +372,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
             rawFrequency: nextRawFrequency,
             snappedFrequency: update.frequency,
             stableFrequency: stable,
+            responsiveFrequency: responsive,
             confidence: update.confidence,
             confidenceGate: DEFAULT_AUDIO_SETTINGS.confidenceGate,
             smoothingWindow: nextBuffer,
@@ -285,12 +381,23 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
           });
           setState({
             detectedFrequency: stable,
+            detectedStableFrequency: stable,
+            detectedResponsiveFrequency: responsive,
+            detectedSnappedFrequency: update.frequency,
             detectedRawFrequency: nextRawFrequency,
             detectedConfidence: update.confidence,
             detectedRms: update.rms,
             detectedCandidates: nextCandidates,
             lastDetectedAt:
               stable && update.confidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate ? Date.now() : state.lastDetectedAt,
+            lastStableDetectedAt:
+              stable && update.confidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate
+                ? Date.now()
+                : state.lastStableDetectedAt,
+            lastResponsiveDetectedAt:
+              responsive && update.confidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate
+                ? Date.now()
+                : state.lastResponsiveDetectedAt,
           });
         }, vocabulary);
         if (!isCurrentListenSession()) return;
@@ -320,6 +427,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     listenSession += 1;
     detector?.stop();
     smoothingBuffer = [];
+    responsiveCommitState = createResponsiveCommitState();
     resetDetectionState();
     setState({
       isListening: false,
