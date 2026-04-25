@@ -42,6 +42,7 @@ import { useAudioSettings } from './src/hooks/use-audio-settings';
 import { AudioListeningProvider, useAudioListening } from './src/hooks/use-audio-listening';
 import { useTransposerSession } from './src/hooks/use-transposer-session';
 import { useTabEditor, SaveTabMode, TabsSubview } from './src/hooks/use-tab-editor';
+import { LatencySnapshot } from './src/logic/audio-latency';
 
 function getLayoutTier(shortEdge: number): LayoutTier {
   if (shortEdge < 420) return 'compact';
@@ -144,6 +145,10 @@ function getScalesLayoutMetrics(layoutTier: LayoutTier) {
         arpeggioTabGap: 2,
       };
   }
+}
+
+function formatLatencyMs(value: number | null) {
+  return value === null ? '—' : `${value.toFixed(1)}ms`;
 }
 
 
@@ -376,7 +381,9 @@ type TabsTransposeViewProps = {
 function ToneFollowDebugPanel(props: {
   detectedRms: number;
   detectedConfidence: number;
-  detectedFrequency: number | null;
+  detectedStableFrequency: number | null;
+  detectedResponsiveFrequency: number | null;
+  detectedSnappedFrequency: number | null;
   detectedRawFrequency: number | null;
   lastDetectedAt: number | null;
   detectedCandidates: Array<{ frequency: number; confidence: number }>;
@@ -384,21 +391,55 @@ function ToneFollowDebugPanel(props: {
   simFrequency: string;
   setSimFrequency: (value: string) => void;
   followStatus: string;
+  latencySnapshot: LatencySnapshot | null;
+  uiPath: 'stable' | 'responsive';
 }) {
   const now = Date.now();
+  const latency = props.latencySnapshot;
+  const currentMetrics = props.uiPath === 'responsive' ? latency?.responsiveCurrent : latency?.stableCurrent;
+  const averageMetrics = props.uiPath === 'responsive' ? latency?.responsiveAverages : latency?.stableAverages;
+  const currentFrequency =
+    props.uiPath === 'responsive' ? props.detectedResponsiveFrequency : props.detectedStableFrequency;
+  const commitLabel = props.uiPath === 'responsive' ? 'Responsive' : 'Stable';
 
   return (
     <View style={styles.debugPanel}>
       <Text style={styles.debugPanelLabel}>Debug Panel</Text>
       <Text style={styles.debugText}>
         RMS: {props.detectedRms.toFixed(4)} · Conf: {props.detectedConfidence.toFixed(2)} · Hz:{' '}
-        {props.detectedFrequency ? props.detectedFrequency.toFixed(1) : '—'} · Raw:{' '}
+        {currentFrequency ? currentFrequency.toFixed(1) : '—'} · Snap:{' '}
+        {props.detectedSnappedFrequency ? props.detectedSnappedFrequency.toFixed(1) : '—'} · Raw:{' '}
         {props.detectedRawFrequency ? props.detectedRawFrequency.toFixed(1) : '—'}
       </Text>
       <Text style={styles.debugText}>
         Last detect: {props.lastDetectedAt ? `${now - props.lastDetectedAt}ms ago` : '—'} · Status:{' '}
         {props.followStatus}
       </Text>
+      {latency && currentMetrics && averageMetrics && (
+        <>
+          <Text style={styles.debugText}>
+            Frame: {formatLatencyMs(latency.frameDurationMs)} · Detect: {formatLatencyMs(latency.detectorDurationMs)} · Votes:{' '}
+            {latency.smoothingVotes}/{latency.smoothingMinVotes} · Gate: {latency.confidencePassed ? 'pass' : 'wait'}
+          </Text>
+          <Text style={styles.debugText}>
+            This note: Raw {formatLatencyMs(currentMetrics.captureToRawMs)} · Snap {formatLatencyMs(currentMetrics.rawToSnappedMs)} · {commitLabel}{' '}
+            {formatLatencyMs(currentMetrics.snappedToSmoothedMs)} · UI {formatLatencyMs(currentMetrics.smoothedToUiMs)}
+          </Text>
+          <Text style={styles.debugText}>
+            Totals: UI {formatLatencyMs(currentMetrics.captureToUiMs)} · Tuner baseline {formatLatencyMs(currentMetrics.captureToTunerBaselineMs)} · Gap{' '}
+            {formatLatencyMs(currentMetrics.gapVsTunerBaselineMs)}
+          </Text>
+          <Text style={styles.debugText}>
+            Avg ({latency.completedEpisodeCount}): UI {formatLatencyMs(averageMetrics.captureToUiMs)} · Tuner baseline{' '}
+            {formatLatencyMs(averageMetrics.captureToTunerBaselineMs)} · Gap {formatLatencyMs(averageMetrics.gapVsTunerBaselineMs)}
+          </Text>
+          <Text style={styles.debugText}>
+            Labels: Raw {latency.rawLabel ?? '—'} · Snap {latency.snappedLabel ?? '—'} · Stable {latency.stableLabel ?? '—'} · Responsive{' '}
+            {latency.responsiveLabel ?? '—'} · Tuner {latency.tunerBaselineLabel ?? '—'}
+          </Text>
+          <Text style={styles.debugText}>Window: {latency.smoothingWindowLabels.join(' · ') || '—'}</Text>
+        </>
+      )}
       {props.detectedCandidates.length > 0 && (
         <Text style={styles.debugText}>
           Top candidates:{' '}
@@ -445,13 +486,16 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
     isListening,
     listenError,
     listenSource,
-    detectedFrequency,
+    detectedStableFrequency,
+    detectedResponsiveFrequency,
+    detectedSnappedFrequency,
     detectedRawFrequency,
     detectedConfidence,
     detectedRms,
     detectedCandidates,
-    lastDetectedAt,
-    audioSnapshot,
+    lastStableDetectedAt,
+    stableAudioSnapshot,
+    latencySnapshot,
     startListening,
     stopListening,
   } = useAudioListening();
@@ -462,13 +506,13 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
   const arpeggioLayoutLogCountRef = useRef(0);
   const lastCaretVisibleRef = useRef(false);
 
-  const frequency = audioSnapshot.frequency;
+  const frequency = stableAudioSnapshot.frequency;
   const midis = props.groups.map((group) => group.midi);
   const pitchMatch = isListening && frequency ? matchFrequencyToTabs(midis, frequency, 25) : null;
   const caretPos = mainSelected ? getCaretPosition(pitchMatch, tabLayouts) : null;
   const mainInTune = pitchMatch !== null && Math.abs(pitchMatch.centsOffset) <= props.toneToleranceCents;
   const activeTab = pitchMatch ? props.selectedTabs[pitchMatch.activeIndex] : null;
-  const effectiveConfidence = audioSnapshot.confidence;
+  const effectiveConfidence = stableAudioSnapshot.confidence;
   const statusText = isListening
     ? listenError
       ? listenError
@@ -634,14 +678,18 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
             <ToneFollowDebugPanel
               detectedRms={detectedRms}
               detectedConfidence={detectedConfidence}
-              detectedFrequency={detectedFrequency}
+              detectedStableFrequency={detectedStableFrequency}
+              detectedResponsiveFrequency={detectedResponsiveFrequency}
+              detectedSnappedFrequency={detectedSnappedFrequency}
               detectedRawFrequency={detectedRawFrequency}
-              lastDetectedAt={lastDetectedAt}
+              lastDetectedAt={lastStableDetectedAt}
               detectedCandidates={detectedCandidates}
               listenSource={listenSource}
               simFrequency={props.simFrequency}
               setSimFrequency={props.setSimFrequency}
               followStatus={props.transposerFollowStatus}
+              latencySnapshot={latencySnapshot}
+              uiPath="stable"
             />
           )}
         </View>
@@ -875,13 +923,16 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
   const {
     isListening,
     listenSource,
-    detectedFrequency,
+    detectedStableFrequency,
+    detectedResponsiveFrequency,
+    detectedSnappedFrequency,
     detectedRawFrequency,
     detectedConfidence,
     detectedRms,
     detectedCandidates,
-    lastDetectedAt,
-    audioSnapshot,
+    lastResponsiveDetectedAt,
+    responsiveAudioSnapshot,
+    latencySnapshot,
     startListening,
     stopListening,
   } = useAudioListening();
@@ -912,7 +963,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
     targetRootPc: props.targetRootPc,
     notation: props.notation,
     gAltPreference: props.gAltPreference,
-    audioSnapshot,
+    audioSnapshot: responsiveAudioSnapshot,
     toneToleranceCents: props.toneToleranceCents,
     toneFollowMinConfidence: props.toneFollowMinConfidence,
     isListening,
@@ -983,14 +1034,18 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
           <ToneFollowDebugPanel
             detectedRms={detectedRms}
             detectedConfidence={detectedConfidence}
-            detectedFrequency={detectedFrequency}
+            detectedStableFrequency={detectedStableFrequency}
+            detectedResponsiveFrequency={detectedResponsiveFrequency}
+            detectedSnappedFrequency={detectedSnappedFrequency}
             detectedRawFrequency={detectedRawFrequency}
-            lastDetectedAt={lastDetectedAt}
+            lastDetectedAt={lastResponsiveDetectedAt}
             detectedCandidates={detectedCandidates}
             listenSource={listenSource}
             simFrequency={props.simFrequency}
             setSimFrequency={props.setSimFrequency}
             followStatus={transposerFollowEvaluation.status}
+            latencySnapshot={latencySnapshot}
+            uiPath="responsive"
           />
         )}
         <View style={styles.transposerLibraryRow}>

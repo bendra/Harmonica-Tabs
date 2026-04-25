@@ -28,6 +28,8 @@
 - Set up a Puppeteer or Playwright MCP server for live browser observation (useful for debugging resource leaks, audio lifecycle, and runtime behavior without relying on manual screenshots)
 - Consider extracting remaining App.tsx layout/caret tracking into a `useScaleLayoutTracking` hook if that section grows unwieldy
 - Improve tone-follow cursor behavior during tab playback: instead of advancing the cursor as soon as a note is held long enough, pulsate/highlight the current note while it is being held, then advance the cursor only when the tone stops or changes — and indicate whether the note was played correctly.
+- Revisit the new split listen policies after user testing: `Tabs` now uses a faster responsive commit path while `Scales` keeps the conservative stable path; if players want more control later, prefer named responsiveness presets over a raw smoothing slider.
+- Investigate the separate high-register detector/register-selection issue (for example E harmonica hole 10 blow/draw) without conflating it with the low/mid smoothing-delay work.
 - Improve arpeggio tone-follow feedback: replace the floating caret with per-note highlighting that shows which arpeggio note is currently being played (within tolerance), and add recognition of chords (multiple simultaneous notes).
 - accessibility
 - localization
