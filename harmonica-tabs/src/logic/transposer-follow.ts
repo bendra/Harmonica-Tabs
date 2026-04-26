@@ -25,6 +25,8 @@ export type TransposerFollowStatus =
 export type TransposerFollowState = {
   activeTokenIndex: number | null;
   waitingForRelease: boolean;
+  peakRmsSinceAdvance: number;
+  lastAmplitudeReleaseRms: number | null;
 };
 
 export type EvaluateTransposerFollowInput = {
@@ -34,6 +36,7 @@ export type EvaluateTransposerFollowInput = {
   detector: DetectorSnapshot;
   toneToleranceCents: number;
   minConfidence: number;
+  noteSeparationRatio: number;
 };
 
 export type EvaluateTransposerFollowResult = {
@@ -47,13 +50,27 @@ export function createTransposerFollowState(activeTokenIndex: number | null): Tr
   return {
     activeTokenIndex,
     waitingForRelease: false,
+    peakRmsSinceAdvance: 0,
+    lastAmplitudeReleaseRms: null,
   };
+}
+
+function safeRms(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 export function evaluateTransposerFollow(
   input: EvaluateTransposerFollowInput,
 ): EvaluateTransposerFollowResult {
-  const { detector, enabled, minConfidence, state, tokens, toneToleranceCents } = input;
+  const {
+    detector,
+    enabled,
+    minConfidence,
+    noteSeparationRatio,
+    state,
+    tokens,
+    toneToleranceCents,
+  } = input;
 
   if (tokens.length === 0) {
     return {
@@ -71,11 +88,18 @@ export function evaluateTransposerFollow(
   const nextState: TransposerFollowState = {
     activeTokenIndex: safeIndex,
     waitingForRelease: state.waitingForRelease,
+    peakRmsSinceAdvance: state.peakRmsSinceAdvance,
+    lastAmplitudeReleaseRms: state.lastAmplitudeReleaseRms,
   };
 
   if (!enabled) {
     return {
-      state: { ...nextState, waitingForRelease: false },
+      state: {
+        ...nextState,
+        waitingForRelease: false,
+        peakRmsSinceAdvance: 0,
+        lastAmplitudeReleaseRms: null,
+      },
       status: detector.source ? 'listening' : 'idle',
       centsOffset: null,
       matchingTarget: false,
@@ -84,7 +108,12 @@ export function evaluateTransposerFollow(
 
   if (!detector.source) {
     return {
-      state: { ...nextState, waitingForRelease: false },
+      state: {
+        ...nextState,
+        waitingForRelease: false,
+        peakRmsSinceAdvance: 0,
+        lastAmplitudeReleaseRms: null,
+      },
       status: 'idle',
       centsOffset: null,
       matchingTarget: false,
@@ -94,6 +123,7 @@ export function evaluateTransposerFollow(
   const hasSignal = detector.frequency !== null && Number.isFinite(detector.frequency);
   const confidentEnough = detector.confidence >= minConfidence;
   const currentToken = tokens[safeIndex];
+  const currentRms = safeRms(detector.rms);
 
   const currentMatch =
     hasSignal && confidentEnough
@@ -102,10 +132,16 @@ export function evaluateTransposerFollow(
   const matchingCurrent = Boolean(currentMatch?.withinTolerance);
   const centsOffset = currentMatch ? currentMatch.centsOffset : null;
 
-  // After advancing, block further advancement until the pitch drops.
-  // This handles consecutive same-pitch tokens (e.g., two -4 in a row).
+  // After advancing, block further advancement until the pitch drops, changes,
+  // or the player articulates the same pitch with a clear RMS dip.
   if (nextState.waitingForRelease) {
-    if (matchingCurrent) {
+    nextState.peakRmsSinceAdvance = Math.max(nextState.peakRmsSinceAdvance, currentRms);
+    const releasedByAmplitude =
+      matchingCurrent &&
+      nextState.peakRmsSinceAdvance > 0 &&
+      currentRms <= nextState.peakRmsSinceAdvance * noteSeparationRatio;
+
+    if (matchingCurrent && !releasedByAmplitude) {
       return {
         state: nextState,
         status: 'waiting-for-release',
@@ -113,8 +149,19 @@ export function evaluateTransposerFollow(
         matchingTarget: true,
       };
     }
-    // Pitch dropped or changed — release the block
+
     nextState.waitingForRelease = false;
+    nextState.peakRmsSinceAdvance = 0;
+
+    if (releasedByAmplitude) {
+      nextState.lastAmplitudeReleaseRms = currentRms;
+      return {
+        state: nextState,
+        status: 'matching-current',
+        centsOffset,
+        matchingTarget: true,
+      };
+    }
   }
 
   if (!hasSignal || !confidentEnough) {
@@ -134,12 +181,19 @@ export function evaluateTransposerFollow(
     detector.frequency as number,
     toneToleranceCents,
   );
+  const samePitchNextToken = nextToken.midi === currentToken.midi;
+  const hasRecoveredFromAmplitudeRelease =
+    nextState.lastAmplitudeReleaseRms === null ||
+    !samePitchNextToken ||
+    currentRms > nextState.lastAmplitudeReleaseRms / noteSeparationRatio;
 
-  if (nextMatch?.withinTolerance) {
+  if (nextMatch?.withinTolerance && hasRecoveredFromAmplitudeRelease) {
     return {
       state: {
         activeTokenIndex: nextIndex,
         waitingForRelease: true,
+        peakRmsSinceAdvance: currentRms,
+        lastAmplitudeReleaseRms: null,
       },
       status: 'advanced',
       centsOffset: nextMatch.centsOffset,

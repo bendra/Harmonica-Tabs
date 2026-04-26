@@ -23,7 +23,7 @@
 - Shared listening now lives behind an audio-listening provider/store so detector frame updates re-render only the subscribed listening UI instead of the whole top-level `App`.
 - Shared listening now exposes two post-detection commit paths: a conservative `stable` path for `Scales` (majority smoothing + hold) and a faster `responsive` path for `Tabs` (2 consecutive snapped frames, no hold).
 - Tone follow is automatically on while listening is on, and off while listening is off.
-- Repeated identical output notes require a release before the cursor can advance again.
+- Repeated identical output notes require either a pitch release/change or a relative RMS dip before the cursor can advance again.
 - When tone follow matches the last playable transposer note, the cursor wraps back to the first playable note.
 - Saved tabs persist `id`, `title`, `inputText`, optional `harmonicaPc`, optional `positionNumber`, `createdAt`, and `updatedAt`.
 - On web, saved tabs use the existing JSON blob in app storage; on native, the saved-tab service still uses the typed SQLite-backed path. In both cases, malformed half-filled saved context is normalized to no context.
@@ -71,7 +71,7 @@
 - Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
 - When the editor toggle is on, it also shows a compact summary of the saved context such as `C harp • 2nd / G`.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
-- The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling (`standard`, `flat`, `sharp`), target-key spelling (`flat`, `sharp`), and tone-follow settings for tolerance, minimum confidence, and hold duration.
+- The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling (`standard`, `flat`, `sharp`), target-key spelling (`flat`, `sharp`), and tone-follow settings for tolerance, minimum confidence, and repeated-note separation.
 - Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
 - Properties screen is still separate via gear button.
 
@@ -87,7 +87,7 @@
   - Warning behavior for unrecognized token fragments.
 - `harmonica-tabs/tests/logic/transposer-follow.test.ts`
   - Hold/confidence/tolerance advancement rules.
-  - Re-arm behavior for repeated identical notes.
+  - Re-arm behavior for repeated identical notes, including same-pitch RMS articulation dips.
   - End-of-tab wrap back to the first playable token.
   - Manual cursor resets via state replacement.
 - `harmonica-tabs/tests/hooks/use-audio-listening-policy.test.ts`

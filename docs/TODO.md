@@ -34,5 +34,4 @@
 - accessibility
 - localization
 - Investigate errors encountered on ipad through idevicesyslog | grep harmonicatabs | grep \<Error\>
-- Rapid repeated-note cursor advancement: when the same note appears consecutively in a tab and is played quickly (eighth notes at moderate tempo), the cursor sometimes stalls because the inter-note gap is shorter than one audio frame (~100ms). Fix: track peak RMS since last advance and treat a drop to ~40% of peak as a note release (relative threshold, consistent across low/high notes). Expose as a "Note separation" property (20–70%, default ~40%) since technique varies by player.
 - Native audio RMS gate (currently 0.001) was tuned on one iPad — if device variation proves to be a problem, replace the fixed value with automatic noise floor calibration: measure background level for ~1 second when listening starts and set the gate at 3× that value.

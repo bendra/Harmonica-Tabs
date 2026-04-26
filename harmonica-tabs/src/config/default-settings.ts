@@ -18,6 +18,10 @@ export const AUDIO_SETTINGS_LIMITS = {
     min: 0,
     max: 1,
   },
+  noteSeparationRatio: {
+    min: 0.2,
+    max: 0.7,
+  },
 } as const;
 
 export const DEFAULT_AUDIO_SETTINGS = {
@@ -26,6 +30,8 @@ export const DEFAULT_AUDIO_SETTINGS = {
   toneToleranceCents: 60,
   toneFollowMinConfidenceInput: '0.35',
   toneFollowMinConfidence: 0.35,
+  noteSeparationRatioInput: '0.4',
+  noteSeparationRatio: 0.4,
   simFrequencyInput: '440',
   signalHoldMs: 400,
   confidenceGate: 0.2,

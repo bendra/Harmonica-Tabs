@@ -24,6 +24,7 @@ type TransposerSessionParams = {
   audioSnapshot: DetectorSnapshot;
   toneToleranceCents: number;
   toneFollowMinConfidence: number;
+  noteSeparationRatio: number;
   isListening: boolean;
 };
 
@@ -38,6 +39,7 @@ export function useTransposerSession({
   audioSnapshot,
   toneToleranceCents,
   toneFollowMinConfidence,
+  noteSeparationRatio,
   isListening,
 }: TransposerSessionParams) {
   const [transposerFollowState, setTransposerFollowState] = useState<TransposerFollowState>(
@@ -159,6 +161,7 @@ export function useTransposerSession({
         detector: audioSnapshot,
         toneToleranceCents,
         minConfidence: toneFollowMinConfidence,
+        noteSeparationRatio,
       }),
     // toneFollowTick drives periodic re-evaluation — include even though value unused in factory body
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -169,6 +172,7 @@ export function useTransposerSession({
       audioSnapshot,
       toneToleranceCents,
       toneFollowMinConfidence,
+      noteSeparationRatio,
       toneFollowTick,
     ],
   );
@@ -192,7 +196,9 @@ export function useTransposerSession({
     const nextState = transposerFollowEvaluation.state;
     if (
       nextState.activeTokenIndex === transposerFollowState.activeTokenIndex &&
-      nextState.waitingForRelease === transposerFollowState.waitingForRelease
+      nextState.waitingForRelease === transposerFollowState.waitingForRelease &&
+      nextState.peakRmsSinceAdvance === transposerFollowState.peakRmsSinceAdvance &&
+      nextState.lastAmplitudeReleaseRms === transposerFollowState.lastAmplitudeReleaseRms
     ) {
       return;
     }

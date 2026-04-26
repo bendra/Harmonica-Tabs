@@ -32,6 +32,8 @@ describe('shared default settings', () => {
     expect(snapshot!.audio.toneToleranceCents).toBe(DEFAULT_AUDIO_SETTINGS.toneToleranceCents);
     expect(snapshot!.audio.toneFollowMinConfidenceInput).toBe(DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput);
     expect(snapshot!.audio.toneFollowMinConfidence).toBe(DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidence);
+    expect(snapshot!.audio.noteSeparationRatioInput).toBe(DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput);
+    expect(snapshot!.audio.noteSeparationRatio).toBe(DEFAULT_AUDIO_SETTINGS.noteSeparationRatio);
     expect(snapshot!.audio.simFrequency).toBe(DEFAULT_AUDIO_SETTINGS.simFrequencyInput);
     expect(snapshot!.musical.harmonicaKey.pc).toBe(DEFAULT_MUSICAL_SELECTION.harmonicaKeyPc);
     expect(snapshot!.musical.harmonicaKeyLabelStyle).toBe(DEFAULT_MUSICAL_SELECTION.harmonicaKeyLabelStyle);

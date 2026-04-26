@@ -37,6 +37,9 @@ export function useAudioSettings() {
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState<string>(
     DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput,
   );
+  const [noteSeparationRatioInput, setNoteSeparationRatioInput] = useState<string>(
+    DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput,
+  );
   const [simFrequency, setSimFrequency] = useState<string>(DEFAULT_AUDIO_SETTINGS.simFrequencyInput);
 
   const toneToleranceCents = useMemo(
@@ -59,6 +62,16 @@ export function useAudioSettings() {
       ),
     [toneFollowMinConfidenceInput],
   );
+  const noteSeparationRatio = useMemo(
+    () =>
+      parseBoundedNumber(
+        noteSeparationRatioInput,
+        DEFAULT_AUDIO_SETTINGS.noteSeparationRatio,
+        AUDIO_SETTINGS_LIMITS.noteSeparationRatio.min,
+        AUDIO_SETTINGS_LIMITS.noteSeparationRatio.max,
+      ),
+    [noteSeparationRatioInput],
+  );
   const simHz = useMemo(() => {
     const parsed = Number.parseFloat(simFrequency);
     return Number.isFinite(parsed) ? parsed : null;
@@ -72,10 +85,14 @@ export function useAudioSettings() {
     toneFollowMinConfidenceInput,
     setToneFollowMinConfidenceInput: (value: string) =>
       setToneFollowMinConfidenceInput(sanitizeDecimalInput(value)),
+    noteSeparationRatioInput,
+    setNoteSeparationRatioInput: (value: string) =>
+      setNoteSeparationRatioInput(sanitizeDecimalInput(value)),
     simFrequency,
     setSimFrequency,
     toneToleranceCents,
     toneFollowMinConfidence,
+    noteSeparationRatio,
     simHz,
   };
 }

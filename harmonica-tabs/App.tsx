@@ -181,6 +181,27 @@ function isSavedTabsErrorStatus(value: string | null) {
   return normalized.includes('could not') || normalized.includes('enter some tab text');
 }
 
+type PropertiesHelpTopic = 'tolerance' | 'confidence' | 'note-separation' | 'g-alt';
+
+const PROPERTIES_HELP_CONTENT: Record<PropertiesHelpTopic, { title: string; body: string }> = {
+  tolerance: {
+    title: 'Tolerance',
+    body: 'Sets how close your pitch must be to the target note, measured in cents. Lower values are stricter; higher values are more forgiving.',
+  },
+  confidence: {
+    title: 'Confidence',
+    body: 'Sets how certain the detector must be before tone follow reacts. Higher values ignore shakier detections; lower values respond more easily.',
+  },
+  'note-separation': {
+    title: 'Note separation',
+    body: 'Sets how much the volume must dip before repeated same-pitch notes count as separate notes. Lower values require a deeper dip; higher values catch lighter articulations.',
+  },
+  'g-alt': {
+    title: '-2 / 3',
+    body: 'When 2 draw and 3 blow are the same pitch, this chooses which tab spelling the app prefers.',
+  },
+};
+
 /**
  * Reusable single-value dropdown rendered with a modal menu.
  */
@@ -193,6 +214,7 @@ function Dropdown<T extends string | number>(props: {
   size?: ResponsiveControlSize;
   testID?: string;
   disabled?: boolean;
+  labelAccessory?: React.ReactNode;
 }) {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
@@ -212,9 +234,12 @@ function Dropdown<T extends string | number>(props: {
 
   return (
     <View testID={props.testID} style={[styles.dropdown, compact && styles.dropdownCompact, props.disabled && styles.dropdownDisabled]}>
-      <Text style={[styles.dropdownLabel, compact && styles.dropdownLabelCompact, wide && styles.dropdownLabelWide]}>
-        {props.label}
-      </Text>
+      <View style={styles.dropdownLabelRow}>
+        <Text style={[styles.dropdownLabel, compact && styles.dropdownLabelCompact, wide && styles.dropdownLabelWide]}>
+          {props.label}
+        </Text>
+        {props.labelAccessory}
+      </View>
       <Pressable
         ref={triggerRef}
         onPress={() => {
@@ -366,6 +391,7 @@ type TabsTransposeViewProps = {
   gAltPreference: '-2' | '3';
   toneToleranceCents: number;
   toneFollowMinConfidence: number;
+  noteSeparationRatio: number;
   targetRootPc: number;
   firstPositionRoot: NoteName;
   setSavedTabsStatus: (value: string | null) => void;
@@ -966,6 +992,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
     audioSnapshot: responsiveAudioSnapshot,
     toneToleranceCents: props.toneToleranceCents,
     toneFollowMinConfidence: props.toneFollowMinConfidence,
+    noteSeparationRatio: props.noteSeparationRatio,
     isListening,
   });
   const canListenOnTransposer = transposerSourceTab !== null && transposerResult.playableTokens.length > 0;
@@ -1335,10 +1362,13 @@ export default function App() {
     setToneToleranceInput,
     toneFollowMinConfidenceInput,
     setToneFollowMinConfidenceInput,
+    noteSeparationRatioInput,
+    setNoteSeparationRatioInput,
     simFrequency,
     setSimFrequency,
     toneToleranceCents,
     toneFollowMinConfidence,
+    noteSeparationRatio,
     simHz,
   } = useAudioSettings();
   const {
@@ -1351,6 +1381,7 @@ export default function App() {
   const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(null);
   const [transposerOctaveOffset, setTransposerOctaveOffset] = useState(0);
   const [transposerFollowStatus, setTransposerFollowStatus] = useState('idle');
+  const [activePropertiesHelpTopic, setActivePropertiesHelpTopic] = useState<PropertiesHelpTopic | null>(null);
   const {
     editorInput,
     setEditorInput,
@@ -1430,6 +1461,21 @@ export default function App() {
     visibleScaleKeyOptions.some(
       (option) => option.position === pendingContextCurrentHarpPosition && noteToPc(option.note) === pendingContextTargetPc,
     );
+  const activePropertiesHelp =
+    activePropertiesHelpTopic === null ? null : PROPERTIES_HELP_CONTENT[activePropertiesHelpTopic];
+
+  function renderPropertiesHelpButton(topic: PropertiesHelpTopic) {
+    return (
+      <Pressable
+        testID={`${topic}-help-button`}
+        onPress={() => setActivePropertiesHelpTopic(topic)}
+        style={styles.helpIconButton}
+        accessibilityLabel={`Help for ${PROPERTIES_HELP_CONTENT[topic].title}`}
+      >
+        <Text style={styles.helpIconText}>?</Text>
+      </Pressable>
+    );
+  }
 
   function ensurePositionVisible(positionNumber: number) {
     if (visibleScaleKeyOptions.some((option) => option.position === positionNumber)) {
@@ -1886,6 +1932,7 @@ export default function App() {
                     { label: '3', value: '3' },
                   ]}
                   onChange={(value) => setGAltPreference(value as '-2' | '3')}
+                  labelAccessory={renderPropertiesHelpButton('g-alt')}
                 />
               </View>
             </View>
@@ -1900,7 +1947,10 @@ export default function App() {
             <Text style={styles.propertiesTitle}>Tone Follow</Text>
             <View style={styles.propertiesInlineFields}>
               <View style={styles.propertiesInlineField}>
-                <Text style={styles.dropdownLabel}>Tolerance</Text>
+                <View style={styles.propertiesLabelWithHelp}>
+                  <Text style={styles.dropdownLabel}>Tolerance</Text>
+                  {renderPropertiesHelpButton('tolerance')}
+                </View>
                 <TextInput
                   value={toneToleranceInput}
                   onChangeText={setToneToleranceInput}
@@ -1915,7 +1965,10 @@ export default function App() {
                 />
               </View>
               <View style={styles.propertiesInlineField}>
-                <Text style={styles.dropdownLabel}>Confidence</Text>
+                <View style={styles.propertiesLabelWithHelp}>
+                  <Text style={styles.dropdownLabel}>Confidence</Text>
+                  {renderPropertiesHelpButton('confidence')}
+                </View>
                 <TextInput
                   value={toneFollowMinConfidenceInput}
                   onChangeText={setToneFollowMinConfidenceInput}
@@ -1925,6 +1978,26 @@ export default function App() {
                   autoCapitalize="none"
                   spellCheck={false}
                   placeholder={DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput}
+                  placeholderTextColor="#64748b"
+                  style={styles.propertiesNumberInput}
+                />
+              </View>
+            </View>
+            <View style={styles.propertiesInlineFields}>
+              <View style={styles.propertiesInlineField}>
+                <View style={styles.propertiesLabelWithHelp}>
+                  <Text style={styles.dropdownLabel}>Note separation</Text>
+                  {renderPropertiesHelpButton('note-separation')}
+                </View>
+                <TextInput
+                  value={noteSeparationRatioInput}
+                  onChangeText={setNoteSeparationRatioInput}
+                  keyboardType="decimal-pad"
+                  inputMode="decimal"
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder={DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput}
                   placeholderTextColor="#64748b"
                   style={styles.propertiesNumberInput}
                 />
@@ -2059,6 +2132,7 @@ export default function App() {
                 gAltPreference={gAltPreference}
                 toneToleranceCents={toneToleranceCents}
                 toneFollowMinConfidence={toneFollowMinConfidence}
+                noteSeparationRatio={noteSeparationRatio}
                 targetRootPc={scale.rootPc}
                 firstPositionRoot={firstPositionRoot}
                 setSavedTabsStatus={setSavedTabsStatus}
@@ -2103,6 +2177,21 @@ export default function App() {
             gAltPreference={gAltPreference}
             transposerFollowStatus={transposerFollowStatus}
           />
+        )}
+        {activePropertiesHelp && (
+          <View
+            testID={`${activePropertiesHelpTopic}-help-dialog`}
+            style={[StyleSheet.absoluteFill, styles.dialogOverlay]}
+          >
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setActivePropertiesHelpTopic(null)} />
+            <View style={styles.dialogCard}>
+              <Text style={styles.dialogTitle}>{activePropertiesHelp.title}</Text>
+              <Text style={styles.helperText}>{activePropertiesHelp.body}</Text>
+              <Pressable onPress={() => setActivePropertiesHelpTopic(null)} style={styles.dialogButton}>
+                <Text style={styles.dialogButtonText}>Got it</Text>
+              </Pressable>
+            </View>
+          </View>
         )}
         {pendingContextOpenRecord !== null && pendingContextRecordContext !== null && pendingContextTargetPc !== null && (
           <View testID="saved-tab-context-modal" style={[StyleSheet.absoluteFill, styles.dialogOverlay]}>
@@ -2358,6 +2447,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 6,
   },
+  propertiesLabelWithHelp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   propertiesRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2380,6 +2474,11 @@ const styles = StyleSheet.create({
   },
   dropdownCompact: {
     gap: 4,
+  },
+  dropdownLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   dropdownLabel: {
     color: '#94a3b8',

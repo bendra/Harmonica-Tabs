@@ -560,6 +560,62 @@ describe('App navigation', () => {
     expect(findDropdownByLabel(root, 'Target Position/Key').props.value).toBe('F#');
   });
 
+  it('explains the advanced properties settings from their help buttons', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findPressableByText(root, '⚙').props.onPress();
+    });
+
+    const helpCases = [
+      {
+        topic: 'tolerance',
+        title: 'Tolerance',
+        expectedText: 'measured in cents',
+      },
+      {
+        topic: 'confidence',
+        title: 'Confidence',
+        expectedText: 'detector must be',
+      },
+      {
+        topic: 'note-separation',
+        title: 'Note separation',
+        expectedText: 'volume must dip',
+      },
+      {
+        topic: 'g-alt',
+        title: '-2 / 3',
+        expectedText: '2 draw and 3 blow',
+      },
+    ];
+
+    for (const helpCase of helpCases) {
+      act(() => {
+        findByTestId(root, `${helpCase.topic}-help-button`).props.onPress();
+      });
+
+      expect(findByTestId(root, `${helpCase.topic}-help-dialog`)).toBeTruthy();
+      expect(findAllText(root, helpCase.title).length).toBeGreaterThan(0);
+      expect(
+        root.findAll(
+          (node: any) =>
+            node.type === 'Text' &&
+            flattenTextChildren(node.children).includes(helpCase.expectedText),
+        ).length,
+      ).toBeGreaterThan(0);
+
+      act(() => {
+        findPressableByText(root, 'Got it').props.onPress();
+      });
+
+      expect(root.findAll((node: any) => node.props?.testID === `${helpCase.topic}-help-dialog`)).toHaveLength(0);
+    }
+  });
+
   it('keeps the workspace nav visible while the library list scrolls internally', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
     seedSavedTabs(
