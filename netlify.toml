@@ -3,6 +3,8 @@
   base = "harmonica-tabs"
   command = "npm run build:netlify"
   publish = "dist"
+  # Exit 0 (skip build) when the only changes are in docs/ or harmonica-tabs/tests/.
+  ignore = "git diff --quiet HEAD^ HEAD -- . ':(exclude)docs' ':(exclude)harmonica-tabs/tests' ':(exclude)sound-samples' ':(exclude)scripts'"
 
 # Applied to branch deploy previews unless a branch-specific context overrides it.
 [context.branch-deploy]
