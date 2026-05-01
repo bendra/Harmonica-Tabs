@@ -75,9 +75,16 @@ function decodeWav(buffer: Buffer): { sampleRate: number; channelData: Float32Ar
 
 import { buildHarmonicaVocabulary } from '../src/logic/harmonica-frequencies';
 import { detectSingleNote } from '../src/logic/fft-detector';
+import { DEFAULT_AUDIO_SETTINGS } from '../src/config/default-settings';
+import {
+  evaluateTransposerFollow,
+  createTransposerFollowState,
+  type DetectorSnapshot,
+} from '../src/logic/transposer-follow';
 
 const FRAME_SIZE = 4096;
 const SAMPLES_DIR = path.resolve(process.cwd(), '../sound-samples');
+const CONFIDENCE_SWEEP = [0.1, 0.2, 0.35, 0.5, 0.7];
 
 // Map folder name → pitch class (semitones above C) for all 12 keys.
 // Both enharmonic spellings are listed so recordings using either name work.
@@ -125,6 +132,10 @@ type FileResult = {
     rawHz: number | null;
     snappedHz: number | null;
   }>;
+  /** Populated only for repeated-note files. */
+  advanceCount?: { detected: number; expected: number };
+  /** Advances detected at each CONFIDENCE_SWEEP threshold. Parallel to CONFIDENCE_SWEEP. */
+  sweepAdvances?: number[];
 };
 
 function classifyFrame(snappedHz: number | null, expectedMidi: number): FrameClass {
@@ -384,6 +395,203 @@ function main() {
     }
   }
   console.log();
+
+  // -----------------------------------------------------------------------
+  // Repeated notes processing
+  // -----------------------------------------------------------------------
+  const repeatResults: FileResult[] = [];
+
+  for (const harmKey of availableKeys.sort()) {
+    const pc = KEY_PC[harmKey];
+    const vocabulary = buildHarmonicaVocabulary(pc);
+    const harmDir = path.join(SAMPLES_DIR, harmKey, 'repeated_notes');
+
+    if (!fs.existsSync(harmDir)) continue;  // repeated_notes is optional
+
+    for (const takeDir of fs.readdirSync(harmDir).sort()) {
+      if (!takeDir.startsWith('take_')) continue;
+      const takePath = path.join(harmDir, takeDir);
+
+      for (const filename of fs.readdirSync(takePath).sort()) {
+        if (!filename.endsWith('.wav')) continue;
+
+        const match = filename.match(/^(\d+)[_-](blow|draw)_x(\d+)\.wav$/);
+        if (!match) continue;
+        const hole = parseInt(match[1], 10);
+        const dir = match[2] as 'blow' | 'draw';
+        const expectedEventCount = parseInt(match[3], 10);
+
+        const expectedNote = vocabulary.naturalNotes.find(
+          n => n.hole === hole && n.technique === dir,
+        );
+        if (!expectedNote) {
+          console.warn(`No vocab entry: hole ${hole} ${dir} on ${harmKey}`);
+          continue;
+        }
+
+        const buffer = fs.readFileSync(path.join(takePath, filename));
+        const decoded = decodeWav(buffer);
+        const samples = decoded.channelData[0];
+        const sampleRate = decoded.sampleRate;
+
+        const followTokens = Array.from({ length: expectedEventCount }, () => ({
+          tokenIndex: 0,
+          text: String(hole),
+          midi: expectedNote.midi,
+        }));
+
+        const counts: Record<FrameClass, number> = {
+          silent: 0, correct: 0, wrong_octave: 0, wrong_note: 0,
+        };
+        const frames: FileResult['frames'] = [];
+        const totalFrames = Math.floor(samples.length / FRAME_SIZE);
+
+        const maxAdvances = expectedEventCount - 1;
+        let followState = createTransposerFollowState(0);
+        let advancesDetected = 0;
+        let doneCounting = false;
+
+        for (let i = 0; i < totalFrames; i++) {
+          const frame = samples.slice(i * FRAME_SIZE, (i + 1) * FRAME_SIZE);
+          const result = detectSingleNote(frame, sampleRate, vocabulary);
+          const cls = classifyFrame(result.frequency, expectedNote.midi);
+          counts[cls]++;
+          if (cls !== 'silent') {
+            frames.push({ frameIdx: i, cls, rawHz: result.rawFrequency, snappedHz: result.frequency });
+          }
+
+          if (!doneCounting) {
+            const snapshot: DetectorSnapshot = {
+              frequency: result.frequency,
+              confidence: result.confidence,
+              rms: result.rms,
+              source: 'web',
+              lastDetectedAt: null,
+            };
+            const followResult = evaluateTransposerFollow({
+              enabled: true,
+              tokens: followTokens,
+              state: followState,
+              detector: snapshot,
+              toneToleranceCents: DEFAULT_AUDIO_SETTINGS.toneToleranceCents,
+              minConfidence: DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidence,
+              noteSeparationRatio: DEFAULT_AUDIO_SETTINGS.noteSeparationRatio,
+            });
+            followState = followResult.state;
+            if (followResult.status === 'advanced') {
+              advancesDetected++;
+              if (advancesDetected >= maxAdvances) doneCounting = true;
+            }
+          }
+        }
+
+        const sweepAdvances: number[] = CONFIDENCE_SWEEP.map((minConf) => {
+          let state = createTransposerFollowState(0);
+          let advances = 0;
+          let done = false;
+          for (let i = 0; i < totalFrames; i++) {
+            if (done) break;
+            const frame = samples.slice(i * FRAME_SIZE, (i + 1) * FRAME_SIZE);
+            const result = detectSingleNote(frame, sampleRate, vocabulary);
+            const followResult = evaluateTransposerFollow({
+              enabled: true,
+              tokens: followTokens,
+              state,
+              detector: {
+                frequency: result.frequency,
+                confidence: result.confidence,
+                rms: result.rms,
+                source: 'web',
+                lastDetectedAt: null,
+              },
+              toneToleranceCents: DEFAULT_AUDIO_SETTINGS.toneToleranceCents,
+              minConfidence: minConf,
+              noteSeparationRatio: DEFAULT_AUDIO_SETTINGS.noteSeparationRatio,
+            });
+            state = followResult.state;
+            if (followResult.status === 'advanced') {
+              advances++;
+              if (advances >= maxAdvances) done = true;
+            }
+          }
+          return advances;
+        });
+
+        repeatResults.push({
+          harmonica: harmKey.replace('_harmonica', '').toUpperCase(),
+          take: takeDir.replace('take_', ''),
+          hole, dir,
+          expectedNote: midiToName(expectedNote.midi),
+          expectedHz: expectedNote.frequency,
+          counts, totalFrames, frames,
+          advanceCount: { detected: advancesDetected, expected: maxAdvances },
+          sweepAdvances,
+        });
+      }
+    }
+  }
+
+  // --- Repeated notes results ---
+  if (repeatResults.length > 0) {
+    console.log('\n=== Repeated Notes Results ===\n');
+    console.log(`  Settings: tolerance=${DEFAULT_AUDIO_SETTINGS.toneToleranceCents}¢  confidence=${DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidence}  noteSeparation=${DEFAULT_AUDIO_SETTINGS.noteSeparationRatio}`);
+    console.log('  (correct/wrong = % of active frames; silent = % of total; advances = detected/expected)');
+    console.log();
+    const repHdr = [
+      col('key', 4), col('take', 5), col('hole', 5), col('dir', 5),
+      col('expected', 14),
+      col('correct', 8, true), col('wrong_oct', 10, true),
+      col('wrong_note', 11, true), col('silent', 7, true),
+      col('frames', 7, true), col('advances', 9, true),
+    ].join(' ');
+    console.log(repHdr);
+    console.log('-'.repeat(repHdr.length));
+
+    for (const r of repeatResults) {
+      const active = r.totalFrames - r.counts.silent;
+      const advStr = r.advanceCount
+        ? `${r.advanceCount.detected}/${r.advanceCount.expected}`
+        : '--';
+      const row = [
+        col(r.harmonica, 4), col(r.take, 5), col(r.hole, 5), col(r.dir, 5),
+        col(`${r.expectedNote} ${r.expectedHz.toFixed(1)}Hz`, 14),
+        col(pct(r.counts.correct, active), 8, true),
+        col(pct(r.counts.wrong_octave, active), 10, true),
+        col(pct(r.counts.wrong_note, active), 11, true),
+        col(pct(r.counts.silent, r.totalFrames), 7, true),
+        col(r.totalFrames, 7, true),
+        col(advStr, 9, true),
+      ].join(' ');
+      console.log(row);
+    }
+    console.log();
+  }
+
+  // --- Confidence sweep for repeated notes ---
+  if (repeatResults.length > 0 && repeatResults[0].sweepAdvances) {
+    console.log('=== Repeated Notes: Confidence Sweep ===\n');
+    console.log(`  (advances detected/expected at each minConfidence; noteSeparation=${DEFAULT_AUDIO_SETTINGS.noteSeparationRatio})`);
+    console.log();
+    const sweepCols = CONFIDENCE_SWEEP.map(c => c.toFixed(2));
+    const sweepHdr = [
+      col('key', 4), col('take', 5), col('hole', 5), col('dir', 5),
+      col('expected', 14),
+      ...sweepCols.map(c => col(c, 7, true)),
+    ].join(' ');
+    console.log(sweepHdr);
+    console.log('-'.repeat(sweepHdr.length));
+
+    for (const r of repeatResults) {
+      const maxAdv = r.advanceCount?.expected ?? 0;
+      const row = [
+        col(r.harmonica, 4), col(r.take, 5), col(r.hole, 5), col(r.dir, 5),
+        col(`${r.expectedNote} ${r.expectedHz.toFixed(1)}Hz`, 14),
+        ...(r.sweepAdvances ?? []).map(adv => col(`${adv}/${maxAdv}`, 7, true)),
+      ].join(' ');
+      console.log(row);
+    }
+    console.log();
+  }
 }
 
 main();
