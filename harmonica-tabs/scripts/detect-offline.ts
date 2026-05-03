@@ -10,6 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 
 /**
  * Minimal WAV decoder supporting both standard PCM (format 0x0001) and
@@ -80,11 +81,20 @@ import {
   evaluateTransposerFollow,
   createTransposerFollowState,
   type DetectorSnapshot,
+  type TransposerFollowStatus,
+  type TransposerFollowState,
 } from '../src/logic/transposer-follow';
 
 const FRAME_SIZE = 4096;
 const SAMPLES_DIR = path.resolve(process.cwd(), '../sound-samples');
 const CONFIDENCE_SWEEP = [0.1, 0.2, 0.35, 0.5, 0.7];
+const REPEATED_NOTE_FRAME_HOP_EXPERIMENTS = [
+  { label: '4096/4096', frameSize: 4096, hopSize: 4096 },
+  { label: '4096/2048', frameSize: 4096, hopSize: 2048 },
+  { label: '2048/2048', frameSize: 2048, hopSize: 2048 },
+  { label: '2048/1024', frameSize: 2048, hopSize: 1024 },
+  { label: '1024/512', frameSize: 1024, hopSize: 512 },
+];
 
 // Map folder name → pitch class (semitones above C) for all 12 keys.
 // Both enharmonic spellings are listed so recordings using either name work.
@@ -116,6 +126,47 @@ function midiToName(midi: number): string {
 
 type FrameClass = 'silent' | 'correct' | 'wrong_octave' | 'wrong_note';
 
+type AubioEvent = {
+  midi: number;
+  onsetSeconds: number;
+  releaseSeconds: number;
+};
+
+type FollowFrameTrace = {
+  frameIdx: number;
+  timeSeconds: number;
+  cls: FrameClass;
+  rawHz: number | null;
+  snappedHz: number | null;
+  confidence: number;
+  rms: number;
+  status: TransposerFollowStatus;
+  activeBefore: number | null;
+  activeAfter: number | null;
+  waitingBefore: boolean;
+  waitingAfter: boolean;
+  peakRmsAfter: number;
+  lastAmplitudeReleaseRmsAfter: number | null;
+  advanced: boolean;
+};
+
+type FrameHopExperimentResult = {
+  label: string;
+  frameSize: number;
+  hopSize: number;
+  totalFrames: number;
+  activeFrames: number;
+  correctFrames: number;
+  wrongOctaveFrames: number;
+  wrongNoteFrames: number;
+  advancesDetected: number;
+  expectedAdvances: number;
+  maxConfidence: number | null;
+  medianConfidence: number | null;
+  maxRms: number | null;
+  medianRms: number | null;
+};
+
 type FileResult = {
   harmonica: string;
   take: string;
@@ -136,6 +187,16 @@ type FileResult = {
   advanceCount?: { detected: number; expected: number };
   /** Advances detected at each CONFIDENCE_SWEEP threshold. Parallel to CONFIDENCE_SWEEP. */
   sweepAdvances?: number[];
+  /** Aubio note-event cross-reference for repeated-note files, when available. */
+  aubioEvents?: AubioEvent[];
+  /** App follow trace for repeated-note files. */
+  followTrace?: FollowFrameTrace[];
+  /** Sample rate used to convert detector frame indexes to seconds. */
+  sampleRate?: number;
+  /** Full decoded repeated-note samples for offline-only follow experiments. */
+  repeatedSamples?: Float32Array;
+  /** MIDI number expected for repeated-note files. */
+  expectedMidi?: number;
 };
 
 function classifyFrame(snappedHz: number | null, expectedMidi: number): FrameClass {
@@ -155,6 +216,169 @@ function pct(count: number, total: number): string {
 function col(s: string | number, width: number, right = false): string {
   const str = String(s);
   return right ? str.padStart(width) : str.padEnd(width);
+}
+
+function fmtRms(value: number): string {
+  return value.toFixed(4);
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+let aubioUnavailableReason: string | null = null;
+
+function runAubioNotes(filePath: string): AubioEvent[] | null {
+  if (aubioUnavailableReason) return null;
+
+  const result = spawnSync('aubio', ['notes', filePath, '-s', '-50'], {
+    encoding: 'utf8',
+  });
+
+  if (result.error) {
+    aubioUnavailableReason = result.error.message;
+    return null;
+  }
+
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    aubioUnavailableReason = stderr || `aubio exited with status ${result.status}`;
+    return null;
+  }
+
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      const parts = line.split(/\s+/);
+      if (parts.length !== 3) return [];
+      const [midi, onsetSeconds, releaseSeconds] = parts.map(Number);
+      if (![midi, onsetSeconds, releaseSeconds].every(Number.isFinite)) return [];
+      return [{ midi, onsetSeconds, releaseSeconds }];
+    });
+}
+
+function frameTraceLabel(frame: FollowFrameTrace | undefined): string {
+  if (!frame) return 'no app frame';
+  const snapped = frame.snappedHz == null
+    ? 'null'
+    : `${midiToName(freqToMidi(frame.snappedHz))} ${frame.snappedHz.toFixed(1)}Hz`;
+  const advance = frame.advanced ? ' ADV' : '';
+  return `frame ${frame.frameIdx} ${frame.status}${advance} ${frame.cls} conf=${frame.confidence.toFixed(2)} rms=${fmtRms(frame.rms)} snapped=${snapped}`;
+}
+
+function nearestTraceFrame(trace: FollowFrameTrace[], targetFrameIdx: number): FollowFrameTrace | undefined {
+  let nearest: FollowFrameTrace | undefined;
+  for (const frame of trace) {
+    if (!nearest || Math.abs(frame.frameIdx - targetFrameIdx) < Math.abs(nearest.frameIdx - targetFrameIdx)) {
+      nearest = frame;
+    }
+  }
+  return nearest;
+}
+
+function evaluateRepeatedNoteWithFrameHop(input: {
+  samples: Float32Array;
+  sampleRate: number;
+  vocabulary: ReturnType<typeof buildHarmonicaVocabulary>;
+  expectedMidi: number;
+  expectedEventCount: number;
+  hole: number;
+  frameSize: number;
+  hopSize: number;
+  label: string;
+}): FrameHopExperimentResult {
+  const {
+    expectedEventCount,
+    expectedMidi,
+    frameSize,
+    hole,
+    hopSize,
+    label,
+    sampleRate,
+    samples,
+    vocabulary,
+  } = input;
+  const followTokens = Array.from({ length: expectedEventCount }, () => ({
+    tokenIndex: 0,
+    text: String(hole),
+    midi: expectedMidi,
+  }));
+  const expectedAdvances = expectedEventCount - 1;
+  const totalFrames =
+    samples.length >= frameSize
+      ? Math.floor((samples.length - frameSize) / hopSize) + 1
+      : 0;
+  let followState = createTransposerFollowState(0);
+  let advancesDetected = 0;
+  let activeFrames = 0;
+  let correctFrames = 0;
+  let wrongOctaveFrames = 0;
+  let wrongNoteFrames = 0;
+  const activeConfidence: number[] = [];
+  const activeRms: number[] = [];
+  let doneCounting = false;
+
+  for (let i = 0; i < totalFrames; i++) {
+    const start = i * hopSize;
+    const frame = samples.slice(start, start + frameSize);
+    const result = detectSingleNote(frame, sampleRate, vocabulary);
+    const cls = classifyFrame(result.frequency, expectedMidi);
+    if (cls !== 'silent') {
+      activeFrames++;
+      activeConfidence.push(result.confidence);
+      activeRms.push(result.rms);
+      if (cls === 'correct') correctFrames++;
+      if (cls === 'wrong_octave') wrongOctaveFrames++;
+      if (cls === 'wrong_note') wrongNoteFrames++;
+    }
+
+    if (!doneCounting) {
+      const followResult = evaluateTransposerFollow({
+        enabled: true,
+        tokens: followTokens,
+        state: followState,
+        detector: {
+          frequency: result.frequency,
+          confidence: result.confidence,
+          rms: result.rms,
+          source: 'web',
+          lastDetectedAt: null,
+        },
+        toneToleranceCents: DEFAULT_AUDIO_SETTINGS.toneToleranceCents,
+        minConfidence: DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidence,
+        noteSeparationRatio: DEFAULT_AUDIO_SETTINGS.noteSeparationRatio,
+      });
+      followState = followResult.state;
+      if (followResult.status === 'advanced') {
+        advancesDetected++;
+        if (advancesDetected >= expectedAdvances) doneCounting = true;
+      }
+    }
+  }
+
+  return {
+    label,
+    frameSize,
+    hopSize,
+    totalFrames,
+    activeFrames,
+    correctFrames,
+    wrongOctaveFrames,
+    wrongNoteFrames,
+    advancesDetected,
+    expectedAdvances,
+    maxConfidence: activeConfidence.length > 0 ? Math.max(...activeConfidence) : null,
+    medianConfidence: median(activeConfidence),
+    maxRms: activeRms.length > 0 ? Math.max(...activeRms) : null,
+    medianRms: median(activeRms),
+  };
 }
 
 /**
@@ -433,6 +657,8 @@ function main() {
         const decoded = decodeWav(buffer);
         const samples = decoded.channelData[0];
         const sampleRate = decoded.sampleRate;
+        const filePath = path.join(takePath, filename);
+        const aubioEvents = runAubioNotes(filePath);
 
         const followTokens = Array.from({ length: expectedEventCount }, () => ({
           tokenIndex: 0,
@@ -450,6 +676,7 @@ function main() {
         let followState = createTransposerFollowState(0);
         let advancesDetected = 0;
         let doneCounting = false;
+        const followTrace: FollowFrameTrace[] = [];
 
         for (let i = 0; i < totalFrames; i++) {
           const frame = samples.slice(i * FRAME_SIZE, (i + 1) * FRAME_SIZE);
@@ -468,6 +695,7 @@ function main() {
               source: 'web',
               lastDetectedAt: null,
             };
+            const previousState: TransposerFollowState = { ...followState };
             const followResult = evaluateTransposerFollow({
               enabled: true,
               tokens: followTokens,
@@ -478,6 +706,23 @@ function main() {
               noteSeparationRatio: DEFAULT_AUDIO_SETTINGS.noteSeparationRatio,
             });
             followState = followResult.state;
+            followTrace.push({
+              frameIdx: i,
+              timeSeconds: (i * FRAME_SIZE) / sampleRate,
+              cls,
+              rawHz: result.rawFrequency,
+              snappedHz: result.frequency,
+              confidence: result.confidence,
+              rms: result.rms,
+              status: followResult.status,
+              activeBefore: previousState.activeTokenIndex,
+              activeAfter: followState.activeTokenIndex,
+              waitingBefore: previousState.waitingForRelease,
+              waitingAfter: followState.waitingForRelease,
+              peakRmsAfter: followState.peakRmsSinceAdvance,
+              lastAmplitudeReleaseRmsAfter: followState.lastAmplitudeReleaseRms,
+              advanced: followResult.status === 'advanced',
+            });
             if (followResult.status === 'advanced') {
               advancesDetected++;
               if (advancesDetected >= maxAdvances) doneCounting = true;
@@ -526,6 +771,11 @@ function main() {
           counts, totalFrames, frames,
           advanceCount: { detected: advancesDetected, expected: maxAdvances },
           sweepAdvances,
+          aubioEvents: aubioEvents ?? undefined,
+          followTrace,
+          sampleRate,
+          repeatedSamples: samples,
+          expectedMidi: expectedNote.midi,
         });
       }
     }
@@ -565,6 +815,133 @@ function main() {
       console.log(row);
     }
     console.log();
+  }
+
+  const repeatFailures = repeatResults.filter((r) =>
+    r.advanceCount !== undefined && r.advanceCount.detected < r.advanceCount.expected
+  );
+  if (repeatFailures.length > 0) {
+    console.log('=== Repeated Notes: Failure Detail ===\n');
+    if (aubioUnavailableReason) {
+      console.log(`  aubio unavailable; skipping aubio cross-reference (${aubioUnavailableReason})`);
+      console.log();
+    }
+
+    for (const r of repeatFailures) {
+      const active = r.totalFrames - r.counts.silent;
+      const trace = r.followTrace ?? [];
+      const activeFrames = trace.filter((frame) => frame.cls !== 'silent');
+      const activeConfidence = activeFrames.map((frame) => frame.confidence);
+      const activeRms = activeFrames.map((frame) => frame.rms);
+      const maxConfidence = activeConfidence.length > 0 ? Math.max(...activeConfidence) : null;
+      const medianConfidence = median(activeConfidence);
+      const maxRms = activeRms.length > 0 ? Math.max(...activeRms) : null;
+      const medianRms = median(activeRms);
+      const advances = trace.filter((frame) => frame.advanced);
+      const lastTrace = trace.at(-1);
+
+      console.log(`${r.harmonica} take ${r.take}  hole ${r.hole} ${r.dir}  ${r.expectedNote} ${r.expectedHz.toFixed(1)}Hz`);
+      console.log(`  advances: ${r.advanceCount?.detected}/${r.advanceCount?.expected}; active frames: ${active}/${r.totalFrames}; silent: ${pct(r.counts.silent, r.totalFrames)}`);
+      console.log(
+        `  confidence: max=${maxConfidence == null ? '--' : maxConfidence.toFixed(2)} median=${medianConfidence == null ? '--' : medianConfidence.toFixed(2)}; ` +
+        `rms: max=${maxRms == null ? '--' : fmtRms(maxRms)} median=${medianRms == null ? '--' : fmtRms(medianRms)}`,
+      );
+
+      if (r.aubioEvents) {
+        const eventSummary = r.aubioEvents.length === 0
+          ? 'no note events'
+          : r.aubioEvents
+              .map((event) => `${midiToName(event.midi)} ${event.onsetSeconds.toFixed(3)}-${event.releaseSeconds.toFixed(3)}s`)
+              .join(', ');
+        const expectedEvents = (r.advanceCount?.expected ?? 0) + 1;
+        console.log(`  aubio: ${r.aubioEvents.length}/${expectedEvents} events: ${eventSummary}`);
+
+        if (r.aubioEvents.length > 0 && r.sampleRate) {
+          const nearbyRows = r.aubioEvents.map((event) => {
+            const onsetFrame = Math.round((event.onsetSeconds * r.sampleRate!) / FRAME_SIZE);
+            const nearby = trace.filter((frame) => Math.abs(frame.frameIdx - onsetFrame) <= 1);
+            const nearest = nearestTraceFrame(trace, onsetFrame);
+            const advancedNear = nearby.some((frame) => frame.advanced);
+            const nearbyText = nearby.length > 0
+              ? nearby.map(frameTraceLabel).join('; ')
+              : frameTraceLabel(nearest);
+            return `${midiToName(event.midi)} @ ${event.onsetSeconds.toFixed(3)}s -> ${advancedNear ? 'advance near' : 'no advance near'}; ${nearbyText}`;
+          });
+          console.log('  app frames near aubio onsets:');
+          nearbyRows.forEach((row) => console.log(`    ${row}`));
+        }
+      } else if (!aubioUnavailableReason) {
+        console.log('  aubio: no cross-reference available');
+      }
+
+      if (advances.length > 0) {
+        console.log(`  app advances: ${advances.map((frame) => `frame ${frame.frameIdx} @ ${frame.timeSeconds.toFixed(3)}s`).join(', ')}`);
+      } else {
+        console.log('  app advances: none');
+      }
+      if (lastTrace) {
+        console.log(`  final app state: active=${lastTrace.activeAfter} waiting=${lastTrace.waitingAfter} peakRms=${fmtRms(lastTrace.peakRmsAfter)} lastReleaseRms=${lastTrace.lastAmplitudeReleaseRmsAfter == null ? 'null' : fmtRms(lastTrace.lastAmplitudeReleaseRmsAfter)}`);
+      }
+      console.log();
+    }
+  } else if (repeatResults.length > 0 && aubioUnavailableReason) {
+    console.log(`aubio unavailable; skipping aubio cross-reference (${aubioUnavailableReason})`);
+    console.log();
+  }
+
+  if (repeatFailures.length > 0) {
+    console.log('=== Repeated Notes: Frame/Hop Experiment ===\n');
+    console.log('  Offline-only experiment: re-runs failed repeated-note files with alternate detector frame/hop sizes.');
+    console.log('  advances = detected/expected at default tone-follow settings; active/correct are frame counts.');
+    console.log();
+
+    const expHdr = [
+      col('key', 4), col('take', 5), col('hole', 5), col('dir', 5),
+      col('expected', 14), col('window', 10),
+      col('active', 8, true), col('correct', 8, true),
+      col('wrong', 8, true), col('conf', 6, true),
+      col('rms', 8, true), col('adv', 7, true),
+    ].join(' ');
+    console.log(expHdr);
+    console.log('-'.repeat(expHdr.length));
+
+    for (const r of repeatFailures) {
+      if (!r.repeatedSamples || !r.sampleRate || r.expectedMidi == null || !r.advanceCount) continue;
+      const pc = KEY_PC[`${r.harmonica.toLowerCase()}_harmonica`];
+      if (pc === undefined) continue;
+      const vocabulary = buildHarmonicaVocabulary(pc);
+      const expectedEventCount = r.advanceCount.expected + 1;
+      const rows = REPEATED_NOTE_FRAME_HOP_EXPERIMENTS.map((experiment) =>
+        evaluateRepeatedNoteWithFrameHop({
+          samples: r.repeatedSamples as Float32Array,
+          sampleRate: r.sampleRate as number,
+          vocabulary,
+          expectedMidi: r.expectedMidi as number,
+          expectedEventCount,
+          hole: r.hole,
+          frameSize: experiment.frameSize,
+          hopSize: experiment.hopSize,
+          label: experiment.label,
+        }),
+      );
+
+      for (const result of rows) {
+        const wrong = result.wrongOctaveFrames + result.wrongNoteFrames;
+        const row = [
+          col(r.harmonica, 4), col(r.take, 5), col(r.hole, 5), col(r.dir, 5),
+          col(`${r.expectedNote} ${r.expectedHz.toFixed(1)}Hz`, 14),
+          col(result.label, 10),
+          col(`${result.activeFrames}/${result.totalFrames}`, 8, true),
+          col(result.correctFrames, 8, true),
+          col(wrong, 8, true),
+          col(result.medianConfidence == null ? '--' : result.medianConfidence.toFixed(2), 6, true),
+          col(result.medianRms == null ? '--' : fmtRms(result.medianRms), 8, true),
+          col(`${result.advancesDetected}/${result.expectedAdvances}`, 7, true),
+        ].join(' ');
+        console.log(row);
+      }
+      console.log();
+    }
   }
 
   // --- Confidence sweep for repeated notes ---

@@ -24,6 +24,7 @@
 - Shared listening now exposes two post-detection commit paths: a conservative `stable` path for `Scales` (majority smoothing + hold) and a faster `responsive` path for `Tabs` (2 consecutive snapped frames, no hold).
 - Tone follow is automatically on while listening is on, and off while listening is off.
 - Repeated identical output notes require either a pitch release/change or a relative RMS dip before the cursor can advance again.
+- Offline repeated-note diagnostics now include optional aubio cross-reference output and a frame/hop experiment for failures. Current evidence suggests smaller, overlapped detector windows help repeated-note advancement, but may increase wrong-note/wrong-octave exposure, so live detector defaults should not be changed without a focused follow-up pass and regression coverage.
 - When tone follow matches the last playable transposer note, the cursor wraps back to the first playable note.
 - Saved tabs persist `id`, `title`, `inputText`, optional `harmonicaPc`, optional `positionNumber`, `createdAt`, and `updatedAt`.
 - On web, saved tabs use the existing JSON blob in app storage; on native, the saved-tab service still uses the typed SQLite-backed path. In both cases, malformed half-filled saved context is normalized to no context.
