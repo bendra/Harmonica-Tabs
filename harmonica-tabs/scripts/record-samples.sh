@@ -345,27 +345,37 @@ elif [[ "$RECORD_TYPE" == "chord" ]]; then
     echo "Recording: $HARP_KEY harmonica, chords — take $TAKE_NUM"
     echo "Output:    $TAKE_DIR"
     echo ""
-    echo "Enter the notes of each chord as space-separated '<hole>_<dir>' tokens."
-    echo "Example:   1_blow 2_blow 3_blow   or   4_draw 5_draw"
+    echo "For each chord you will be asked the direction (blow/draw) and then which holes."
     echo ""
     echo "Controls:  SPACE = record   S = skip   Q = quit"
-    echo "Enter Q at the chord prompt when you are finished."
+    echo "Enter Q at the direction prompt when you are finished."
     echo ""
 
     while true; do
-        printf "Notes in chord (or Q to finish): "
-        read -r NOTES_INPUT
+        printf "Blow or draw? [blow/draw/Q to finish]: "
+        read -r CHORD_DIR_INPUT
 
-        case "$NOTES_INPUT" in
+        case "$CHORD_DIR_INPUT" in
             q|Q) break ;;
-            "")  echo "  No notes entered. Try again."; continue ;;
+            blow|Blow|BLOW) CHORD_DIR_INPUT="blow" ;;
+            draw|Draw|DRAW) CHORD_DIR_INPUT="draw" ;;
+            "") echo "  Please enter 'blow' or 'draw'."; continue ;;
+            *) echo "  Invalid direction. Enter 'blow' or 'draw'."; continue ;;
         esac
 
-        # Validate each token: must be <number>_blow or <number>_draw
+        printf "Which holes? (e.g. 1 2 3): "
+        read -r HOLES_INPUT
+
+        case "$HOLES_INPUT" in
+            q|Q) break ;;
+            "") echo "  No holes entered. Try again."; continue ;;
+        esac
+
+        # Validate each token is a number
         ALL_VALID=true
-        for token in $NOTES_INPUT; do
-            if ! [[ "$token" =~ ^[0-9]+_(blow|draw)$ ]]; then
-                echo "  Invalid token '$token'. Use format '<hole>_<dir>', e.g. '3_blow' or '4_draw'."
+        for hole in $HOLES_INPUT; do
+            if ! [[ "$hole" =~ ^[0-9]+$ ]]; then
+                echo "  Invalid hole '$hole'. Use numbers only, e.g. '1 2 3'."
                 ALL_VALID=false
                 break
             fi
@@ -373,6 +383,13 @@ elif [[ "$RECORD_TYPE" == "chord" ]]; then
         if [[ "$ALL_VALID" == false ]]; then
             continue
         fi
+
+        # Build notes tokens: e.g. "1_blow 2_blow 3_blow"
+        NOTES_INPUT=""
+        for hole in $HOLES_INPUT; do
+            NOTES_INPUT="$NOTES_INPUT ${hole}_${CHORD_DIR_INPUT}"
+        done
+        NOTES_INPUT="${NOTES_INPUT# }"
 
         # Build filename: join tokens with dashes, e.g. "1_blow-2_blow-3_blow.wav"
         CHORD_NAME=$(echo "$NOTES_INPUT" | tr ' ' '-')

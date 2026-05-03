@@ -75,6 +75,7 @@ function decodeWav(buffer: Buffer): { sampleRate: number; channelData: Float32Ar
 }
 
 import { buildHarmonicaVocabulary } from '../src/logic/harmonica-frequencies';
+import { RICHTER_C_LAYOUT, transposeLayout } from '../src/data/richter';
 import { detectSingleNote } from '../src/logic/fft-detector';
 import { DEFAULT_AUDIO_SETTINGS } from '../src/config/default-settings';
 import {
@@ -968,6 +969,105 @@ function main() {
       console.log(row);
     }
     console.log();
+  }
+
+  // -----------------------------------------------------------------------
+  // Chord verification
+  // -----------------------------------------------------------------------
+  console.log('=== Chord Verification ===\n');
+  console.log('  Goertzel power at each expected note frequency, relative to the strongest in the chord.');
+  console.log('  WEAK = below 15% of strongest; may mean a note was not played or is inaudible.');
+  console.log();
+
+  let anyChords = false;
+
+  for (const harmKey of availableKeys.sort()) {
+    const pc = KEY_PC[harmKey];
+    const chordBaseDir = path.join(SAMPLES_DIR, harmKey, 'chords');
+
+    if (!fs.existsSync(chordBaseDir)) continue;
+    anyChords = true;
+
+    const keyLabel = harmKey.replace('_harmonica', '').toUpperCase();
+
+    // Build a hole→MIDI map directly from the transposed layout so every
+    // hole/direction combination is available, including duplicates like
+    // hole 3 blow and hole 2 draw that share the same MIDI and get deduplicated
+    // in the vocabulary.
+    const semitones = pc >= 7 ? pc - 12 : pc;
+    const harpLayout = transposeLayout(RICHTER_C_LAYOUT, semitones);
+    const holeFreqMap = new Map<string, { midi: number; freq: number }>();
+    for (const h of harpLayout) {
+      const blowFreq = 440 * Math.pow(2, (h.blowMidi - 69) / 12);
+      const drawFreq = 440 * Math.pow(2, (h.drawMidi - 69) / 12);
+      holeFreqMap.set(`${h.hole}_blow`, { midi: h.blowMidi, freq: blowFreq });
+      holeFreqMap.set(`${h.hole}_draw`, { midi: h.drawMidi, freq: drawFreq });
+    }
+
+    for (const takeDir of fs.readdirSync(chordBaseDir).sort()) {
+      if (!takeDir.startsWith('take_')) continue;
+      const takePath = path.join(chordBaseDir, takeDir);
+
+      for (const filename of fs.readdirSync(takePath).sort()) {
+        if (!filename.endsWith('.wav')) continue;
+
+        const chordName = filename.replace('.wav', '');
+        const tokens = chordName.split('-');
+
+        const expectedNotes: Array<{ hole: number; dir: string; freq: number; noteName: string }> = [];
+        let parseOk = true;
+        for (const token of tokens) {
+          const m = token.match(/^(\d+)_(blow|draw)$/);
+          if (!m) { parseOk = false; break; }
+          const hole = parseInt(m[1], 10);
+          const dir = m[2];
+          const entry = holeFreqMap.get(`${hole}_${dir}`);
+          if (!entry) { parseOk = false; break; }
+          expectedNotes.push({ hole, dir, freq: entry.freq, noteName: midiToName(entry.midi) });
+        }
+
+        if (!parseOk || expectedNotes.length === 0) {
+          console.log(`  ${keyLabel} ${takeDir}  ${filename}  [could not parse filename]\n`);
+          continue;
+        }
+
+        const buffer = fs.readFileSync(path.join(takePath, filename));
+        const decoded = decodeWav(buffer);
+        const samples = decoded.channelData[0];
+        const sampleRate = decoded.sampleRate;
+        const totalFrames = Math.floor(samples.length / FRAME_SIZE);
+
+        const powers = new Array<number>(expectedNotes.length).fill(0);
+        let activeFrameCount = 0;
+
+        for (let i = 0; i < totalFrames; i++) {
+          const frame = samples.slice(i * FRAME_SIZE, (i + 1) * FRAME_SIZE);
+          const rms = Math.sqrt(frame.reduce((s, x) => s + x * x, 0) / frame.length);
+          if (rms < 0.001) continue;
+          activeFrameCount++;
+          for (let j = 0; j < expectedNotes.length; j++) {
+            powers[j] += goertzel(frame, expectedNotes[j].freq, sampleRate);
+          }
+        }
+
+        const maxPower = Math.max(...powers);
+        const noteLabels = expectedNotes.map(n => `${n.noteName}(${n.hole}_${n.dir})`).join(', ');
+        console.log(`  ${keyLabel} ${takeDir}  ${chordName}  [${noteLabels}]  (${activeFrameCount} active frames)`);
+
+        for (let j = 0; j < expectedNotes.length; j++) {
+          const ratio = maxPower > 0 ? powers[j] / maxPower : 0;
+          const bar = '█'.repeat(Math.round(ratio * 10)).padEnd(10);
+          const weak = ratio < 0.15 ? '  ← WEAK' : '';
+          const n = expectedNotes[j];
+          console.log(`    ${n.noteName.padEnd(4)} ${n.freq.toFixed(1).padStart(7)}Hz  ${bar}  ${ratio.toFixed(2)}${weak}`);
+        }
+        console.log();
+      }
+    }
+  }
+
+  if (!anyChords) {
+    console.log('  No chord recordings found.\n');
   }
 }
 
