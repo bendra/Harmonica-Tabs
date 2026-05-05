@@ -1,116 +1,95 @@
 # Chord Highlight Proposal
 
-## Background
+## What currently exists
 
-The Scales workspace already shows blow and draw chords derived from adjacent
-unbent holes.  The question is whether live audio detection can highlight the
-chord the user is currently playing.
+The Scales workspace shows scale and arpeggio notes as individual tab chips
+(e.g. `4`, `-4`, `5`).  When listening, a floating caret moves underneath the
+chip whose MIDI note best matches the currently-detected frequency.  This is
+monophonic: one note detected, one chip indicated at a time.
 
-### What the offline data shows
+`detectChord()` already exists in `src/logic/fft-detector.ts` but is not wired
+to the UI.  It runs Goertzel at every harmonica note frequency and returns the
+set of notes whose power clears a relative threshold — but with no structural
+constraints, so the returned set is inconsistent (see offline data below).
 
-Offline Goertzel analysis of real chord recordings (`scripts/detect-offline.ts`,
-chord verification section) produced two consistent findings:
+## The key harmonica constraint
 
-1. **The lowest note in a multi-hole chord is physically weak.** Hole 1 blow
-   (C4) registered 0.01–0.04 relative power across two takes; hole 1 draw (D4)
-   was similarly weak.  This appears to be a reed-physics issue: air splits
-   across all open holes and lower reeds, which have more mass and need more
-   back-pressure, barely vibrate.
+On a harmonica you can only blow or draw at any moment — never both — and chords
+are always played on adjacent holes.  This means the universe of valid chords is
+small and fully enumerable:
 
-2. **Note dominance within a chord shifts unpredictably between takes.**
-   `8_draw-9_draw-10_draw` peaked at A6 in take 1 and at F6 in take 2;
-   `1_blow–4_blow` peaked at G4 in take 1 and C5 in take 2.  The same chord
-   played twice produces a different spectral fingerprint each time.
+- All contiguous groups of 2+ holes, all-blow or all-draw
+- For a 10-hole harmonica, groups of size 2–4 give roughly 48 candidates total
+  (24 per direction); size 5+ can be included but are rare in practice
 
-These two effects together make polyphonic detection (verifying all N notes are
-simultaneously present above a threshold) unreliable for harmonica.  Adding
-more takes or harmonicas is unlikely to change this — the variability comes from
-embouchure and breath pressure, not from recording conditions.
+This reduces the detection problem from "which individual notes are
+independently active?" to "which candidate group best matches the current
+spectrum?" — a much tighter question with a definitive answer.
 
----
+## Proposed detection strategy
 
-## Proposed approach: dominant-note chord matching
+For each audio frame while listening:
 
-Rather than trying to detect all notes in a chord, use what the existing
-monophonic detector already does reliably — identify the single dominant
-frequency — and ask: **is that note a member of any chord currently on screen?**
+1. Compute Goertzel power at every candidate group's member frequencies.
+2. Score each group by the **mean power** of its members, normalized to the
+   strongest single note in the frame.  Mean is more robust than minimum (which
+   would be hurt by a weak low note) and more honest than sum (which grows with
+   group size).
+3. The highest-scoring group above a minimum threshold is the detected chord.
+   Below the threshold: no chord detected (silence or single note).
+4. The detected group's member MIDI notes are used to highlight the
+   corresponding chips in the Scales display.
 
-If it is, highlight that chord row.
+This sidesteps the "weak lowest note" problem observed in offline data: if
+holes 2–4 blow are strong but hole 1 blow is weak, the group `2-4 blow` scores
+well even though `1-4 blow` scores poorly.
 
-### How it would work
+## What the offline data says
 
-1. The detector fires as it does today, producing a snapped MIDI note.
-2. Each chord row in the Scales results is checked: does the detected note
-   appear in this chord's note set?
-3. Matching chord rows are highlighted; non-matching rows are dimmed.
-4. When the detector goes silent, all rows return to neutral.
+Goertzel analysis of real C-harmonica chord recordings showed:
 
-No new detection logic is needed — the monophonic detector output is the only
-input.
+1. **Lowest note in a chord is physically near-silent** (hole 1 blow: 0.01–0.04
+   relative power across two takes).  Group scoring handles this — the detector
+   would simply prefer the sub-group that excludes the weak note.
 
-### Ambiguity is expected and okay
+2. **Note dominance shifts between takes**, meaning the highest-scoring *group*
+   may not always match exactly what was played.  However, group scoring is
+   substantially more stable than per-note thresholding because the aggregate
+   smooths over per-note variation.
 
-Some notes appear in multiple chords.  G4 is in the blow chord for holes 2–3
-and in the draw chord for holes 1–2.  Both rows would highlight simultaneously.
-That is a feature, not a bug: it tells the user "these are the chords you could
-be contributing to right now."  The user still has to know which holes they are
-covering; the UI just narrows the candidates.
-
----
-
-## Tradeoffs
-
-**In favour**
-- Uses the existing detector with no changes.
-- Reliable — it's only as wrong as the monophonic detector already is.
-- Consistent: the same note always highlights the same chords.
-
-**Against**
-- Does not confirm the *full* chord is being played — only that one note in it
-  is dominant.  A user playing a single note will highlight the same chords as
-  a user playing the full chord.
-- Ambiguous matches (multiple chords lit) may confuse users who expect a single
-  chord to be identified.
-- The signal is softer than "you played this chord correctly," which limits its
-  usefulness for anything score-like.
-
----
+The approach won't be perfect but should be significantly more consistent than
+the existing unconstrained `detectChord`.
 
 ## What implementation would require
 
-1. **Logic layer** — a helper that takes a MIDI note and a list of chord objects
-   and returns which chords contain that note.  Chords are already computed; no
-   new data model work needed.
+1. **New detection function** — `detectAdjacentChord(input, sampleRate,
+   vocabulary)` that enumerates candidate groups, scores each, and returns the
+   best match (or null if below threshold).  The existing `goertzelPower`
+   helper in `fft-detector.ts` can be reused directly.
 
-2. **Scales results UI** — chord rows need a highlighted/dimmed visual state
-   wired to the audio snapshot.  The audio store is already available in the
-   Scales workspace.
+2. **Audio pipeline** — run the new function alongside (or instead of)
+   `detectSingleNote` and expose the result through the audio store / listening
+   snapshot.
 
-3. **Subscription scope** — chord rows would subscribe to the same `stable`
-   audio snapshot already used by the Scales listen display.  No new
-   subscription path needed.
+3. **Scales results UI** — each tab chip checks whether its MIDI is in the
+   detected group's note set; if so, it renders highlighted.  The floating
+   caret could be removed or kept as a single-note fallback.
 
-Roughly: one small logic helper, one style change to chord rows, and one
-connection from the audio store to the chord list renderer.
-
----
+4. **Arpeggio rows** — same chip-level check, replacing the existing
+   `rowMatch` / `rowCaretPos` caret logic.
 
 ## Open questions
 
-- **Highlight style**: should a matching chord row glow/fill, or just have a
-  coloured border?  Should non-matching rows dim, or stay neutral?  Dimming
-  non-matches draws more attention to the match but could feel noisy when only
-  one note is held.
-
-- **Threshold for "detected"**: should chord highlighting only activate when
-  confidence is above the current tone-follow minimum, or use a looser threshold
-  since this is display-only and not driving cursor movement?
-
-- **Arpeggio rows**: the same logic could highlight individual notes within an
-  arpeggio row (the detected note highlights its cell).  That is more granular
-  and possibly more useful for practice, but it is a separate UI change and can
-  be deferred.
-
-- **Is this worth the UI complexity?** If the softer signal ("a note in this
-  chord is dominant") is not meaningfully helpful for practice, it may not be
-  worth wiring up at all.  Worth deciding before building.
+- **Group size range**: should size-2 groups be included (very common in
+  practice) or excluded as too ambiguous?  A size-2 match will be a subset of
+  many larger groups.
+- **Scoring function**: mean power is the suggested starting point but may need
+  tuning once tested against live recordings of different chord sizes.
+- **Threshold**: what minimum mean-power score constitutes "a chord is being
+  played" vs. "one note with a strong harmonic"?  This will need empirical
+  tuning, ideally against the existing chord sample set.
+- **Single notes**: should single-note playing be treated as a size-1 "chord"
+  and handled by this same path, or kept as a separate monophonic detection
+  path?
+- **Caret vs. highlighting**: remove the floating caret entirely and rely on
+  chip highlighting, or keep both?
