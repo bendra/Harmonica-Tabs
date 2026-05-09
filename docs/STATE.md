@@ -68,7 +68,7 @@
 - Pressing `Base` also resets the Target Position/Key picker back to first position on the current harmonica key so the controls match the displayed tab.
 - `Down` and `Up` are disabled based on whether one more octave step from the current display would make any note unavailable.
 - Transposer output now preserves render segments while also tracking playable output tokens with MIDI metadata for tone follow.
-- The transposer output auto-scrolls just enough to keep the active token visible during tone follow and manual cursor moves.
+- The transposer output auto-scrolls during tone follow and manual cursor moves, keeping the active token visible while revealing the next tab line before the player reaches it.
 - Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
 - When the editor toggle is on, it also shows a compact summary of the saved context such as `C harp • 2nd / G`.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
@@ -108,7 +108,7 @@
   - The transposer steps octaves from the current display, and `Base` resets back to saved first position.
   - `Base` also resets the target picker to first position, and unavailable octave buttons update after each step.
   - Changing the displayed octave resets the active output token.
-  - The transposer output auto-scrolls to keep the active token visible.
+  - The transposer output auto-scrolls to keep the active token visible and reveal the next tab line before the player reaches it.
   - The editor overlay supports save, save-as branching, return-to-origin behavior after save, and unsaved-close confirmation; title auto-suggests from content when the title field is blank at save time.
   - Deleting the current transposer source clears the transposer back to its empty state.
   - The editor saved-context toggle defaults off for new drafts and restores saved context for existing records.

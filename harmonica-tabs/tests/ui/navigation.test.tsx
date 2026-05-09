@@ -984,6 +984,72 @@ describe('App navigation', () => {
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 76, animated: true });
   });
 
+  it('auto-scrolls the output early to reveal the next tab line', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4 5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
+
+    measureTransposerOutput(root, 80);
+    measureTransposerToken(root, 0, 0, 20);
+    const secondToken = measureTransposerToken(root, 1, 40, 20);
+    measureTransposerToken(root, 2, 80, 20);
+
+    scrollToSpy.mockClear();
+
+    act(() => {
+      secondToken.props.onPress();
+    });
+
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 36, animated: true });
+  });
+
+  it('does not auto-scroll early when the next tab line is already visible', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'source',
+        title: 'Source',
+        inputText: '4 -4 5',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T00:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTransposer(root);
+    openLibraryFromTransposer(root);
+    await openLibraryTab(root, 'source');
+
+    measureTransposerOutput(root, 120);
+    measureTransposerToken(root, 0, 0, 20);
+    const secondToken = measureTransposerToken(root, 1, 40, 20);
+    measureTransposerToken(root, 2, 80, 20);
+
+    scrollToSpy.mockClear();
+
+    act(() => {
+      secondToken.props.onPress();
+    });
+
+    expect(scrollToSpy).not.toHaveBeenCalled();
+  });
+
   it('lets the transposer page control the shared listen state once a source tab is selected', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
     seedSavedTabs([

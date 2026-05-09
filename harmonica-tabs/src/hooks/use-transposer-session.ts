@@ -12,6 +12,7 @@ import { SavedTabRecord } from '../logic/saved-tab-library';
 import { OverbendNotation } from '../logic/tabs';
 
 const TRANSPOSER_OUTPUT_SCROLL_PADDING = 16;
+const TRANSPOSER_OUTPUT_LINE_Y_TOLERANCE = 4;
 
 type TransposerSessionParams = {
   savedTabs: SavedTabRecord[];
@@ -271,6 +272,39 @@ function ensureActiveTransposerTokenVisible(params: {
 
   if (tokenBottom > visibleBottom) {
     return Math.max(0, tokenBottom - viewportHeight + TRANSPOSER_OUTPUT_SCROLL_PADDING);
+  }
+
+  const tokenLines = Object.entries(layouts)
+    .map(([tokenIndex, tokenLayout]) => ({
+      tokenIndex: Number(tokenIndex),
+      top: tokenLayout.y,
+      bottom: tokenLayout.y + tokenLayout.height,
+    }))
+    .sort((left, right) => left.top - right.top || left.tokenIndex - right.tokenIndex)
+    .reduce<Array<{ top: number; bottom: number; tokenIndexes: number[] }>>((lines, tokenLayout) => {
+      const matchingLine = lines.find(
+        (line) => Math.abs(line.top - tokenLayout.top) <= TRANSPOSER_OUTPUT_LINE_Y_TOLERANCE,
+      );
+
+      if (!matchingLine) {
+        lines.push({
+          top: tokenLayout.top,
+          bottom: tokenLayout.bottom,
+          tokenIndexes: [tokenLayout.tokenIndex],
+        });
+        return lines;
+      }
+
+      matchingLine.top = Math.min(matchingLine.top, tokenLayout.top);
+      matchingLine.bottom = Math.max(matchingLine.bottom, tokenLayout.bottom);
+      matchingLine.tokenIndexes.push(tokenLayout.tokenIndex);
+      return lines;
+    }, []);
+  const activeLineIndex = tokenLines.findIndex((line) => line.tokenIndexes.includes(activeTokenIndex));
+  const nextLine = activeLineIndex >= 0 ? tokenLines[activeLineIndex + 1] : undefined;
+
+  if (nextLine && nextLine.bottom > visibleBottom) {
+    return Math.max(0, nextLine.bottom - viewportHeight + TRANSPOSER_OUTPUT_SCROLL_PADDING);
   }
 
   return null;
