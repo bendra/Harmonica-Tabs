@@ -1,6 +1,6 @@
 # TODO / Next Steps
 
-- Implement background noise filter (auto-calibration at listen start + properties toggle) — see `docs/NOISE_FILTER_PLAN.md`.
+- Implement background noise filter (auto-calibration at listen start + properties toggle) — see `docs/NOISE_FILTER_PLAN.md`; this also replaces the older fixed native RMS-gate follow-up.
 - Revisit tab ordering and octave handling if alternate tunings are added.
 - Consider surfacing the current octave offset in the transposer UI if repeated `Down` / `Up` stepping proves hard to track.
 - Consider exposing chord logic as a pure helper to test more directly.
@@ -10,10 +10,9 @@
 - Revisit `-2` vs `3` toggle behavior for chord visualization.
 - Expand transposer parser support for more legacy tab notations (if needed).
 - Add copy/share actions for transposer output.
-- Consider a compact current-source label on the transposer if users miss the removed source preview card.
+- Consider whether the transposer's compact current-source label needs richer source metadata if users miss the removed source preview card.
 - Harden the native detector adapter against listen start/stop races: make native startup reuse one in-flight session, ensure stale listeners are removed, and guarantee cleanup when native start fails.
-- Add an Android fallback path that drops back to the existing JS/simulated listen flow when native `AudioRecord` initialization or start fails on a device, instead of surfacing a brittle native-only failure.
-- Consolidate repeated UI/runtime default values into shared default-setting constants so input defaults and fallback values stay in sync.
+- Harden Android `AudioRecord` initialization errors specifically so native startup failures always clean up and reliably fall back to the existing simulated listen flow.
 - Persist tone-follow settings across sessions if they prove useful.
 - Consider a helper hint for the editor `Clean Input` flow if users need more guidance after the custom pad removal.
 - Expand the saved-tab library viewer with search/filter, sort options, larger previews, and future multi-select actions.
@@ -35,4 +34,3 @@
 - accessibility
 - localization
 - Investigate errors encountered on ipad through idevicesyslog | grep harmonicatabs | grep \<Error\>
-- Native audio RMS gate (currently 0.001) was tuned on one iPad — if device variation proves to be a problem, replace the fixed value with automatic noise floor calibration: measure background level for ~1 second when listening starts and set the gate at 3× that value.
