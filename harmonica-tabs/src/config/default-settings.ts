@@ -22,6 +22,10 @@ export const AUDIO_SETTINGS_LIMITS = {
     min: 0.2,
     max: 0.7,
   },
+  minSendIntervalMs: {
+    min: 50,
+    max: 400,
+  },
 } as const;
 
 export const DEFAULT_AUDIO_SETTINGS = {
@@ -35,4 +39,6 @@ export const DEFAULT_AUDIO_SETTINGS = {
   simFrequencyInput: '440',
   signalHoldMs: 400,
   confidenceGate: 0.2,
+  minSendIntervalMsInput: '50',
+  minSendIntervalMs: 50,
 } as const;

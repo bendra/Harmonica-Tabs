@@ -25,7 +25,7 @@ function parseBoundedNumber(value: string, fallback: number, min: number, max: n
   return Math.max(min, Math.min(max, parsed));
 }
 
-function parseBoundedInteger(value: string, fallback: number, min: number, max: number): number {
+export function parseBoundedInteger(value: string, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
@@ -39,6 +39,9 @@ export function useAudioSettings() {
   );
   const [noteSeparationRatioInput, setNoteSeparationRatioInput] = useState<string>(
     DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput,
+  );
+  const [minSendIntervalMsInput, setMinSendIntervalMsInput] = useState<string>(
+    DEFAULT_AUDIO_SETTINGS.minSendIntervalMsInput,
   );
   const [simFrequency, setSimFrequency] = useState<string>(DEFAULT_AUDIO_SETTINGS.simFrequencyInput);
 
@@ -72,6 +75,16 @@ export function useAudioSettings() {
       ),
     [noteSeparationRatioInput],
   );
+  const minSendIntervalMs = useMemo(
+    () =>
+      parseBoundedInteger(
+        minSendIntervalMsInput,
+        DEFAULT_AUDIO_SETTINGS.minSendIntervalMs,
+        AUDIO_SETTINGS_LIMITS.minSendIntervalMs.min,
+        AUDIO_SETTINGS_LIMITS.minSendIntervalMs.max,
+      ),
+    [minSendIntervalMsInput],
+  );
   const simHz = useMemo(() => {
     const parsed = Number.parseFloat(simFrequency);
     return Number.isFinite(parsed) ? parsed : null;
@@ -88,11 +101,15 @@ export function useAudioSettings() {
     noteSeparationRatioInput,
     setNoteSeparationRatioInput: (value: string) =>
       setNoteSeparationRatioInput(sanitizeDecimalInput(value)),
+    minSendIntervalMsInput,
+    setMinSendIntervalMsInput: (value: string) =>
+      setMinSendIntervalMsInput(sanitizeDecimalInput(value)),
     simFrequency,
     setSimFrequency,
     toneToleranceCents,
     toneFollowMinConfidence,
     noteSeparationRatio,
+    minSendIntervalMs,
     simHz,
   };
 }

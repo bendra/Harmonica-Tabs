@@ -13,7 +13,9 @@ export type ScaleDefinition = {
  */
 export const SCALE_DEFINITIONS: ScaleDefinition[] = [
   { id: 'major', name: 'Major', intervals: [0, 2, 4, 5, 7, 9, 11] },
+  { id: 'major_pentatonic', name: 'Major Pentatonic', intervals: [0, 2, 4, 7, 9] },
   { id: 'natural_minor', name: 'Natural Minor', intervals: [0, 2, 3, 5, 7, 8, 10] },
+  { id: 'minor_pentatonic', name: 'Minor Pentatonic', intervals: [0, 3, 5, 7, 10] },
   { id: 'harmonic_minor', name: 'Harmonic Minor', intervals: [0, 2, 3, 5, 7, 8, 11] },
   { id: 'dorian', name: 'Dorian', intervals: [0, 2, 3, 5, 7, 9, 10] },
   { id: 'mixolydian', name: 'Mixolydian', intervals: [0, 2, 4, 5, 7, 9, 10] },

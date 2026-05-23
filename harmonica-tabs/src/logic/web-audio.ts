@@ -1,4 +1,4 @@
-import { detectSingleNote } from './fft-detector';
+import { detectSingleNote, YinFrameDiagnostic } from './fft-detector';
 import { HarmonicaVocabulary } from './harmonica-frequencies';
 import { PitchUpdateTrace } from './audio-latency';
 
@@ -11,6 +11,7 @@ type PitchUpdate = {
   confidence: number;
   rms: number;
   trace?: PitchUpdateTrace | null;
+  yinDiagnostic?: YinFrameDiagnostic | null;
 };
 
 type PitchUpdateHandler = (update: PitchUpdate) => void;
@@ -254,5 +255,8 @@ export function createWebAudioPitchDetector() {
     currentVocabulary = vocabulary;
   }
 
-  return { isSupported, start, stop, updateVocabulary };
+  // No-op on web (no native bridge to rate-limit); kept for interface parity.
+  function setMinSendIntervalMs(_ms: number) {}
+
+  return { isSupported, start, stop, updateVocabulary, setMinSendIntervalMs };
 }

@@ -76,7 +76,7 @@ function decodeWav(buffer: Buffer): { sampleRate: number; channelData: Float32Ar
 
 import { buildHarmonicaVocabulary } from '../src/logic/harmonica-frequencies';
 import { RICHTER_C_LAYOUT, transposeLayout } from '../src/data/richter';
-import { detectSingleNote } from '../src/logic/fft-detector';
+import { detectSingleNote, diagnoseYinOctaveCandidate, type YinOctaveDiagnostic } from '../src/logic/fft-detector';
 import { DEFAULT_AUDIO_SETTINGS } from '../src/config/default-settings';
 import {
   evaluateTransposerFollow,
@@ -183,6 +183,7 @@ type FileResult = {
     cls: FrameClass;
     rawHz: number | null;
     snappedHz: number | null;
+    yin?: YinOctaveDiagnostic;
   }>;
   /** Populated only for repeated-note files. */
   advanceCount?: { detected: number; expected: number };
@@ -199,6 +200,25 @@ type FileResult = {
   /** MIDI number expected for repeated-note files. */
   expectedMidi?: number;
 };
+
+function vocabularyBounds(vocabulary: ReturnType<typeof buildHarmonicaVocabulary>): { minFreq: number; maxFreq: number } {
+  const { allNotes } = vocabulary;
+  return {
+    minFreq: allNotes[0].frequency * 0.9,
+    maxFreq: allNotes[allNotes.length - 1].frequency * 1.1,
+  };
+}
+
+function formatYinDiagnostic(yin: YinOctaveDiagnostic | undefined): string {
+  if (!yin) return '';
+  const accepted = yin.acceptedLag == null || yin.acceptedCmnd == null
+    ? 'accepted=--'
+    : `accepted=${yin.acceptedLag}/${yin.acceptedCmnd.toFixed(3)}`;
+  const half = yin.halfLag == null || yin.halfCmnd == null
+    ? 'half=--'
+    : `half=${yin.halfLag}/${yin.halfCmnd.toFixed(3)}`;
+  return `  yin: ${accepted} ${half} ${yin.reason}`;
+}
 
 function classifyFrame(snappedHz: number | null, expectedMidi: number): FrameClass {
   if (snappedHz === null) return 'silent';
@@ -414,6 +434,7 @@ function main() {
   for (const harmKey of availableKeys.sort()) {
     const pc = KEY_PC[harmKey];
     const vocabulary = buildHarmonicaVocabulary(pc);
+    const bounds = vocabularyBounds(vocabulary);
     const harmDir = path.join(SAMPLES_DIR, harmKey, 'single_notes');
 
     if (!fs.existsSync(harmDir)) {
@@ -460,11 +481,13 @@ function main() {
           const cls = classifyFrame(result.frequency, expectedNote.midi);
           counts[cls]++;
           if (cls !== 'silent') {
+            const yin = diagnoseYinOctaveCandidate(frame, sampleRate, bounds.minFreq, bounds.maxFreq);
             frames.push({
               frameIdx: i,
               cls,
               rawHz: result.rawFrequency,
               snappedHz: result.frequency,
+              yin: cls === 'wrong_octave' || yin.reason === 'prefer-half-lag' ? yin : undefined,
             });
           }
         }
@@ -530,10 +553,34 @@ function main() {
           ? `snapped=${f.snappedHz.toFixed(1)}Hz (${midiToName(freqToMidi(f.snappedHz))})`
           : 'snapped=null';
         console.log(`  frame ${String(f.frameIdx).padStart(3)}: [${f.cls.padEnd(12)}] ${rawStr}  ${snappedStr}`);
+        const yinStr = formatYinDiagnostic(f.yin);
+        if (yinStr) console.log(`    ${yinStr}`);
       }
     }
   } else {
     console.log('\nNo files with >10% wrong octave. Good!');
+  }
+
+  const correctedFrames = results.flatMap((r) =>
+    r.frames
+      .filter((frame) => frame.yin?.reason === 'prefer-half-lag')
+      .map((frame) => ({ ...frame, file: r })),
+  );
+  if (correctedFrames.length > 0) {
+    console.log('\n=== YIN octave-check corrections ===');
+    console.log('  Frames where the first accepted lag was octave-low and the half-lag local dip was used instead.');
+    for (const frame of correctedFrames.slice(0, 30)) {
+      const r = frame.file;
+      const rawStr = frame.rawHz == null ? 'raw=null' : `raw=${frame.rawHz.toFixed(1)}Hz`;
+      const snappedStr = frame.snappedHz == null ? 'snapped=null' : `snapped=${frame.snappedHz.toFixed(1)}Hz`;
+      console.log(
+        `  ${r.harmonica} take ${r.take} hole ${r.hole} ${r.dir} frame ${frame.frameIdx}: ` +
+        `${rawStr} ${snappedStr} ${formatYinDiagnostic(frame.yin).trim()}`,
+      );
+    }
+    if (correctedFrames.length > 30) {
+      console.log(`  ...and ${correctedFrames.length - 30} more corrected frame(s).`);
+    }
   }
 
   // --- Summary stats per harmonica ---

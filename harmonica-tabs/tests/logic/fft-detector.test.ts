@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { detectSingleNote, detectChord, calculateRms } from '../../src/logic/fft-detector';
-import { buildHarmonicaVocabulary } from '../../src/logic/harmonica-frequencies';
+import * as fs from 'fs';
+import * as path from 'path';
+import { detectSingleNote, detectChord, calculateRms, diagnoseYinOctaveCandidate } from '../../src/logic/fft-detector';
+import { buildHarmonicaVocabulary, HarmonicaVocabulary } from '../../src/logic/harmonica-frequencies';
 
 const SAMPLE_RATE = 44100;
 const BUFFER_SIZE = 4096;
@@ -38,6 +40,76 @@ function mixSines(components: { frequency: number; amplitude: number }[], size =
     }
   }
   return buf;
+}
+
+function decodeWav(buffer: Buffer): { sampleRate: number; channelData: Float32Array[] } {
+  if (buffer.toString('ascii', 0, 4) !== 'RIFF') throw new Error('Not a RIFF file');
+  if (buffer.toString('ascii', 8, 12) !== 'WAVE') throw new Error('Not a WAVE file');
+
+  let sampleRate = 0;
+  let channels = 0;
+  let bitsPerSample = 0;
+  let dataOffset = -1;
+  let dataLength = -1;
+
+  let pos = 12;
+  while (pos < buffer.length - 8) {
+    const chunkId = buffer.toString('ascii', pos, pos + 4);
+    const chunkSize = buffer.readUInt32LE(pos + 4);
+    pos += 8;
+
+    if (chunkId === 'fmt ') {
+      const formatTag = buffer.readUInt16LE(pos);
+      if (formatTag !== 1 && formatTag !== 0xfffe) {
+        throw new Error(`Unsupported WAV format tag: 0x${formatTag.toString(16)}`);
+      }
+      channels = buffer.readUInt16LE(pos + 2);
+      sampleRate = buffer.readUInt32LE(pos + 4);
+      bitsPerSample = buffer.readUInt16LE(pos + 14);
+    } else if (chunkId === 'data') {
+      dataOffset = pos;
+      dataLength = chunkSize;
+    }
+
+    pos += chunkSize;
+    if (chunkSize % 2 !== 0) pos++;
+  }
+
+  if (sampleRate === 0) throw new Error('WAV fmt chunk not found');
+  if (dataOffset === -1) throw new Error('WAV data chunk not found');
+
+  const bytesPerSample = bitsPerSample / 8;
+  const totalSamples = Math.floor(dataLength / (bytesPerSample * channels));
+  const channelData: Float32Array[] = Array.from({ length: channels }, () => new Float32Array(totalSamples));
+  const scale = 1 / Math.pow(2, bitsPerSample - 1);
+
+  for (let i = 0; i < totalSamples; i++) {
+    for (let c = 0; c < channels; c++) {
+      const offset = dataOffset + (i * channels + c) * bytesPerSample;
+      const sample = bitsPerSample === 16 ? buffer.readInt16LE(offset) : buffer.readInt32LE(offset);
+      channelData[c][i] = sample * scale;
+    }
+  }
+
+  return { sampleRate, channelData };
+}
+
+function sampleFrame(relativePath: string, frameIdx: number): { frame: Float32Array; sampleRate: number } {
+  const wavPath = path.resolve(process.cwd(), '..', relativePath);
+  const decoded = decodeWav(fs.readFileSync(wavPath));
+  const samples = decoded.channelData[0];
+  return {
+    frame: samples.slice(frameIdx * BUFFER_SIZE, (frameIdx + 1) * BUFFER_SIZE),
+    sampleRate: decoded.sampleRate,
+  };
+}
+
+function vocabularyBounds(vocabulary: HarmonicaVocabulary): { minFreq: number; maxFreq: number } {
+  const { allNotes } = vocabulary;
+  return {
+    minFreq: allNotes[0].frequency * 0.9,
+    maxFreq: allNotes[allNotes.length - 1].frequency * 1.1,
+  };
 }
 
 const cVocab = buildHarmonicaVocabulary(0); // C harmonica
@@ -130,6 +202,42 @@ describe('detectSingleNote', () => {
     if (result.frequency !== null) {
       expect(result.confidence).toBeLessThan(0.5);
     }
+  });
+
+  it('prefers the true high octave when a recorded C harmonica frame has a half-frequency YIN dip', () => {
+    const { frame, sampleRate } = sampleFrame('sound-samples/c_harmonica/single_notes/take_2/9_draw.wav', 52);
+    const bounds = vocabularyBounds(cVocab);
+    const diagnostic = diagnoseYinOctaveCandidate(frame, sampleRate, bounds.minFreq, bounds.maxFreq);
+    const expected = cVocab.naturalNotes.find((n) => n.midi === 89)!; // F6, 9 draw
+    const result = detectSingleNote(frame, sampleRate, cVocab);
+
+    expect(diagnostic.reason).toBe('prefer-half-lag');
+    expect(diagnostic.acceptedLag).toBeGreaterThan(diagnostic.halfLag!);
+    expect(Math.abs(result.rawFrequency! - expected.frequency)).toBeLessThan(20);
+    expect(result.frequency).toBe(expected.frequency);
+  });
+
+  it('prefers the true high octave when a recorded G harmonica frame has a half-frequency YIN dip', () => {
+    const gVocab = buildHarmonicaVocabulary(7);
+    const { frame, sampleRate } = sampleFrame('sound-samples/g_harmonica/single_notes/take_3/9_draw.wav', 44);
+    const bounds = vocabularyBounds(gVocab);
+    const diagnostic = diagnoseYinOctaveCandidate(frame, sampleRate, bounds.minFreq, bounds.maxFreq);
+    const expected = gVocab.naturalNotes.find((n) => n.midi === 84)!; // C6, 9 draw
+    const result = detectSingleNote(frame, sampleRate, gVocab);
+
+    expect(diagnostic.reason).toBe('prefer-half-lag');
+    expect(diagnostic.acceptedLag).toBeGreaterThan(diagnostic.halfLag!);
+    expect(Math.abs(result.rawFrequency! - expected.frequency)).toBeLessThan(20);
+    expect(result.frequency).toBe(expected.frequency);
+  });
+
+  it('does not promote a real low G harmonica note to its octave harmonic', () => {
+    const gVocab = buildHarmonicaVocabulary(7);
+    const { frame, sampleRate } = sampleFrame('sound-samples/g_harmonica/single_notes/take_1/1_blow.wav', 41);
+    const expected = gVocab.naturalNotes.find((n) => n.midi === 55)!; // G3, 1 blow
+    const result = detectSingleNote(frame, sampleRate, gVocab);
+
+    expect(result.frequency).toBe(expected.frequency);
   });
 });
 

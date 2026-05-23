@@ -11,6 +11,9 @@ declare class HarmonicaAudioModule extends NativeModule<HarmonicaAudioModuleEven
 
   /** Stops capture and releases audio resources. */
   stop(): void;
+
+  /** Temporary debug control: live-tunable producer-side rate limit (ms). */
+  setMinSendIntervalMs(ms: number): void;
 }
 
 export default requireNativeModule<HarmonicaAudioModule>('HarmonicaAudio');

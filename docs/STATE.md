@@ -43,6 +43,9 @@
 - Deleting the current transposer source tab clears the transposer back to its empty-state prompt.
 - Closing the editor returns to the invoking `Tabs` subview, and closing with unsaved changes prompts with `Cancel`, `Discard`, and `Save`.
 - Successful editor saves always dismiss the editor and return to the invoking `Tabs` subview.
+- Native audio sends raw PCM over the unbounded Expo bridge FIFO, which caused detection latency to grow over time. Fixed by producer-side rate limiting in the Swift module (`minSendIntervalMs`, default `50`, live-tunable via a temporary Properties "Send interval ms (debug)" field). Moving YIN fully into Swift (the definitive fix) was evaluated and deliberately deferred since rate limiting met the responsiveness bar. See `docs/ARCHITECTURE.md` flow 5C.
+- Shared YIN single-note detection now has a conservative octave-low correction: when the first accepted CMND lag is a likely subharmonic and a local dip near half that lag only barely missed the YIN threshold, the detector prefers the shorter lag. This fixed recorded high-register wrong-octave frames without changing the native audio bridge.
+- Native iOS `.measurement` capture mode was tried for the high-register octave-low issue and made many notes disappear, so iOS capture is back on `.default`. Further native-audio work should avoid blind capture-mode/threshold tuning; compare against the WebView audio spike in `docs/WEBVIEW_AUDIO_SPIKE.md` or export PCM fixtures for offline analysis.
 
 ## UI Summary
 - Top-level workspace switcher exposes `Scales` and `Tabs`.
@@ -73,6 +76,7 @@
 - When the editor toggle is on, it also shows a compact summary of the saved context such as `C harp • 2nd / G`.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
 - The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling (`standard`, `flat`, `sharp`), target-key spelling (`flat`, `sharp`), and tone-follow settings for tolerance, minimum confidence, and repeated-note separation.
+- The Properties screen exposes a `Help` button that opens an in-app `Help` screen (formerly the `Tab Symbols` screen). The Help screen now mirrors the full end-user user guide in `docs/USER_GUIDE.md`, including the tab-symbol reference.
 - Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
 - Properties screen is still separate via gear button.
 
@@ -91,6 +95,10 @@
   - Re-arm behavior for repeated identical notes, including same-pitch RMS articulation dips.
   - End-of-tab wrap back to the first playable token.
   - Manual cursor resets via state replacement.
+- `harmonica-tabs/tests/logic/fft-detector.test.ts`
+  - Single-note and chord detector basics.
+  - Recorded-frame regressions for high-register YIN octave-low correction.
+  - Guard coverage that real low G-harmonica notes are not promoted upward.
 - `harmonica-tabs/tests/hooks/use-audio-listening-policy.test.ts`
   - Stable path still requires 3 agreeing frames, while the responsive path commits after 2 consecutive snapped frames and drops immediately on signal loss.
 - `harmonica-tabs/tests/logic/transposer-input.test.ts`

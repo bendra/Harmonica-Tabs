@@ -6,6 +6,12 @@ public class HarmonicaAudioModule: Module {
   private var sampleAccumulator: [Float] = []
   private let targetFrameCount = 4096
 
+  // Producer-side rate limit. The Expo event bridge is an unbounded FIFO; if we
+  // emit faster than JS can drain, the queue compounds and latency grows without
+  // recovering. Capping emit rate here bounds the queue regardless of JS speed.
+  private var lastSentAtMs: Double = 0
+  private var minSendIntervalMs: Double = 50
+
   public func definition() -> ModuleDefinition {
     Name("HarmonicaAudio")
 
@@ -22,6 +28,12 @@ public class HarmonicaAudioModule: Module {
     Function("stop") {
       self.stopCapture()
     }
+
+    // Temporary debug control: live-tunable producer-side rate limit so the
+    // floor can be found without a native rebuild per candidate value.
+    Function("setMinSendIntervalMs") { (ms: Double) in
+      self.minSendIntervalMs = ms
+    }
   }
 
   // MARK: - Capture lifecycle
@@ -30,7 +42,7 @@ public class HarmonicaAudioModule: Module {
     stopCapture()
 
     let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.record, mode: .measurement, options: [])
+    try session.setCategory(.record, mode: .default, options: [])
     try session.setActive(true)
 
     let engine = AVAudioEngine()
@@ -50,19 +62,17 @@ public class HarmonicaAudioModule: Module {
 
       self.sampleAccumulator.append(contentsOf: incoming)
 
-      if self.sampleAccumulator.count >= self.targetFrameCount {
-        var frame = Array(self.sampleAccumulator.prefix(self.targetFrameCount))
-        self.sampleAccumulator.removeFirst(self.targetFrameCount)
-
-        // AVAudioEngine in .measurement mode delivers samples ~5× quieter than
-        // browser getUserMedia (no automatic gain). Scale up so the TypeScript
-        // RMS gate (MIN_RMS = 0.005) sees comparable levels to the web path.
-        let gain: Float = 5.0
-        for i in 0..<frame.count { frame[i] *= gain }
+      let nowMs = Date().timeIntervalSince1970 * 1000
+      if self.sampleAccumulator.count >= self.targetFrameCount,
+         nowMs - self.lastSentAtMs >= self.minSendIntervalMs {
+        self.lastSentAtMs = nowMs
+        let frame = Array(self.sampleAccumulator.suffix(self.targetFrameCount))
+        self.sampleAccumulator.removeAll(keepingCapacity: true)
 
         self.sendEvent("onAudioFrame", [
           "samples": frame,
           "sampleRate": sampleRate,
+          "capturedAt": nowMs,
         ])
       }
     }
@@ -77,6 +87,7 @@ public class HarmonicaAudioModule: Module {
     audioEngine?.stop()
     audioEngine = nil
     sampleAccumulator = []
+    lastSentAtMs = 0
     try? AVAudioSession.sharedInstance().setActive(false)
   }
 }

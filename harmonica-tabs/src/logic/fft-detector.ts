@@ -48,6 +48,11 @@ export type SingleNoteResult = {
    * Populated only when __DEV__ is true to avoid production overhead.
    */
   candidates: DetectionCandidate[];
+  /**
+   * Debug-only YIN/frame details for diagnosing native-vs-web octave errors.
+   * Populated only when __DEV__ is true.
+   */
+  yinDiagnostic?: YinFrameDiagnostic | null;
 };
 
 /**
@@ -130,6 +135,9 @@ export function calculateRms(input: Float32Array): number {
  * function; the FFT path keeps CMND bounded so this threshold is reliably reached.
  */
 const YIN_THRESHOLD = 0.15;
+
+const OCTAVE_CHECK_RADIUS = 2;
+const OCTAVE_CHECK_MAX_CMND = YIN_THRESHOLD + 0.03;
 
 /**
  * In-place radix-2 Cooley-Tukey FFT (or inverse FFT).
@@ -276,46 +284,173 @@ function parabolicInterpolation(cmnd: Float32Array, tau: number): number {
   return tau + (prev - next) / denom;
 }
 
-/**
- * Full YIN pitch detector (FFT variant).
- *
- * Returns the detected fundamental frequency in Hz, or null if the signal is
- * not sufficiently periodic (silence, noise, or a pitch outside the requested
- * range).
- *
- * `minFreq` and `maxFreq` should bracket the vocabulary of the harmonica being
- * detected — see `detectSingleNote` where these are derived from `allNotes`.
- * Using vocabulary-derived bounds avoids two problems with fixed constants:
- *   - Fixed upper bound too low → misses high notes (e.g. A6 on hole 10 draw)
- *   - Fixed lower bound too high → aliases of extreme out-of-range signals
- *     (e.g. 8000 Hz) can land within the search window and produce false matches
- */
-function yinDetect(
-  input: Float32Array,
-  sampleRate: number,
-  minFreq: number,
-  maxFreq: number,
+export type YinOctaveDiagnostic = {
+  acceptedLag: number | null;
+  acceptedCmnd: number | null;
+  halfLag: number | null;
+  halfCmnd: number | null;
+  preferredLag: number | null;
+  preferredCmnd: number | null;
+  preferredFrequency: number | null;
+  reason:
+    | 'no-accepted-lag'
+    | 'half-lag-out-of-range'
+    | 'half-lag-not-local-dip'
+    | 'half-lag-too-weak'
+    | 'prefer-half-lag';
+};
+
+export type YinFrameDiagnostic = {
+  sampleRate: number;
+  frameLength: number;
+  octave: YinOctaveDiagnostic;
+};
+
+function isLocalDip(cmnd: Float32Array, tau: number): boolean {
+  if (tau <= 0 || tau >= cmnd.length - 1) return false;
+  return cmnd[tau] <= cmnd[tau - 1] && cmnd[tau] <= cmnd[tau + 1];
+}
+
+function findLocalDipNear(
+  cmnd: Float32Array,
+  center: number,
+  radius: number,
+  minLag: number,
+  maxLag: number,
 ): number | null {
-  const minLag = Math.floor(sampleRate / maxFreq); // shortest period = highest freq
-  const maxLag = Math.floor(sampleRate / minFreq); // longest  period = lowest  freq
+  const start = Math.max(minLag, center - radius);
+  const end = Math.min(maxLag, center + radius);
+  let bestTau: number | null = null;
+  let bestCmnd = Infinity;
 
-  if (input.length < maxLag * 2) return null;
+  for (let tau = start; tau <= end; tau++) {
+    if (!isLocalDip(cmnd, tau)) continue;
+    if (cmnd[tau] < bestCmnd) {
+      bestCmnd = cmnd[tau];
+      bestTau = tau;
+    }
+  }
 
-  const d = yinDifferenceFFT(input, maxLag);
-  const cmnd = yinCmnd(d);
+  return bestTau;
+}
 
-  // Step 3: find the first lag ≥ minLag where CMND dips below the threshold,
-  // then follow the dip to its local minimum for better accuracy.
+function octaveCandidateIsComparable(halfCmnd: number): boolean {
+  return halfCmnd <= OCTAVE_CHECK_MAX_CMND;
+}
+
+function analyzeYinOctave(
+  cmnd: Float32Array,
+  sampleRate: number,
+  minLag: number,
+  maxLag: number,
+): YinOctaveDiagnostic {
   for (let tau = minLag; tau <= maxLag; tau++) {
     if (cmnd[tau] < YIN_THRESHOLD) {
       while (tau + 1 <= maxLag && cmnd[tau + 1] < cmnd[tau]) {
         tau++;
       }
-      return sampleRate / parabolicInterpolation(cmnd, tau);
+
+      const acceptedLag = tau;
+      const acceptedCmnd = cmnd[acceptedLag];
+      const halfCenter = Math.round(acceptedLag / 2);
+      const halfLag = findLocalDipNear(cmnd, halfCenter, OCTAVE_CHECK_RADIUS, minLag, maxLag);
+
+      if (halfLag === null) {
+        return {
+          acceptedLag,
+          acceptedCmnd,
+          halfLag: null,
+          halfCmnd: null,
+          preferredLag: acceptedLag,
+          preferredCmnd: acceptedCmnd,
+          preferredFrequency: sampleRate / parabolicInterpolation(cmnd, acceptedLag),
+          reason: halfCenter < minLag || halfCenter > maxLag
+            ? 'half-lag-out-of-range'
+            : 'half-lag-not-local-dip',
+        };
+      }
+
+      const halfCmnd = cmnd[halfLag];
+      if (!octaveCandidateIsComparable(halfCmnd)) {
+        return {
+          acceptedLag,
+          acceptedCmnd,
+          halfLag,
+          halfCmnd,
+          preferredLag: acceptedLag,
+          preferredCmnd: acceptedCmnd,
+          preferredFrequency: sampleRate / parabolicInterpolation(cmnd, acceptedLag),
+          reason: 'half-lag-too-weak',
+        };
+      }
+
+      return {
+        acceptedLag,
+        acceptedCmnd,
+        halfLag,
+        halfCmnd,
+        preferredLag: halfLag,
+        preferredCmnd: halfCmnd,
+        preferredFrequency: sampleRate / parabolicInterpolation(cmnd, halfLag),
+        reason: 'prefer-half-lag',
+      };
     }
   }
 
-  return null; // no clear fundamental in range
+  return {
+    acceptedLag: null,
+    acceptedCmnd: null,
+    halfLag: null,
+    halfCmnd: null,
+    preferredLag: null,
+    preferredCmnd: null,
+    preferredFrequency: null,
+    reason: 'no-accepted-lag',
+  };
+}
+
+function analyzeYinFrame(
+  input: Float32Array,
+  sampleRate: number,
+  minFreq: number,
+  maxFreq: number,
+): YinFrameDiagnostic {
+  const minLag = Math.floor(sampleRate / maxFreq);
+  const maxLag = Math.floor(sampleRate / minFreq);
+
+  if (input.length < maxLag * 2) {
+    return {
+      sampleRate,
+      frameLength: input.length,
+      octave: {
+        acceptedLag: null,
+        acceptedCmnd: null,
+        halfLag: null,
+        halfCmnd: null,
+        preferredLag: null,
+        preferredCmnd: null,
+        preferredFrequency: null,
+        reason: 'no-accepted-lag',
+      },
+    };
+  }
+
+  const d = yinDifferenceFFT(input, maxLag);
+  const cmnd = yinCmnd(d);
+  return {
+    sampleRate,
+    frameLength: input.length,
+    octave: analyzeYinOctave(cmnd, sampleRate, minLag, maxLag),
+  };
+}
+
+export function diagnoseYinOctaveCandidate(
+  input: Float32Array,
+  sampleRate: number,
+  minFreq: number,
+  maxFreq: number,
+): YinOctaveDiagnostic {
+  return analyzeYinFrame(input, sampleRate, minFreq, maxFreq).octave;
 }
 
 /**
@@ -364,9 +499,11 @@ export function detectSingleNote(
   const maxFreq = allNotes[allNotes.length - 1].frequency * 1.1;
 
   // Detect the fundamental frequency using YIN.
-  const fundamental = yinDetect(input, sampleRate, minFreq, maxFreq);
+  const yinFrame = analyzeYinFrame(input, sampleRate, minFreq, maxFreq);
+  const yinDiagnostic = typeof __DEV__ !== 'undefined' && __DEV__ ? yinFrame : null;
+  const fundamental = yinFrame.octave.preferredFrequency;
   if (fundamental === null) {
-    return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [] };
+    return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [], yinDiagnostic };
   }
 
   // Convert to fractional MIDI for cent-accurate distance comparisons.
@@ -383,12 +520,14 @@ export function detectSingleNote(
     }
   }
 
-  if (nearestNote === null) return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [] };
+  if (nearestNote === null) {
+    return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [], yinDiagnostic };
+  }
 
   // Reject if the pitch is too far from any vocabulary note.
   const tolerance = centsTolerance(nearestNote.confidenceThreshold);
   if (nearestCents > tolerance) {
-    return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [] };
+    return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [], yinDiagnostic };
   }
 
   // Confidence: 1.0 = exactly on pitch, 0.0 = at the edge of the window.
@@ -405,7 +544,7 @@ export function detectSingleNote(
         .slice(0, 3)
     : [];
 
-  return { frequency: nearestNote.frequency, rawFrequency: fundamental, confidence, rms, candidates };
+  return { frequency: nearestNote.frequency, rawFrequency: fundamental, confidence, rms, candidates, yinDiagnostic };
 }
 
 /**

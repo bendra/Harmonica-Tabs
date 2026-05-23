@@ -1,8 +1,14 @@
 import HarmonicaAudioModule from '../../modules/harmonica-audio';
 import { HarmonicaVocabulary } from './harmonica-frequencies';
 import { detectSingleNote, SingleNoteResult } from './fft-detector';
+import { isStaleFrame } from './native-audio-policy';
 
 type PitchUpdateHandler = (update: SingleNoteResult) => void;
+
+// Safety-net drop for backlogged frames. With Swift-side producer rate limiting
+// (minSendIntervalMs) the bridge queue stays bounded, so this rarely fires in
+// practice; it remains as a guard against stale frames from start/stop races.
+const STALE_FRAME_MS = 500;
 
 /**
  * Creates a native audio pitch detector with the same { isSupported, start, stop }
@@ -25,6 +31,7 @@ export function createNativeAudioPitchDetector() {
     // Subscribe before starting so no frames are missed.
     subscription = HarmonicaAudioModule.addListener('onAudioFrame', (event) => {
       if (!currentVocabulary) return;
+      if (isStaleFrame(event.capturedAt, Date.now(), STALE_FRAME_MS)) return;
       const samples = new Float32Array(event.samples);
       const result = detectSingleNote(samples, event.sampleRate, currentVocabulary);
       onUpdate(result);
@@ -45,5 +52,10 @@ export function createNativeAudioPitchDetector() {
     currentVocabulary = vocabulary;
   }
 
-  return { isSupported, start, stop, updateVocabulary };
+  // Temporary debug control: forwards the live-tunable rate limit to Swift.
+  function setMinSendIntervalMs(ms: number) {
+    HarmonicaAudioModule.setMinSendIntervalMs(ms);
+  }
+
+  return { isSupported, start, stop, updateVocabulary, setMinSendIntervalMs };
 }

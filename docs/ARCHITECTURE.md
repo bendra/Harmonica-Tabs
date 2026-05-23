@@ -1,6 +1,6 @@
 # Architecture Snapshot
 
-Date: 2026-03-22  
+Date: 2026-05-17  
 Status: Rapid exploration (structure and behavior are still changing quickly)
 
 This document describes the app as it exists today. It is intentionally practical: enough context for a typically-skilled React/TypeScript developer to contribute safely without reverse-engineering the whole codebase.
@@ -83,6 +83,17 @@ Derived values (`useMemo`) drive most rendering:
 4. Caret is drawn between measured chip centers (or aligned to active row on wrap).
 5. In-tune visual threshold uses `±10` cents (`toneToleranceCents`).
 
+#### Native audio bridge constraint and rate limiting (what and why)
+
+Native pitch detection has a structural cost the web path does not, and this shaped the current design.
+
+- **Web path is cheap and self-healing.** `web-audio.ts` uses a `ScriptProcessorNode` whose callback receives the sample buffer *by reference* (zero-copy) and is *lossy under load* — if the JS thread is busy, the browser simply skips a buffer, so detection latency never accumulates.
+- **Native path is expensive and queue-based.** `native-audio.ts` receives raw PCM from Swift over the Expo event bridge, which is an **unbounded FIFO**. Every ~93 ms frame is a ~16 KB array that is serialized natively, deserialized into a JS array, then copied into a `Float32Array`. When per-frame JS work (deserialize + YIN in `fft-detector.ts` + the React re-render) occasionally exceeds the production interval, the queue grows and never self-heals — detection latency degrades the longer listening runs, and only stop/start drains it. This was the observed "gets slower over time on device" bug.
+
+**Mitigation (shipped): producer-side rate limiting.** `HarmonicaAudioModule` (iOS Swift) only emits a frame if at least `minSendIntervalMs` has elapsed since the last emit; on emit it takes the freshest 4096 samples and clears its accumulator. This bounds the bridge queue regardless of JS speed. The shipped value is **50 ms** (≈20 fps emit rate — actually faster than web's ≈10.7 fps), found empirically as the lowest value that stayed flat over sustained continuous play on the test device while giving detection latency equal to or better than web. It is also exposed as a deliberately temporary live-tunable **"Send interval ms (debug)"** field on the Properties screen, wired Swift → `native-audio.ts` → `use-audio-listening` params (mirroring the existing `harmonicaPc → updateVocabulary` live-update path), so the value can be retuned on-device without a native rebuild.
+
+**Considered and deferred: moving YIN into Swift.** The definitive fix is to run detection in Swift and emit only `{ rawFrequency, clarity, rms }` (~50 bytes), keeping harmonica-specific snapping in shared, tested TS (`fft-detector.ts` split into a generic `yinCore` + a `snapToVocabulary` tail). That would eliminate the bridge cost entirely and make native faster than web. It was intentionally **not** done because tuned producer-side rate limiting already met the responsiveness bar; revisit only if a slower/older device shows residual degradation at the chosen interval.
+
 ### D) Tone-followed transposer output
 1. User selects a saved source tab from the library.
 2. The transposer resolves one base shift for the current target.
@@ -154,6 +165,7 @@ There is no sync between platforms — web app storage and native SQLite are ind
 - The transposer never works from an unsaved draft.
 - If mic is unavailable/blocked/unsupported, app runs with simulated frequency input.
 - Detector-specific code remains isolated so a future native audio pipeline can feed the same detector snapshot and transposer-follow logic.
+- Native audio is producer-side rate-limited in `HarmonicaAudioModule` to keep the Expo bridge queue bounded; default `minSendIntervalMs` is `50` and is live-tunable via the temporary Properties "Send interval ms (debug)" field. See flow 5C for rationale.
 
 ## 8. Testing and Quality Gates
 
@@ -197,7 +209,7 @@ Current gap:
 
 - `App.tsx` is still large and mixes orchestration + rendering + interaction details.
 - Layout-measurement logic is duplicated across main and arpeggio tab rows.
-- Pitch detection runs on web (Web Audio API) and native iOS/Android (raw PCM via custom Expo module). Both paths use the same `fft-detector.ts` implementation.
+- Pitch detection runs on web (Web Audio API) and native iOS/Android (raw PCM via custom Expo module). Both paths use the same `fft-detector.ts` implementation. The native path pays a per-frame ~16 KB bridge serialization cost the web path does not; this is mitigated (not eliminated) by producer-side rate limiting (see flow 5C). The structural fix — moving YIN into Swift and shipping only a small result — is documented there as deferred.
 - Some data/logic assumptions are implicit (for example, technique ranking and alternate handling conventions).
 
 ## 11. Working Agreement While Exploring

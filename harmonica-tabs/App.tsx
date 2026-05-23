@@ -43,6 +43,9 @@ import { AudioListeningProvider, useAudioListening } from './src/hooks/use-audio
 import { useTransposerSession } from './src/hooks/use-transposer-session';
 import { useTabEditor, SaveTabMode, TabsSubview } from './src/hooks/use-tab-editor';
 import { LatencySnapshot } from './src/logic/audio-latency';
+import { BUILD_ID } from './src/config/build-info';
+import { DetectorSource } from './src/logic/transposer-follow';
+import { YinFrameDiagnostic } from './src/logic/fft-detector';
 
 function getLayoutTier(shortEdge: number): LayoutTier {
   if (shortEdge < 420) return 'compact';
@@ -160,7 +163,7 @@ type SingleSelectOption<T extends string> = {
   value: T;
 };
 
-type AppScreen = 'scales' | 'tabs' | 'properties' | 'tab-symbols';
+type AppScreen = 'scales' | 'tabs' | 'properties' | 'help';
 type LayoutRect = { x: number; y: number; width: number; height: number };
 
 function sameLayoutRect(a: LayoutRect | undefined, b: LayoutRect) {
@@ -413,7 +416,8 @@ function ToneFollowDebugPanel(props: {
   detectedRawFrequency: number | null;
   lastDetectedAt: number | null;
   detectedCandidates: Array<{ frequency: number; confidence: number }>;
-  listenSource: 'web' | 'sim' | null;
+  detectedYinDiagnostic: YinFrameDiagnostic | null;
+  listenSource: DetectorSource;
   simFrequency: string;
   setSimFrequency: (value: string) => void;
   followStatus: string;
@@ -427,10 +431,25 @@ function ToneFollowDebugPanel(props: {
   const currentFrequency =
     props.uiPath === 'responsive' ? props.detectedResponsiveFrequency : props.detectedStableFrequency;
   const commitLabel = props.uiPath === 'responsive' ? 'Responsive' : 'Stable';
+  const yin = props.detectedYinDiagnostic;
+  const octave = yin?.octave ?? null;
+  const acceptedFrequency =
+    yin && octave?.acceptedLag ? yin.sampleRate / octave.acceptedLag : null;
+  const halfFrequency =
+    yin && octave?.halfLag ? yin.sampleRate / octave.halfLag : null;
+  const sourceLabel =
+    props.listenSource === 'web'
+      ? 'Mic input (web)'
+      : props.listenSource === 'native'
+        ? 'Mic input (native)'
+        : props.listenSource === 'sim'
+          ? 'Simulated Hz (fallback)'
+          : '—';
 
   return (
     <View style={styles.debugPanel}>
       <Text style={styles.debugPanelLabel}>Debug Panel</Text>
+      <Text style={styles.debugText}>Build: {BUILD_ID}</Text>
       <Text style={styles.debugText}>
         RMS: {props.detectedRms.toFixed(4)} · Conf: {props.detectedConfidence.toFixed(2)} · Hz:{' '}
         {currentFrequency ? currentFrequency.toFixed(1) : '—'} · Snap:{' '}
@@ -466,6 +485,17 @@ function ToneFollowDebugPanel(props: {
           <Text style={styles.debugText}>Window: {latency.smoothingWindowLabels.join(' · ') || '—'}</Text>
         </>
       )}
+      {yin && octave && (
+        <Text style={styles.debugText}>
+          YIN: {Math.round(yin.sampleRate)}Hz/{yin.frameLength} · Acc{' '}
+          {octave.acceptedLag ?? '—'}
+          {acceptedFrequency ? ` (${acceptedFrequency.toFixed(1)}Hz)` : ''} cmnd{' '}
+          {octave.acceptedCmnd !== null ? octave.acceptedCmnd.toFixed(3) : '—'} · Half{' '}
+          {octave.halfLag ?? '—'}
+          {halfFrequency ? ` (${halfFrequency.toFixed(1)}Hz)` : ''} cmnd{' '}
+          {octave.halfCmnd !== null ? octave.halfCmnd.toFixed(3) : '—'} · {octave.reason}
+        </Text>
+      )}
       {props.detectedCandidates.length > 0 && (
         <Text style={styles.debugText}>
           Top candidates:{' '}
@@ -476,13 +506,7 @@ function ToneFollowDebugPanel(props: {
       )}
       <View style={styles.debugRow}>
         <Text style={styles.debugLabel}>Source</Text>
-        <Text style={styles.debugTextInline}>
-          {props.listenSource === 'web'
-            ? 'Mic input (web)'
-            : props.listenSource === 'sim'
-              ? 'Simulated Hz (fallback)'
-              : '—'}
-        </Text>
+        <Text style={styles.debugTextInline}>{sourceLabel}</Text>
       </View>
       <View style={styles.debugRow}>
         <Text style={styles.debugLabel}>Sim Hz</Text>
@@ -519,6 +543,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
     detectedConfidence,
     detectedRms,
     detectedCandidates,
+    detectedYinDiagnostic,
     lastStableDetectedAt,
     stableAudioSnapshot,
     latencySnapshot,
@@ -710,6 +735,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
               detectedRawFrequency={detectedRawFrequency}
               lastDetectedAt={lastStableDetectedAt}
               detectedCandidates={detectedCandidates}
+              detectedYinDiagnostic={detectedYinDiagnostic}
               listenSource={listenSource}
               simFrequency={props.simFrequency}
               setSimFrequency={props.setSimFrequency}
@@ -956,6 +982,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
     detectedConfidence,
     detectedRms,
     detectedCandidates,
+    detectedYinDiagnostic,
     lastResponsiveDetectedAt,
     responsiveAudioSnapshot,
     latencySnapshot,
@@ -1067,6 +1094,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
             detectedRawFrequency={detectedRawFrequency}
             lastDetectedAt={lastResponsiveDetectedAt}
             detectedCandidates={detectedCandidates}
+            detectedYinDiagnostic={detectedYinDiagnostic}
             listenSource={listenSource}
             simFrequency={props.simFrequency}
             setSimFrequency={props.setSimFrequency}
@@ -1309,6 +1337,178 @@ function getCaretPosition(
   };
 }
 
+const TAB_SYMBOLS: { key: string; meaning: string }[] = [
+  { key: '4', meaning: 'Blow on hole 4.' },
+  { key: '-4', meaning: 'Draw on hole 4.' },
+  { key: "-4'", meaning: 'Draw bend (one semitone).' },
+  { key: "-3''", meaning: 'Deeper bend (two semitones).' },
+  { key: '4° / -7°', meaning: 'Overbend when Overbend Symbol is set to °.' },
+  { key: "4' / -7'", meaning: "Overbend when Overbend Symbol is set to '." },
+];
+
+function HelpSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.helpSection}>
+      <Text style={styles.helpSectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function HelpParagraph({ children }: { children: React.ReactNode }) {
+  return <Text style={styles.helpBody}>{children}</Text>;
+}
+
+function HelpBullet({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={styles.helpBulletRow}>
+      <Text style={styles.helpBulletDot}>•</Text>
+      <Text style={styles.helpBulletText}>{children}</Text>
+    </View>
+  );
+}
+
+/**
+ * In-app user guide. Mirrors docs/USER_GUIDE.md so the app works offline.
+ */
+function HelpScreen() {
+  return (
+    <View style={styles.propertiesCard}>
+      <Text style={styles.propertiesTitle}>Help</Text>
+      <HelpParagraph>
+        HarpPilot helps you visualize playable scales and chords on a 10-hole diatonic harmonica,
+        transpose tabs between keys, and play along while the app listens through your microphone.
+      </HelpParagraph>
+
+      <HelpSection title="Quick orientation">
+        <HelpParagraph>
+          The app has two main workspaces, switched via the Scales / Tabs buttons at the bottom of the screen.
+        </HelpParagraph>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Scales</Text>
+          {' — pick a harmonica key, a target position/key, and a scale name to see the playable tabs and optional arpeggios.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Tabs</Text>
+          {' — manage a personal library of saved tabs, edit tab text, and play tabs back with octave-shift and tone-follow.'}
+        </HelpBullet>
+        <HelpParagraph>
+          The gear icon in the top right opens Properties for display preferences and detection settings. The Help
+          button on Properties opens this guide.
+        </HelpParagraph>
+      </HelpSection>
+
+      <HelpSection title="Reading tabs">
+        <HelpParagraph>
+          Tabs describe which hole to play and how. Numbers refer to hole positions on a 10-hole diatonic harmonica.
+        </HelpParagraph>
+        {TAB_SYMBOLS.map((row) => (
+          <View key={row.key} style={styles.symbolRow}>
+            <Text style={styles.symbolKey}>{row.key}</Text>
+            <Text style={styles.symbolMeaning}>{row.meaning}</Text>
+          </View>
+        ))}
+        <HelpBullet>Blow is written as the bare hole number; draw uses a leading minus.</HelpBullet>
+        <HelpBullet>Bends stack apostrophes — one per semitone of bend.</HelpBullet>
+        <HelpBullet>
+          Overbends use either ° or ' (your choice in Properties). HarpPilot omits overbends on holes 2, 3, and 8.
+        </HelpBullet>
+        <HelpBullet>
+          When two tabs play the same pitch (e.g., -2 vs 3 on a C harp for G), the chip is tappable to cycle to the
+          alternate.
+        </HelpBullet>
+      </HelpSection>
+
+      <HelpSection title="Scales workspace">
+        <HelpParagraph>The fastest way to see what tabs play a given scale on a given harp.</HelpParagraph>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Harmonica Key</Text>
+          {' — the key of the physical harp in your hand.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Target Position/Key</Text>
+          {' — the key you want to play in, expressed as a position. 1st = harp\'s own key, 2nd = a fifth above (classic blues), and so on.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Scale Name</Text>
+          {' — Major, Major Pentatonic, Natural Minor, Minor Pentatonic, Harmonic Minor, Dorian, Mixolydian, or Blues Minor.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Arpeggios</Text>
+          {' — optionally show triads, 7th chords, or common blues chords for the scale\'s root.'}
+        </HelpBullet>
+        <HelpParagraph>
+          Tap Listen to start mic detection. A caret moves between tabs to show your detected pitch. If mic access is
+          unavailable, HarpPilot falls back to a simulated input so the UI still works.
+        </HelpParagraph>
+      </HelpSection>
+
+      <HelpSection title="Tabs workspace">
+        <HelpParagraph>
+          The Tabs workspace has two views: Library (manage saved tabs) and Transposer (play a saved tab back).
+        </HelpParagraph>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Library</Text>
+          {' — New Tab, Open, Edit, Delete. Tabs are sorted alphabetically. Saving with key/position context lets HarpPilot prompt you if you reopen the tab on a different harp.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Transposer</Text>
+          {' — Choose Tab clears the current source. Down / Up step the displayed tab one octave; Base resets to the saved first position. Successfully transposed tokens are clickable to move the play cursor.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Editor</Text>
+          {' — paste or type tabs; use Clean Input to strip non-tab content. Save overwrites; Save As always creates a new record.'}
+        </HelpBullet>
+        <HelpParagraph>
+          Tone follow is automatically on while listening is on. The cursor advances as you play, wrapping back to the
+          first playable note at the end. Repeated identical notes require a brief release (pitch change or volume dip)
+          before the cursor advances again.
+        </HelpParagraph>
+      </HelpSection>
+
+      <HelpSection title="Properties">
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Overbend Symbol</Text>
+          {' — choose ° or ' + "'" + '. Affects how overbends are rendered everywhere.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Positions</Text>
+          {' — which positions appear in the Target Position/Key dropdown.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Harmonica Keys / Target Keys</Text>
+          {' — display preferences for key labels (standard / flat / sharp).'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>2 Draw / 3 Blow Preference</Text>
+          {' — which tab shows first when both fingerings produce the same pitch.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Tone Tolerance / Minimum Confidence / Note Separation</Text>
+          {' — tune how strict pitch detection is and how readily the tone-follow cursor advances on repeated notes.'}
+        </HelpBullet>
+        <HelpBullet>
+          <Text style={styles.helpEmphasis}>Debug</Text>
+          {' — toggles a panel of raw detector data; useful only when troubleshooting.'}
+        </HelpBullet>
+      </HelpSection>
+
+      <HelpSection title="Tips">
+        <HelpBullet>
+          Major Pentatonic and Minor Pentatonic are great starting points for soloing — they have no bends in most
+          positions, so the tabs are simpler.
+        </HelpBullet>
+        <HelpBullet>
+          If pitch detection feels jumpy, raise Minimum Confidence in Properties. If it feels unresponsive, lower it.
+        </HelpBullet>
+        <HelpBullet>
+          If repeated notes don't advance the cursor, articulate the attack more or raise Note Separation.
+        </HelpBullet>
+      </HelpSection>
+    </View>
+  );
+}
+
 /**
  * Main app screen for harmonica scale, arpeggio, and pitch-tracking views.
  */
@@ -1364,11 +1564,14 @@ export default function App() {
     setToneFollowMinConfidenceInput,
     noteSeparationRatioInput,
     setNoteSeparationRatioInput,
+    minSendIntervalMsInput,
+    setMinSendIntervalMsInput,
     simFrequency,
     setSimFrequency,
     toneToleranceCents,
     toneFollowMinConfidence,
     noteSeparationRatio,
+    minSendIntervalMs,
     simHz,
   } = useAudioSettings();
   const {
@@ -1556,12 +1759,12 @@ export default function App() {
   const headerTitle =
     screen === 'properties'
       ? 'Properties'
-      : screen === 'tab-symbols'
-        ? 'Tab Symbols'
+      : screen === 'help'
+        ? 'Help'
         : 'HarpPilot';
 
   const isTabsLibraryScreen = screen === 'tabs' && tabsSubview === 'library' && !tabsEditorVisible;
-  const showBackButton = screen === 'properties' || screen === 'tab-symbols';
+  const showBackButton = screen === 'properties' || screen === 'help';
   const showWorkspaceSwitcher = (screen === 'scales' || screen === 'tabs') && !tabsEditorVisible;
 
   function handleHeaderButtonPress() {
@@ -1573,7 +1776,7 @@ export default function App() {
       setScreen(propertiesReturnTo);
       return;
     }
-    if (screen === 'tab-symbols') {
+    if (screen === 'help') {
       setScreen('properties');
       return;
     }
@@ -2003,41 +2206,35 @@ export default function App() {
                 />
               </View>
             </View>
+            <View style={styles.propertiesInlineFields}>
+              <View style={styles.propertiesInlineField}>
+                <View style={styles.propertiesLabelWithHelp}>
+                  <Text style={styles.dropdownLabel}>Send interval ms (debug)</Text>
+                </View>
+                <TextInput
+                  testID="send-interval-debug-input"
+                  value={minSendIntervalMsInput}
+                  onChangeText={setMinSendIntervalMsInput}
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder={DEFAULT_AUDIO_SETTINGS.minSendIntervalMsInput}
+                  placeholderTextColor="#64748b"
+                  style={styles.propertiesNumberInput}
+                />
+              </View>
+            </View>
             <View style={styles.propertiesRow}>
-              <Pressable onPress={() => setScreen('tab-symbols')} style={styles.debugToggle}>
-                <Text style={styles.debugToggleText}>Tab symbols help</Text>
+              <Pressable onPress={() => setScreen('help')} style={styles.debugToggle}>
+                <Text style={styles.debugToggleText}>Help</Text>
               </Pressable>
             </View>
+            <Text style={[styles.helperText, { textAlign: 'center', marginTop: 8 }]}>v0.5</Text>
           </View>
-        ) : screen === 'tab-symbols' ? (
-          <View style={styles.propertiesCard}>
-            <Text style={styles.propertiesTitle}>Tab Symbols</Text>
-            <Text style={styles.helperText}>Quick guide for reading tabs shown in this app.</Text>
-            <View style={styles.symbolRow}>
-              <Text style={styles.symbolKey}>4</Text>
-              <Text style={styles.symbolMeaning}>Blow on hole 4.</Text>
-            </View>
-            <View style={styles.symbolRow}>
-              <Text style={styles.symbolKey}>-4</Text>
-              <Text style={styles.symbolMeaning}>Draw on hole 4.</Text>
-            </View>
-            <View style={styles.symbolRow}>
-              <Text style={styles.symbolKey}>-4'</Text>
-              <Text style={styles.symbolMeaning}>Draw bend (one semitone).</Text>
-            </View>
-            <View style={styles.symbolRow}>
-              <Text style={styles.symbolKey}>-3''</Text>
-              <Text style={styles.symbolMeaning}>Deeper bend (two semitones).</Text>
-            </View>
-            <View style={styles.symbolRow}>
-              <Text style={styles.symbolKey}>4° / -7°</Text>
-              <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to °.</Text>
-            </View>
-            <View style={styles.symbolRow}>
-              <Text style={styles.symbolKey}>4' / -7'</Text>
-              <Text style={styles.symbolMeaning}>Overbend when Overbend Symbol is set to '.</Text>
-            </View>
-          </View>
+        ) : screen === 'help' ? (
+          <HelpScreen />
         ) : screen === 'tabs' ? (
           <>
             {tabsSubview === 'library' ? (
@@ -2302,7 +2499,7 @@ export default function App() {
   }
 
   return (
-    <AudioListeningProvider simHz={simHz} harmonicaPc={harmonicaKey.pc}>
+    <AudioListeningProvider simHz={simHz} harmonicaPc={harmonicaKey.pc} minSendIntervalMs={minSendIntervalMs}>
       <SafeAreaView style={styles.safeArea}>
         {isTabsLibraryScreen || isScalesScreen ? (
           <View style={styles.staticContainer}>{renderMainContent()}</View>
@@ -2899,6 +3096,41 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 10,
+  },
+  helpSection: {
+    gap: 8,
+    marginTop: 6,
+  },
+  helpSectionTitle: {
+    color: '#facc15',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  helpBody: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  helpEmphasis: {
+    color: '#e2e8f0',
+    fontWeight: '700',
+  },
+  helpBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingLeft: 4,
+  },
+  helpBulletDot: {
+    color: '#64748b',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  helpBulletText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    lineHeight: 19,
+    flex: 1,
   },
   symbolKey: {
     color: '#f8fafc',

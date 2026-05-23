@@ -7,6 +7,8 @@ export type AudioFrameEventPayload = {
   samples: number[];
   /** Hardware sample rate in Hz (typically 44100 or 48000). */
   sampleRate: number;
+  /** Capture timestamp (ms since epoch) for stale-frame filtering in JS. */
+  capturedAt: number;
 };
 
 export type HarmonicaAudioModuleEvents = {

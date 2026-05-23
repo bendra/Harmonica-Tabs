@@ -39,4 +39,18 @@ describe('buildTabsForScale', () => {
     expect(degreeTabs).not.toContain('8°');
     expect(degreeTabs).not.toContain('-8°');
   });
+
+  it('only emits pentatonic pitch classes for the new pentatonic scales', () => {
+    const majorPenta = buildTabsForScale({ rootPc: 0, scaleId: 'major_pentatonic' }, 0, 'apostrophe');
+    const minorPenta = buildTabsForScale({ rootPc: 0, scaleId: 'minor_pentatonic' }, 0, 'apostrophe');
+
+    const majorPentaPcs = new Set(majorPenta.map((group) => group.pc));
+    const minorPentaPcs = new Set(minorPenta.map((group) => group.pc));
+
+    expect(majorPentaPcs).toEqual(new Set([0, 2, 4, 7, 9]));
+    expect(minorPentaPcs).toEqual(new Set([0, 3, 5, 7, 10]));
+
+    expect(majorPenta.length).toBeGreaterThan(0);
+    expect(minorPenta.length).toBeGreaterThan(0);
+  });
 });

@@ -86,11 +86,16 @@ SafeAreaView (styles.safeArea)
       │     ├─ Minimum Confidence Input + Help Button (styles.propertiesInlineField + styles.helpIconButton)
       │     ├─ Note Separation Input + Help Button (styles.propertiesInlineField + styles.helpIconButton)
       │     ├─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle)
-      │     └─ Tab Symbols Help Button (styles.propertiesRow + styles.debugToggle)
-      ├─ Tab Symbols Screen (`screen === 'tab-symbols'`)
-      │  └─ Symbols Card (styles.propertiesCard)
+      │     └─ Help Button (styles.propertiesRow + styles.debugToggle)
+      ├─ Help Screen (`screen === 'help'`)
+      │  └─ Help Card (styles.propertiesCard)
       │     ├─ Section Title (styles.propertiesTitle)
-      │     └─ Symbol Rows (styles.symbolRow + styles.symbolKey + styles.symbolMeaning)
+      │     ├─ Intro Paragraph (styles.helpBody)
+      │     └─ Help Sections (styles.helpSection)
+      │        ├─ Section Title (styles.helpSectionTitle)
+      │        ├─ Body Paragraphs (styles.helpBody)
+      │        ├─ Bulleted Rows (styles.helpBulletRow + styles.helpBulletDot + styles.helpBulletText)
+      │        └─ Tab Symbol Rows (styles.symbolRow + styles.symbolKey + styles.symbolMeaning) — under the "Reading tabs" section
    ├─ Workspace Switcher (styles.workspaceNavRow, bottom-aligned on top-level screens)
    │  ├─ `Scales` button (styles.workspaceNavButton)
    │  └─ `Tabs` button (styles.workspaceNavButton)
@@ -110,7 +115,7 @@ SafeAreaView (styles.safeArea)
 - **Toggle Group**: `toggleGroup`, `toggleRow`, `toggleItem`
 - **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`
 - **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
-- **Tab Symbols**: `symbolRow`, `symbolKey`, `symbolMeaning`
+- **Help / Tab Symbols**: `helpSection`, `helpSectionTitle`, `helpBody`, `helpEmphasis`, `helpBulletRow`, `helpBulletDot`, `helpBulletText`, `symbolRow`, `symbolKey`, `symbolMeaning`
 - **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue` (status line below button row), `debugPanel`, `debugPanelLabel`
 - **Scales Workspace**: `scalesWorkspace`, responsive shell via `testID="scales-workspace-shell"`, results scroller via `testID="scales-results-scroll"`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`

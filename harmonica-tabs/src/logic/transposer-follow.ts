@@ -1,10 +1,12 @@
 import { matchFrequencyToTabs } from './pitch';
 
+export type DetectorSource = 'web' | 'native' | 'sim' | null;
+
 export type DetectorSnapshot = {
   frequency: number | null;
   confidence: number;
   rms: number;
-  source: 'web' | 'sim' | null;
+  source: DetectorSource;
   lastDetectedAt: number | null;
 };
 

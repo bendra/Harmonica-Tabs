@@ -23,7 +23,7 @@ type TabEditorParams = {
   setTransposerSourceTabId: Dispatch<SetStateAction<string | null>>;
   setTabsSubview: (subview: TabsSubview) => void;
   setTabsEditorVisible: (visible: boolean) => void;
-  setScreen: (screen: 'scales' | 'tabs' | 'properties' | 'tab-symbols') => void;
+  setScreen: (screen: 'scales' | 'tabs' | 'properties' | 'help') => void;
   deleteSavedTab: (record: SavedTabRecord) => Promise<SavedTabRecord[]>;
   currentHarmonicaPc: number;
   currentPositionNumber: number;

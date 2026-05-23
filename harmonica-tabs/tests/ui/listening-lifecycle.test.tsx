@@ -93,6 +93,7 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState, savedTabDb } = 
       startQueue: [] as Array<() => Promise<void>>,
       startSpy: vi.fn(),
       stopSpy: vi.fn(),
+      setMinSendIntervalMsSpy: vi.fn(),
       updateHandlers: [] as Array<
         (
           update: {
@@ -102,6 +103,7 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState, savedTabDb } = 
             rms: number;
             candidates?: Array<{ frequency: number; confidence: number }>;
             trace?: Record<string, number | null>;
+            yinDiagnostic?: unknown;
           },
         ) => void
       >,
@@ -126,6 +128,7 @@ vi.mock('../../src/logic/web-audio', () => ({
           rms: number;
           candidates?: Array<{ frequency: number; confidence: number }>;
           trace?: Record<string, number | null>;
+          yinDiagnostic?: unknown;
         },
       ) => void,
     ) => {
@@ -135,6 +138,7 @@ vi.mock('../../src/logic/web-audio', () => ({
       return nextStart ? nextStart() : Promise.resolve();
     },
     stop: () => detectorMockState.stopSpy(),
+    setMinSendIntervalMs: (ms: number) => detectorMockState.setMinSendIntervalMsSpy(ms),
   }),
 }));
 
@@ -244,6 +248,7 @@ describe('App listening lifecycle', () => {
     detectorMockState.startQueue = [];
     detectorMockState.startSpy.mockClear();
     detectorMockState.stopSpy.mockClear();
+    detectorMockState.setMinSendIntervalMsSpy.mockClear();
     detectorMockState.updateHandlers = [];
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -400,6 +405,20 @@ describe('App listening lifecycle', () => {
             detectorEndAtMs: 100 + index * 93,
             detectorDurationMs: 4,
           },
+          yinDiagnostic: {
+            sampleRate: 44100,
+            frameLength: 4096,
+            octave: {
+              acceptedLag: 100,
+              acceptedCmnd: 0.12,
+              halfLag: 50,
+              halfCmnd: 0.18,
+              preferredLag: 100,
+              preferredCmnd: 0.12,
+              preferredFrequency: 440,
+              reason: 'half-lag-too-weak',
+            },
+          },
         });
       }
       await Promise.resolve();
@@ -425,6 +444,15 @@ describe('App listening lifecycle', () => {
         (node: any) =>
           node.type === 'Text' &&
           flattenTextChildren(node.children).includes('Labels: Raw A4 · Snap A4 · Stable A4 · Responsive A4 · Tuner A'),
+      ),
+    ).toBeTruthy();
+    expect(
+      root.find(
+        (node: any) =>
+          node.type === 'Text' &&
+          flattenTextChildren(node.children).includes(
+            'YIN: 44100Hz/4096 · Acc 100 (441.0Hz) cmnd 0.120 · Half 50 (882.0Hz) cmnd 0.180 · half-lag-too-weak',
+          ),
       ),
     ).toBeTruthy();
 
@@ -501,6 +529,40 @@ describe('App listening lifecycle', () => {
           flattenTextChildren(node.children).includes('This note: Raw 93.0ms · Snap 0.0ms · Responsive 93.0ms · UI 0.0ms'),
       ),
     ).toBeTruthy();
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('forwards the rate-limit interval to the detector on listen start and on live change', async () => {
+    detectorMockState.isSupported = true;
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    await act(async () => {
+      findPressableByText(root, '🎤 Listen').props.onPress();
+      await Promise.resolve();
+    });
+
+    // (a) start() pushes the current setting (default 50) to the detector so a
+    // fresh session uses the chosen rate limit.
+    expect(detectorMockState.setMinSendIntervalMsSpy).toHaveBeenCalledWith(50);
+
+    // (b) changing the debug field while listening must forward the new value
+    // live (guards the `intervalChanged` branch in setParams + the 8-file wiring).
+    detectorMockState.setMinSendIntervalMsSpy.mockClear();
+
+    act(() => {
+      findPressableByText(root, '⚙').props.onPress();
+    });
+    await act(async () => {
+      findByTestId(root, 'send-interval-debug-input').props.onChangeText('120');
+      await Promise.resolve();
+    });
+
+    expect(detectorMockState.setMinSendIntervalMsSpy).toHaveBeenCalledWith(120);
 
     act(() => {
       renderer.unmount();
