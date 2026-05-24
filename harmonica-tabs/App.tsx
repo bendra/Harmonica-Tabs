@@ -34,12 +34,17 @@ import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import { getHarmonicaSuggestions } from './src/logic/harmonica-suggestions';
 import { DEFAULT_AUDIO_SETTINGS } from './src/config/default-settings';
 import {
-  formatSavedTabPreview,
   getSavedTabContext,
   SavedTabRecord,
 } from './src/logic/saved-tab-library';
+import { parseTabText } from './src/logic/transposer';
 import { useSavedTabLibrary } from './src/hooks/use-saved-tab-library';
 import { useAudioSettings } from './src/hooks/use-audio-settings';
+import {
+  usePersistedPreferences,
+  usePersistPreferencesEffect,
+} from './src/hooks/use-persisted-preferences';
+import { PersistedPreferences } from './src/logic/preferences';
 import { AudioListeningProvider, useAudioListening } from './src/hooks/use-audio-listening';
 import { useTransposerSession } from './src/hooks/use-transposer-session';
 import { useTabEditor, SaveTabMode, TabsSubview } from './src/hooks/use-tab-editor';
@@ -175,7 +180,33 @@ function sameLayoutRect(a: LayoutRect | undefined, b: LayoutRect) {
 function formatSavedTabTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString();
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function countSavedTabNotes(inputText: string) {
+  return parseTabText(inputText).segments.filter((segment) => segment.kind === 'token').length;
+}
+
+function formatSavedTabSummary(
+  tab: SavedTabRecord,
+  harmonicaKeyPreferFlats: boolean,
+  targetKeyPreferFlats: boolean,
+) {
+  const noteCount = countSavedTabNotes(tab.inputText);
+  const parts = [`${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`];
+
+  if (tab.harmonicaPc !== null && tab.positionNumber !== null) {
+    parts.push(`${pcToNote(tab.harmonicaPc, harmonicaKeyPreferFlats)} harp`);
+    parts.push(`${formatOrdinal(tab.positionNumber)} pos`);
+    parts.push(pcToNote(getTargetRootPcForPosition(tab.harmonicaPc, tab.positionNumber), targetKeyPreferFlats));
+  }
+
+  const updatedAt = formatSavedTabTimestamp(tab.updatedAt);
+  if (updatedAt) {
+    parts.push(`updated ${updatedAt}`);
+  }
+
+  return parts.join(' · ');
 }
 
 
@@ -376,6 +407,8 @@ type ScalesWorkspaceProps = {
   notation: OverbendNotation;
   gAltPreference: '-2' | '3';
   transposerFollowStatus: string;
+  topRowInverted: boolean;
+  onTopRowInvertedChange: (next: boolean) => void;
 };
 
 type TabsTransposeViewProps = {
@@ -411,6 +444,8 @@ type TabsTransposeViewProps = {
   simFrequency: string;
   setSimFrequency: (value: string) => void;
   onFollowStatusChange: (value: string) => void;
+  topRowInverted: boolean;
+  onTopRowInvertedChange: (next: boolean) => void;
 };
 
 function ToneFollowDebugPanel(props: {
@@ -550,15 +585,49 @@ type HarmonicaPickerTopRowProps = {
   dropdownSize?: ResponsiveControlSize;
   extraRowStyle?: any;
   testIdPrefix: 'scales' | 'tabs';
+  inverted: boolean;
+  onInvertedChange: (next: boolean) => void;
 };
+
+type TopRowSwapToggleProps = {
+  active?: boolean;
+  accessibilityLabel: string;
+  accessibilityHint: string;
+  buttonTestID: string;
+  label: string;
+  onPress: () => void;
+};
+
+function TopRowSwapToggle({
+  active = false,
+  accessibilityLabel,
+  accessibilityHint,
+  buttonTestID,
+  label,
+  onPress,
+}: TopRowSwapToggleProps) {
+  return (
+    <Pressable
+      testID={buttonTestID}
+      onPress={onPress}
+      style={active ? [styles.topRowSwapToggle, styles.topRowSwapToggleActive] : styles.topRowSwapToggle}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+    >
+      <Text style={styles.topRowSwapToggleIcon}>⇄</Text>
+      <Text style={styles.topRowSwapToggleText}>{label}</Text>
+    </Pressable>
+  );
+}
 
 // Top row for the Scales and Tabs -> Transpose workspaces. Default view is
 // Harmonica + Target Position/Key dropdowns. The ⇄ swap toggle on the right
 // flips to a Target-Key-first view that lists practical (harp, position)
 // pairs as the second dropdown — useful when you know the song's key and
-// want to pick the right harmonica.
+// want to pick the right harmonica. The inverted state is owned at App level
+// so both workspaces stay in sync and the choice persists across sessions.
 function HarmonicaPickerTopRow(props: HarmonicaPickerTopRowProps) {
-  const [inverted, setInverted] = useState(false);
+  const { inverted, onInvertedChange } = props;
   const rowStyle = props.extraRowStyle ? [styles.topRow, props.extraRowStyle] : styles.topRow;
 
   if (inverted) {
@@ -610,14 +679,14 @@ function HarmonicaPickerTopRow(props: HarmonicaPickerTopRowProps) {
             }}
           />
         </View>
-        <Pressable
-          testID={`${props.testIdPrefix}-invert-toggle`}
-          onPress={() => setInverted(false)}
-          style={[styles.topRowSwapToggle, styles.topRowSwapToggleActive]}
+        <TopRowSwapToggle
+          buttonTestID={`${props.testIdPrefix}-invert-toggle`}
+          onPress={() => onInvertedChange(false)}
+          active
           accessibilityLabel="Switch back to harmonica-first view"
-        >
-          <Text style={styles.topRowSwapToggleText}>⇄</Text>
-        </Pressable>
+          accessibilityHint="What key can this harp play?"
+          label="Have harp?"
+        />
       </View>
     );
   }
@@ -645,14 +714,13 @@ function HarmonicaPickerTopRow(props: HarmonicaPickerTopRowProps) {
           onChange={props.onScaleRootChange}
         />
       </View>
-      <Pressable
-        testID={`${props.testIdPrefix}-invert-toggle`}
-        onPress={() => setInverted(true)}
-        style={styles.topRowSwapToggle}
+      <TopRowSwapToggle
+        buttonTestID={`${props.testIdPrefix}-invert-toggle`}
+        onPress={() => onInvertedChange(true)}
         accessibilityLabel="Switch to target-key-first view"
-      >
-        <Text style={styles.topRowSwapToggleText}>⇄</Text>
-      </Pressable>
+        accessibilityHint="What harp do I need?"
+        label="Need harp?"
+      />
     </View>
   );
 }
@@ -822,6 +890,8 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
           dropdownSize={props.scalesLayout.controlSize}
           extraRowStyle={scalesTopRowStyle}
           testIdPrefix="scales"
+          inverted={props.topRowInverted}
+          onInvertedChange={props.onTopRowInvertedChange}
         />
 
         <View style={[styles.listenCard, scalesListenCardStyle]}>
@@ -1167,6 +1237,8 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
         harmonicaKeyLabelStyle={props.harmonicaKeyLabelStyle}
         targetKeyPreferFlats={props.targetKeyPreferFlats}
         testIdPrefix="tabs"
+        inverted={props.topRowInverted}
+        onInvertedChange={props.onTopRowInvertedChange}
       />
       <View style={[styles.transposerCard, styles.transposerCardGrow]}>
         <View style={styles.transposerFollowControls}>
@@ -1509,8 +1581,8 @@ function HelpScreen() {
           {' — manage a personal library of saved tabs, edit tab text, and play tabs back with octave-shift and tone-follow.'}
         </HelpBullet>
         <HelpParagraph>
-          The gear icon in the top right opens Properties for display preferences and detection settings. The Help
-          button on Properties opens this guide.
+          The ? button in the top right opens this guide. The gear icon next to it opens Properties for display
+          preferences and detection settings.
         </HelpParagraph>
       </HelpSection>
 
@@ -1653,19 +1725,40 @@ function HelpScreen() {
 }
 
 /**
- * Main app screen for harmonica scale, arpeggio, and pitch-tracking views.
+ * Top-level entry point. Loads persisted user preferences once, then mounts
+ * the real UI with those values as initial state. A blank SafeAreaView is
+ * shown briefly during the load so we don't render the defaults and then
+ * flash to the user's saved choices.
  */
 export default function App() {
+  const { ready, initialPreferences } = usePersistedPreferences();
+  if (!ready) {
+    return <SafeAreaView style={styles.safeArea} />;
+  }
+  return <HydratedApp initialPreferences={initialPreferences} />;
+}
+
+/**
+ * Main app screen for harmonica scale, arpeggio, and pitch-tracking views.
+ * Receives hydrated preferences from App() and seeds all relevant hooks.
+ */
+function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPreferences }) {
   const { width, height } = useWindowDimensions();
   const shortEdge = Math.min(width, height);
   const layoutTier = getLayoutTier(shortEdge);
   const scalesLayout = getScalesLayoutMetrics(layoutTier);
   const isSmallScreen = layoutTier === 'compact';
   const transposerOutputMaxHeight = Math.max(160, Math.round(height * (isSmallScreen ? 0.38 : 0.46)));
-  const [screen, setScreen] = useState<AppScreen>('scales');
-  const [tabsSubview, setTabsSubview] = useState<TabsSubview>('library');
+  const [screen, setScreen] = useState<AppScreen>(initialPreferences.ui.screen);
+  const [tabsSubview, setTabsSubview] = useState<TabsSubview>(
+    initialPreferences.transposer.sourceTabId ? 'transpose' : 'library',
+  );
   const [tabsEditorVisible, setTabsEditorVisible] = useState(false);
-  const [propertiesReturnTo, setPropertiesReturnTo] = useState<'scales' | 'tabs'>('scales');
+  const [propertiesReturnTo, setPropertiesReturnTo] = useState<'scales' | 'tabs'>(
+    initialPreferences.ui.screen === 'tabs' ? 'tabs' : 'scales',
+  );
+  const [helpReturnTo, setHelpReturnTo] = useState<'scales' | 'tabs' | 'properties'>('properties');
+  const [topRowInverted, setTopRowInverted] = useState<boolean>(initialPreferences.ui.topRowInverted);
   const {
     harmonicaKey,
     setHarmonicaKey,
@@ -1697,7 +1790,7 @@ export default function App() {
     scaleKeyDropdownOptions,
     scaleNameDropdownOptions,
     firstPositionRoot,
-  } = useMusicalSelection();
+  } = useMusicalSelection(initialPreferences.musicalSelection);
   const {
     showDebug,
     setShowDebug,
@@ -1716,7 +1809,14 @@ export default function App() {
     noteSeparationRatio,
     minSendIntervalMs,
     simHz,
-  } = useAudioSettings();
+  } = useAudioSettings({
+    showDebug: initialPreferences.audioSettings.showDebug,
+    toneToleranceInput: initialPreferences.audioSettings.toneToleranceInput,
+    toneFollowMinConfidenceInput: initialPreferences.audioSettings.toneFollowMinConfidenceInput,
+    noteSeparationRatioInput: initialPreferences.audioSettings.noteSeparationRatioInput,
+    minSendIntervalMsInput: initialPreferences.audioSettings.minSendIntervalMsInput,
+    simFrequencyInput: initialPreferences.audioSettings.simFrequencyInput,
+  });
   const {
     savedTabs,
     setSavedTabs,
@@ -1724,8 +1824,12 @@ export default function App() {
     setSavedTabsStatus,
     deleteSavedTab,
   } = useSavedTabLibrary();
-  const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(null);
-  const [transposerOctaveOffset, setTransposerOctaveOffset] = useState(0);
+  const [transposerSourceTabId, setTransposerSourceTabId] = useState<string | null>(
+    initialPreferences.transposer.sourceTabId,
+  );
+  const [transposerOctaveOffset, setTransposerOctaveOffset] = useState(
+    initialPreferences.transposer.octaveOffset,
+  );
   const [transposerFollowStatus, setTransposerFollowStatus] = useState('idle');
   const [activePropertiesHelpTopic, setActivePropertiesHelpTopic] = useState<PropertiesHelpTopic | null>(null);
   const {
@@ -1809,6 +1913,56 @@ export default function App() {
     );
   const activePropertiesHelp =
     activePropertiesHelpTopic === null ? null : PROPERTIES_HELP_CONTENT[activePropertiesHelpTopic];
+
+  // Saved tabs load asynchronously, so the persisted source tab id may point
+  // at a record that no longer exists (deleted, library reset, etc.). Drop it
+  // and fall back to the Library subview if so.
+  useEffect(() => {
+    if (transposerSourceTabId === null) return;
+    if (savedTabs.length === 0) return; // wait for the library to actually arrive
+    const stillExists = savedTabs.some((tab) => tab.id === transposerSourceTabId);
+    if (!stillExists) {
+      setTransposerSourceTabId(null);
+      setTabsSubview('library');
+    }
+  }, [savedTabs, transposerSourceTabId]);
+
+  // Properties and Help are transient screens; we don't want to land in them
+  // at startup. Persist whichever main workspace was visible last.
+  const persistedScreen: 'scales' | 'tabs' = screen === 'tabs' ? 'tabs' : 'scales';
+  usePersistPreferencesEffect(
+    {
+      version: 1,
+      musicalSelection: {
+        harmonicaKeyPc: harmonicaKey.pc,
+        scaleRoot,
+        scaleId,
+        arpeggioSelection,
+        harmonicaKeyLabelStyle,
+        targetKeyLabelStyle,
+        notation,
+        positionKeyFilter,
+        gAltPreference,
+      },
+      audioSettings: {
+        showDebug,
+        toneToleranceInput,
+        toneFollowMinConfidenceInput,
+        noteSeparationRatioInput,
+        minSendIntervalMsInput,
+        simFrequencyInput: simFrequency,
+      },
+      ui: {
+        screen: persistedScreen,
+        topRowInverted,
+      },
+      transposer: {
+        sourceTabId: transposerSourceTabId,
+        octaveOffset: transposerOctaveOffset,
+      },
+    },
+    true,
+  );
 
   function renderPropertiesHelpButton(topic: PropertiesHelpTopic) {
     return (
@@ -1920,11 +2074,22 @@ export default function App() {
       return;
     }
     if (screen === 'help') {
-      setScreen('properties');
+      setScreen(helpReturnTo);
       return;
     }
     setPropertiesReturnTo(screen);
     setScreen('properties');
+  }
+
+  function openHelpFromHeader() {
+    if (screen !== 'scales' && screen !== 'tabs') return;
+    setHelpReturnTo(screen);
+    setScreen('help');
+  }
+
+  function openHelpFromProperties() {
+    setHelpReturnTo('properties');
+    setScreen('help');
   }
 
   function renderEditorOverlay() {
@@ -2207,9 +2372,28 @@ export default function App() {
       <>
         <View style={styles.headerRow}>
           <Text style={styles.title}>{headerTitle}</Text>
-          <Pressable onPress={handleHeaderButtonPress} style={styles.gearButton}>
-            <Text style={styles.gearButtonText}>{showBackButton ? '←' : '⚙'}</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            {!showBackButton && (
+              <Pressable
+                testID="header-help-button"
+                onPress={openHelpFromHeader}
+                style={styles.gearButton}
+                accessibilityLabel="Open Help"
+                accessibilityRole="button"
+              >
+                <Text style={styles.gearButtonText}>?</Text>
+              </Pressable>
+            )}
+            <Pressable
+              testID="header-settings-button"
+              onPress={handleHeaderButtonPress}
+              style={styles.gearButton}
+              accessibilityLabel={showBackButton ? 'Back' : 'Open Properties'}
+              accessibilityRole="button"
+            >
+              <Text style={styles.gearButtonText}>{showBackButton ? '←' : '⚙'}</Text>
+            </Pressable>
+          </View>
         </View>
 
         {screen === 'properties' ? (
@@ -2370,7 +2554,7 @@ export default function App() {
               </View>
             </View>
             <View style={styles.propertiesRow}>
-              <Pressable onPress={() => setScreen('help')} style={styles.debugToggle}>
+              <Pressable onPress={openHelpFromProperties} style={styles.debugToggle}>
                 <Text style={styles.debugToggleText}>Help</Text>
               </Pressable>
             </View>
@@ -2414,12 +2598,8 @@ export default function App() {
                           <Text style={styles.savedTabTitle}>{tab.title}</Text>
                           {transposerSourceTabId === tab.id && <Text style={styles.savedTabActiveBadge}>Source</Text>}
                         </View>
-                        <Text style={styles.savedTabPreview}>{formatSavedTabPreview(tab.inputText)}</Text>
-                        <Text style={styles.savedTabMeta}>
-                          {tab.harmonicaPc !== null && tab.positionNumber !== null
-                            ? `${pcToNote(tab.harmonicaPc, harmonicaKeyPreferFlats)} harp • ${formatOrdinal(tab.positionNumber)} / ${pcToNote(getTargetRootPcForPosition(tab.harmonicaPc, tab.positionNumber), targetKeyPreferFlats)}  ·  `
-                            : ''}
-                          Updated {formatSavedTabTimestamp(tab.updatedAt)}
+                        <Text style={styles.savedTabSummary}>
+                          {formatSavedTabSummary(tab, harmonicaKeyPreferFlats, targetKeyPreferFlats)}
                         </Text>
                         <View style={styles.savedTabActions}>
                           <Pressable
@@ -2486,6 +2666,8 @@ export default function App() {
                 simFrequency={simFrequency}
                 setSimFrequency={setSimFrequency}
                 onFollowStatusChange={setTransposerFollowStatus}
+                topRowInverted={topRowInverted}
+                onTopRowInvertedChange={setTopRowInverted}
               />
             )}
           </>
@@ -2521,6 +2703,8 @@ export default function App() {
             notation={notation}
             gAltPreference={gAltPreference}
             transposerFollowStatus={transposerFollowStatus}
+            topRowInverted={topRowInverted}
+            onTopRowInvertedChange={setTopRowInverted}
           />
         )}
         {activePropertiesHelp && (
@@ -2702,6 +2886,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -3841,15 +4030,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 8,
   },
-  savedTabPreview: {
-    color: '#cbd5e1',
-    fontFamily: 'Courier',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  savedTabMeta: {
+  savedTabSummary: {
     color: '#94a3b8',
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 17,
   },
   savedTabActions: {
     flexDirection: 'row',
@@ -3913,19 +4097,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   topRowSwapToggle: {
-    width: 30,
+    minWidth: 84,
     height: 30,
     borderRadius: 15,
     borderWidth: 1,
     borderColor: '#334155',
     backgroundColor: '#0f172a',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
     marginBottom: 2,
+  },
+  topRowSwapToggleIcon: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '700',
   },
   topRowSwapToggleText: {
     color: '#e2e8f0',
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '700',
   },
   topRowSwapToggleActive: {

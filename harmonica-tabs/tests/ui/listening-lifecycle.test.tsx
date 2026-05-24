@@ -360,6 +360,13 @@ describe('App listening lifecycle', () => {
       findByTestId(root, 'transposer-choose-tab-button').props.onPress();
     });
 
+    // Clearing the source tab updates persisted preferences, which schedules a
+    // debounced save. Flush it so the timer-count check below only reflects
+    // any genuinely leaked follow/listen timers.
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
     expect(vi.getTimerCount()).toBe(0);
 
     act(() => {

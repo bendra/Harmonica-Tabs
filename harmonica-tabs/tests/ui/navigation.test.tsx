@@ -362,13 +362,15 @@ describe('App navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns to the tabs workspace after leaving properties', () => {
+  it('returns to the tabs workspace after leaving properties', async () => {
     stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
 
     let renderer: any;
 
-    act(() => {
+    await act(async () => {
       renderer = TestRenderer.create(<App />);
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
     const root = renderer!.root;
@@ -387,6 +389,39 @@ describe('App navigation', () => {
 
     expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
     expect(findAllText(root, 'New Tab').length).toBeGreaterThan(0);
+  });
+
+  it('opens Help directly from the main header and returns to the originating workspace', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    act(() => {
+      findByTestId(root, 'header-help-button').props.onPress();
+    });
+
+    expect(findAllText(root, 'Quick orientation').length).toBeGreaterThan(0);
+
+    act(() => {
+      findPressableByText(root, '←').props.onPress();
+    });
+
+    expect(findAllText(root, 'HarpPilot').length).toBeGreaterThan(0);
+
+    goToTabs(root);
+
+    act(() => {
+      findByTestId(root, 'header-help-button').props.onPress();
+    });
+
+    expect(findAllText(root, 'Quick orientation').length).toBeGreaterThan(0);
+
+    act(() => {
+      findPressableByText(root, '←').props.onPress();
+    });
+
+    expect(findAllText(root, 'Saved Tabs').length).toBeGreaterThan(0);
   });
 
   it('opens Tabs on the library by default until a transposer source exists', async () => {
@@ -521,6 +556,25 @@ describe('App navigation', () => {
       'G',
     ]);
     expect(findDropdownByLabel(root, 'Harmonica key').props.value).toBe(noteToPc('C'));
+  });
+
+  it('shows mode-specific labels and hints on the top-row swap toggle', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+    const swapToggle = findByTestId(root, 'scales-invert-toggle');
+
+    expect(swapToggle.props.accessibilityHint).toBe('What harp do I need?');
+    expect(findAllText(root, 'Need harp?')).toHaveLength(1);
+
+    act(() => {
+      findByTestId(root, 'scales-invert-toggle').props.onPress();
+    });
+
+    const reverseSwapToggle = findByTestId(root, 'scales-invert-toggle');
+    expect(reverseSwapToggle.props.accessibilityHint).toBe('What key can this harp play?');
+    expect(findAllText(root, 'Have harp?')).toHaveLength(1);
   });
 
   it('lets properties switch harmonica and target dropdown spellings to sharps', async () => {
@@ -690,6 +744,30 @@ describe('App navigation', () => {
     expect(findAllText(root, 'Current tab: Amazing Grace').length).toBeGreaterThan(0);
     expect(readTransposerOutputText(root)).toBe('4 -4');
     expect(() => findByTestId(root, 'transposer-output-token:0')).not.toThrow();
+  });
+
+  it('summarizes saved tabs instead of showing raw tab notation in the library', async () => {
+    stubWebInputEnvironment({ coarsePointerMatches: false, maxTouchPoints: 0 });
+    seedSavedTabs([
+      {
+        id: 'heart-of-gold',
+        title: 'Heart of Gold',
+        inputText: '4 6 -5 5 -4 4 3 6 7 -6 6',
+        harmonicaPc: noteToPc('C'),
+        positionNumber: 2,
+        createdAt: '2026-04-19T12:00:00.000Z',
+        updatedAt: '2026-04-19T12:00:00.000Z',
+      },
+    ]);
+
+    const renderer = await renderApp();
+    const root = renderer.root;
+
+    goToTabs(root);
+
+    expect(findAllText(root, 'Heart of Gold')).toHaveLength(1);
+    expect(findAllText(root, '11 notes · C harp · 2nd pos · G · updated Apr 19')).toHaveLength(1);
+    expect(findAllText(root, '4 6 -5 5 -4 4 3 6 7 -6 6')).toHaveLength(0);
   });
 
   it('returns to the transposer when switching away from Tabs after opening a source tab', async () => {

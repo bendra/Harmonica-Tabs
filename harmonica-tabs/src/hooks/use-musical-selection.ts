@@ -81,24 +81,43 @@ export function getPreferredTabOption(group: TabGroup, gAltPreference: '-2' | '3
 
 export type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
 
-export function useMusicalSelection() {
+export type MusicalSelectionInitial = {
+  harmonicaKeyPc?: number;
+  harmonicaKeyLabelStyle?: HarmonicaNoteLabelStyle;
+  targetKeyLabelStyle?: NoteLabelStyle;
+  notation?: OverbendNotation;
+  positionKeyFilter?: PositionKeyFilter;
+  gAltPreference?: '-2' | '3';
+  arpeggioSelection?: 'triads' | 'sevenths' | 'blues' | null;
+  scaleRoot?: NoteName;
+  scaleId?: string;
+};
+
+export function useMusicalSelection(initial: MusicalSelectionInitial = {}) {
+  const initialHarmonicaPc = initial.harmonicaKeyPc ?? DEFAULT_MUSICAL_SELECTION.harmonicaKeyPc;
   const [harmonicaKey, setHarmonicaKey] = useState<HarmonicaKey>(
-    HARMONICA_KEYS.find((key) => key.pc === DEFAULT_MUSICAL_SELECTION.harmonicaKeyPc) ?? HARMONICA_KEYS[0],
+    HARMONICA_KEYS.find((key) => key.pc === initialHarmonicaPc) ?? HARMONICA_KEYS[0],
   );
   const [harmonicaKeyLabelStyle, setHarmonicaKeyLabelStyle] = useState<HarmonicaNoteLabelStyle>(
-    DEFAULT_MUSICAL_SELECTION.harmonicaKeyLabelStyle,
+    initial.harmonicaKeyLabelStyle ?? DEFAULT_MUSICAL_SELECTION.harmonicaKeyLabelStyle,
   );
   const [targetKeyLabelStyle, setTargetKeyLabelStyle] = useState<NoteLabelStyle>(
-    DEFAULT_MUSICAL_SELECTION.targetKeyLabelStyle,
+    initial.targetKeyLabelStyle ?? DEFAULT_MUSICAL_SELECTION.targetKeyLabelStyle,
   );
-  const [notation, setNotation] = useState<OverbendNotation>(DEFAULT_MUSICAL_SELECTION.notation);
+  const [notation, setNotation] = useState<OverbendNotation>(
+    initial.notation ?? DEFAULT_MUSICAL_SELECTION.notation,
+  );
   const [positionKeyFilter, setPositionKeyFilter] = useState<PositionKeyFilter>(
-    DEFAULT_MUSICAL_SELECTION.positionKeyFilter,
+    initial.positionKeyFilter ?? DEFAULT_MUSICAL_SELECTION.positionKeyFilter,
   );
-  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>(DEFAULT_MUSICAL_SELECTION.gAltPreference);
-  const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(null);
-  const [scaleRoot, setScaleRoot] = useState<NoteName>('C');
-  const [scaleId, setScaleId] = useState<string>(SCALE_DEFINITIONS[0].id);
+  const [gAltPreference, setGAltPreference] = useState<'-2' | '3'>(
+    initial.gAltPreference ?? DEFAULT_MUSICAL_SELECTION.gAltPreference,
+  );
+  const [arpeggioSelection, setArpeggioSelection] = useState<'triads' | 'sevenths' | 'blues' | null>(
+    initial.arpeggioSelection ?? null,
+  );
+  const [scaleRoot, setScaleRoot] = useState<NoteName>(initial.scaleRoot ?? 'C');
+  const [scaleId, setScaleId] = useState<string>(initial.scaleId ?? SCALE_DEFINITIONS[0].id);
   const harmonicaKeyPreferFlats = getHarmonicaKeyPreferFlats(harmonicaKeyLabelStyle, harmonicaKey.pc);
   const targetKeyPreferFlats = targetKeyLabelStyle === 'flat';
 

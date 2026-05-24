@@ -8,6 +8,8 @@
 - `harmonica-tabs/src/logic/transposer-follow.ts`: Pure transposer cursor-advance logic driven by detector snapshots.
 - `harmonica-tabs/src/logic/app-storage.ts`: App-owned async string-storage wrapper.
 - `harmonica-tabs/src/logic/saved-tab-library.ts`: Saved-tab record parsing, sorting, title helpers, and persistence service.
+- `harmonica-tabs/src/logic/preferences.ts`: User-preferences persistence (single JSON blob in app storage), with versioned schema and per-field fallback to defaults on malformed/missing data.
+- `harmonica-tabs/src/hooks/use-persisted-preferences.ts`: Loads persisted preferences once on mount and exposes a debounced auto-save effect.
 - `harmonica-tabs/src/logic/harmonica-suggestions.ts`: Pure helper that, given a target pitch class, returns all 12 (harmonica, position) pairs ordered practical-first (1, 2, 3, 5, then the rest). Used by the top-row swap toggle to populate the "Harmonica + Position" suggestion dropdown.
 
 ## Key Decisions (Current)
@@ -47,7 +49,9 @@
 - Native audio sends raw PCM over the unbounded Expo bridge FIFO, which caused detection latency to grow over time. Fixed by producer-side rate limiting in the Swift module (`minSendIntervalMs`, default `50`, live-tunable via a temporary Properties "Send interval ms (debug)" field). Moving YIN fully into Swift (the definitive fix) was evaluated and deliberately deferred since rate limiting met the responsiveness bar. See `docs/ARCHITECTURE.md` flow 5C.
 - Shared YIN single-note detection now has a conservative octave-low correction: when the first accepted CMND lag is a likely subharmonic and a local dip near half that lag only barely missed the YIN threshold, the detector prefers the shorter lag. This fixed recorded high-register wrong-octave frames without changing the native audio bridge.
 - Native iOS `.measurement` capture mode was tried for the high-register octave-low issue and made many notes disappear, so iOS capture is back on `.default`. Further native-audio work should avoid blind capture-mode/threshold tuning; compare against the WebView audio spike in `docs/WEBVIEW_AUDIO_SPIKE.md` or export PCM fixtures for offline analysis.
-- The top row in both `Scales` and `Tabs → Transpose` shows a swap toggle (⇄) on the right edge that flips into target-key-first mode. In that inverted mode the left dropdown lists all 12 target keys (not filtered by `positionKeyFilter`); the right dropdown lists every (harp · position) pair that yields the chosen target, ordered practical-first (1, 2, 3, 5, then the rest). Selecting either dropdown applies the (harp, position) pair via `applyHarpAndTargetSelection`, which auto-expands `positionKeyFilter` to `all` when the chosen position would otherwise be hidden.
+- The app remembers user preferences across launches via a single JSON blob in app storage (`harmonica-tabs:user-preferences:v1`). Persisted: musical selection (harmonica key, target position/key, scale name, arpeggio selection), all Properties screen settings, active workspace (`scales` or `tabs` only — Properties/Help are not persisted), the shared top-row swap-toggle state, and the transposer's source-tab id and octave offset. Explicitly not persisted: listening on/off, the Tabs subview (which is derived from whether a source tab is active). Hydration happens once at startup; the app shows a brief blank screen until the load resolves to avoid flashing default values.
+- The `⇄` top-row swap toggle is now App-level state shared by both the `Scales` and `Tabs → Transpose` top rows (previously each row tracked its own local state). This keeps the chosen orientation persistent across workspaces.
+- The top row in both `Scales` and `Tabs → Transpose` shows a labeled swap toggle (`⇄ Need harp?` / `⇄ Have harp?`) on the right edge that flips into target-key-first mode. In that inverted mode the left dropdown lists all 12 target keys (not filtered by `positionKeyFilter`); the right dropdown lists every (harp · position) pair that yields the chosen target, ordered practical-first (1, 2, 3, 5, then the rest). Selecting either dropdown applies the (harp, position) pair via `applyHarpAndTargetSelection`, which auto-expands `positionKeyFilter` to `all` when the chosen position would otherwise be hidden.
 
 ## UI Summary
 - Top-level workspace switcher exposes `Scales` and `Tabs`.
@@ -74,11 +78,11 @@
 - `Down` and `Up` are disabled based on whether one more octave step from the current display would make any note unavailable.
 - Transposer output now preserves render segments while also tracking playable output tokens with MIDI metadata for tone follow.
 - The transposer output auto-scrolls during tone follow and manual cursor moves, keeping the active token visible while revealing the next tab line before the player reaches it.
-- Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point.
+- Saved tabs open in the `Tabs -> Library` view with `Open`, `Edit`, and `Delete` actions plus a `New Tab` entry point; each row shows a scan-friendly summary line with note count, saved harp/position context when present, and update date instead of raw tab notation.
 - When the editor toggle is on, it also shows a compact summary of the saved context such as `C harp • 2nd / G`.
 - Opening another saved tab for editing while the editor has unsaved changes offers `Cancel`, `Open Anyway`, and `Save Then Open`.
 - The Properties screen also includes display settings for overbend notation, position filtering, harmonica-key spelling (`standard`, `flat`, `sharp`), target-key spelling (`flat`, `sharp`), and tone-follow settings for tolerance, minimum confidence, and repeated-note separation.
-- The Properties screen exposes a `Help` button that opens an in-app `Help` screen (formerly the `Tab Symbols` screen). The Help screen now mirrors the full end-user user guide in `docs/USER_GUIDE.md`, including the tab-symbol reference.
+- The main header exposes a direct `?` Help button, and the Properties screen also exposes a `Help` button. Both open the in-app `Help` screen (formerly the `Tab Symbols` screen), which mirrors the full end-user user guide in `docs/USER_GUIDE.md`, including the tab-symbol reference.
 - Editor input accepts raw typing/paste, and `Clean Input` always strips non-tab content and normalizes whitespace.
 - Properties screen is still separate via gear button.
 
@@ -108,6 +112,8 @@
   - Selection-aware insertion, full-token insertion, and backspace behavior for the editor input.
 - `harmonica-tabs/tests/logic/saved-tab-library.test.ts`
   - Title defaults, malformed-data fallback, web storage persistence, native migration behavior, saved-context persistence, and alphabetical sort order for persisted saved tabs.
+- `harmonica-tabs/tests/logic/preferences.test.ts`
+  - Round-trip serialize/parse, defaults on empty/malformed/wrong-version blobs, per-field fallback for invalid shapes, harmonica-pc vocabulary check, octave-offset clamping, empty-string source-tab-id handling, and load/save round-trip through storage.
 - `harmonica-tabs/tests/ui/navigation.test.tsx`
   - Top-level `Scales` / `Tabs` navigation and Tabs editor/library flows work as expected.
   - The `Scales` workspace scales its main tab sizing across compact, regular, and wide screen sizes, only caps width on wide layouts, and keeps its results list in an inner scroll area.

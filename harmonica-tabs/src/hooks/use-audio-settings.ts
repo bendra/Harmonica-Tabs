@@ -31,19 +31,32 @@ export function parseBoundedInteger(value: string, fallback: number, min: number
   return Math.max(min, Math.min(max, parsed));
 }
 
-export function useAudioSettings() {
-  const [showDebug, setShowDebug] = useState<boolean>(DEFAULT_AUDIO_SETTINGS.showDebug);
-  const [toneToleranceInput, setToneToleranceInput] = useState<string>(DEFAULT_AUDIO_SETTINGS.toneToleranceInput);
+export type AudioSettingsInitial = {
+  showDebug?: boolean;
+  toneToleranceInput?: string;
+  toneFollowMinConfidenceInput?: string;
+  noteSeparationRatioInput?: string;
+  minSendIntervalMsInput?: string;
+  simFrequencyInput?: string;
+};
+
+export function useAudioSettings(initial: AudioSettingsInitial = {}) {
+  const [showDebug, setShowDebug] = useState<boolean>(initial.showDebug ?? DEFAULT_AUDIO_SETTINGS.showDebug);
+  const [toneToleranceInput, setToneToleranceInput] = useState<string>(
+    initial.toneToleranceInput ?? DEFAULT_AUDIO_SETTINGS.toneToleranceInput,
+  );
   const [toneFollowMinConfidenceInput, setToneFollowMinConfidenceInput] = useState<string>(
-    DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput,
+    initial.toneFollowMinConfidenceInput ?? DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput,
   );
   const [noteSeparationRatioInput, setNoteSeparationRatioInput] = useState<string>(
-    DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput,
+    initial.noteSeparationRatioInput ?? DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput,
   );
   const [minSendIntervalMsInput, setMinSendIntervalMsInput] = useState<string>(
-    DEFAULT_AUDIO_SETTINGS.minSendIntervalMsInput,
+    initial.minSendIntervalMsInput ?? DEFAULT_AUDIO_SETTINGS.minSendIntervalMsInput,
   );
-  const [simFrequency, setSimFrequency] = useState<string>(DEFAULT_AUDIO_SETTINGS.simFrequencyInput);
+  const [simFrequency, setSimFrequency] = useState<string>(
+    initial.simFrequencyInput ?? DEFAULT_AUDIO_SETTINGS.simFrequencyInput,
+  );
 
   const toneToleranceCents = useMemo(
     () =>

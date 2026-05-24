@@ -2,7 +2,7 @@
 
 HarpPilot helps you visualize playable scales and chords on a standard 10‑hole diatonic (Richter) harmonica, transpose tabs between keys, and play along while the app listens through your microphone.
 
-This guide explains everything you need to use the app day‑to‑day. The same content is available inside the app from the **Properties** screen via the **Help** button.
+This guide explains everything you need to use the app day‑to‑day. The same content is available inside the app from the **?** button in the main header or from the **Properties** screen via **Help**.
 
 ---
 
@@ -13,7 +13,7 @@ The app has two main workspaces, switched via the **Scales / Tabs** buttons at t
 - **Scales** — pick a harmonica key, a target key/position, and a scale name; HarpPilot shows you the playable tabs and (optionally) related arpeggios.
 - **Tabs** — manage a personal library of saved tabs, edit tab text, and play tabs back with octave‑shift controls and tone‑follow.
 
-A **gear icon** in the top right of the screen opens **Properties**, where you adjust display preferences and detection settings. From Properties, the **Help** button opens this guide.
+A **?** button in the top right opens this guide. The **gear icon** next to it opens **Properties**, where you adjust display preferences and detection settings.
 
 ---
 

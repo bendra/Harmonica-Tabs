@@ -9,12 +9,14 @@ SafeAreaView (styles.safeArea)
 └─ ScrollView (styles.container)
    ├─ Header Row (styles.headerRow)
    │  ├─ Screen Title (styles.title)
-   │  └─ Screen Toggle Button (styles.gearButton + styles.gearButtonText)
+   │  └─ Header Actions (styles.headerActions)
+   │     ├─ Help Button (`testID="header-help-button"`, styles.gearButton + styles.gearButtonText, main screens only)
+   │     └─ Screen Toggle Button (`testID="header-settings-button"`, styles.gearButton + styles.gearButtonText)
    └─ Screen Body (conditional)
       ├─ Scales Workspace (`screen === 'scales'`)
       │  ├─ Responsive Shell (`testID="scales-workspace-shell"`, wide screens may cap width)
       │  │  └─ Scales Content (`styles.scalesWorkspace`)
-      │  ├─ Fixed Top Row (styles.topRow) — swap toggle (`testID="scales-invert-toggle"`, `styles.topRowSwapToggle`, "⇄", right edge) flips the two dropdowns into target-key-first mode
+      │  ├─ Fixed Top Row (styles.topRow) — swap toggle (`testID="scales-invert-toggle"`, `styles.topRowSwapToggle`, "⇄ Need harp?" / "⇄ Have harp?", right edge) flips the two dropdowns into target-key-first mode (shared App-level state with the `Tabs → Transpose` swap toggle; persisted across launches)
       │  │  ├─ Default: Harmonica Key + Target Position/Key (styles.topRowKey + styles.dropdown*)
       │  │  └─ Inverted: Target Key (all 12) + Harmonica + Position (practical-first list)
       │  ├─ Listen Card (styles.listenCard)
@@ -31,7 +33,7 @@ SafeAreaView (styles.safeArea)
       │        └─ Arpeggio Section (styles.arpeggioSection, conditional)
       ├─ Tabs Workspace (`screen === 'tabs'`)
       │  ├─ Transpose View (`tabsSubview === 'transpose'`)
-      │  │  ├─ Fixed Top Row (styles.topRow) — swap toggle (`testID="tabs-invert-toggle"`, `styles.topRowSwapToggle`, "⇄", right edge) flips the two dropdowns into target-key-first mode
+      │  │  ├─ Fixed Top Row (styles.topRow) — swap toggle (`testID="tabs-invert-toggle"`, `styles.topRowSwapToggle`, "⇄ Need harp?" / "⇄ Have harp?", right edge) flips the two dropdowns into target-key-first mode (shared App-level state with the `Scales` swap toggle; persisted across launches)
       │  │  │  ├─ Default: Harmonica Key + Target Position/Key (styles.topRowKey + styles.dropdown*)
       │  │  │  └─ Inverted: Target Key (all 12) + Harmonica + Position (practical-first list)
       │  │  └─ Transposer Card (styles.transposerCard)
@@ -55,8 +57,7 @@ SafeAreaView (styles.safeArea)
       │  │     └─ Saved Tab Scroll Area (styles.libraryListArea + styles.savedTabsList)
       │  │        └─ Saved Tab Rows (styles.savedTabRow)
       │  │           ├─ Row Header (styles.savedTabRowHeader)
-      │  │           ├─ Preview (styles.savedTabPreview)
-      │  │           ├─ Meta (styles.savedTabMeta) — harp/position context (when saved) + update timestamp
+      │  │           ├─ Summary (styles.savedTabSummary) — note count + saved harp/position context (when saved) + update timestamp
       │  │           └─ Row Actions (styles.savedTabActions + styles.savedTabActionButton)
       │  │              └─ Includes `Open`, `Edit`, and `Delete`
       │  └─ Editor Overlay (`screen === 'tabs'` + editor visible, modal)
@@ -106,7 +107,7 @@ SafeAreaView (styles.safeArea)
 
 ## Naming Reference
 
-- **Header / Screen Nav**: `headerRow`, `title`, `gearButton`, `gearButtonText`
+- **Header / Screen Nav**: `headerRow`, `title`, `headerActions`, `gearButton`, `gearButtonText`
 - **Top Row (Main)**: `topRow`, `topRowKey`, `topRowSwapToggle`, `topRowSwapToggleText`, `topRowSwapToggleActive`
 - **Workspace Nav**: `workspaceNavRow`, `workspaceNavButton`, `workspaceNavText`
 - **Page 1 Header**: `pageOneHeader`, `topRowToggle`, `scalePickerColumn`
@@ -122,5 +123,5 @@ SafeAreaView (styles.safeArea)
 - **Arpeggios**: `arpeggioSection`, `arpeggioBlock`, `arpeggioRow`, `arpeggioLabel`, `arpeggioTabList`, `arpeggioTabChip`
 - **Tab Transposer**: `transposerCard`, `transposerFollowControls`, `transposerSavedTabsStatus`, `transposerCurrentTab`, `transposerLibraryRow`, `transposerActionButton`, `transposerDirectionRow`, `transposerDirectionOption`, `transposerOutputBox`, `transposerOutputToken`, `transposerOutputTokenActive`, `transposerOutputTokenMatched`, `transposerWarnings`
 - **Tab Editor**: `editorDismissButton`, `editorSaveAsButton`, `editorTitleInput`, `editorContextCheckboxRow`, `editorContextCheckbox`, `editorContextSelectors`, `editorPrimaryRow`, `editorPrimaryActionButton`, `editorSecondaryButton`, `transposerInput`
-- **Saved Tab Library**: `savedTabsStatus`, `libraryListArea`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabPreview`, `savedTabMeta`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
+- **Saved Tab Library**: `savedTabsStatus`, `libraryListArea`, `savedTabsList`, `savedTabRow`, `savedTabRowHeader`, `savedTabTitle`, `savedTabActiveBadge`, `savedTabSummary`, `savedTabActions`, `savedTabActionButton`, `libraryNewButton`
 - **Dialogs**: `dialogOverlay`, `dialogCard`, `dialogTitle`, `dialogInput`, `dialogActionRow`, `dialogActionColumn`, `dialogButton`
