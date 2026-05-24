@@ -69,6 +69,20 @@ This is the fastest way to answer "what tabs do I need to play this scale on thi
 
 ---
 
+## Choosing a harmonica for a song's key
+
+The default top‑row workflow assumes you start with a harp in your hand and want to know what key it plays in. Sometimes you have the opposite problem: a song is in a particular key and you don't yet know which harmonica to grab. The small **⇄** button on the right edge of the top row flips the two dropdowns to support that case.
+
+- Tap **⇄** once to enter target‑key‑first mode. The first dropdown becomes **Target Key** (all 12 keys, not narrowed by your Positions filter) and the second becomes **Harmonica + Position**.
+- The Harmonica + Position list is ordered **practical first**: 1st, 2nd, 3rd, and 5th positions appear at the top (they cover most playing styles — major, blues, minor‑blues, natural minor), followed by 4th and the rest.
+- Pick from **Target Key** to keep your current harp and adjust the position to match the new key. Pick from **Harmonica + Position** to switch the harp (and its position) to play the current target key.
+- If the chosen position isn't visible in your current **Positions** filter (see Properties), HarpPilot automatically expands the filter to **All** so the new selection is reachable.
+- Tap **⇄** again to return to the default harmonica‑first view.
+
+The same swap toggle is available in **Tabs → Transpose**, with the same behavior.
+
+---
+
 ## Tabs workspace
 
 The Tabs workspace is for saving, organizing, and playing along with your own tabs. It has two views:

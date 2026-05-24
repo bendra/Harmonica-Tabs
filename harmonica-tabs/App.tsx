@@ -31,6 +31,7 @@ import {
   getTargetRootPcForPosition,
 } from './src/hooks/use-musical-selection';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
+import { getHarmonicaSuggestions } from './src/logic/harmonica-suggestions';
 import { DEFAULT_AUDIO_SETTINGS } from './src/config/default-settings';
 import {
   formatSavedTabPreview,
@@ -356,6 +357,8 @@ type ScalesWorkspaceProps = {
   scaleRoot: NoteName;
   scaleKeyDropdownOptions: DropdownOption<NoteName>[];
   onScaleRootChange: (root: NoteName) => void;
+  onApplyHarpAndTarget: (harmonicaPc: number, positionNumber: number) => void;
+  harmonicaKeyLabelStyle: HarmonicaNoteLabelStyle;
   scaleId: string;
   onScaleIdChange: (value: string) => void;
   scale: { rootPc: number; scaleId: string };
@@ -385,6 +388,9 @@ type TabsTransposeViewProps = {
   scaleRoot: NoteName;
   scaleKeyDropdownOptions: DropdownOption<NoteName>[];
   onScaleRootChange: (root: NoteName) => void;
+  onApplyHarpAndTarget: (harmonicaPc: number, positionNumber: number) => void;
+  harmonicaKeyLabelStyle: HarmonicaNoteLabelStyle;
+  targetKeyPreferFlats: boolean;
   transposerSourceTabId: string | null;
   onTransposerSourceTabChange: (value: string | null) => void;
   transposerOctaveOffset: number;
@@ -531,6 +537,134 @@ function formatNotes(pcs: number[], rootPc: number, preferFlats: boolean) {
   ));
 }
 
+type HarmonicaPickerTopRowProps = {
+  harmonicaKey: HarmonicaKey;
+  harmonicaKeyDropdownOptions: DropdownOption<number>[];
+  onHarmonicaKeyChange: (key: HarmonicaKey) => void;
+  scaleRoot: NoteName;
+  scaleKeyDropdownOptions: DropdownOption<NoteName>[];
+  onScaleRootChange: (root: NoteName) => void;
+  onApplyHarpAndTarget: (harmonicaPc: number, positionNumber: number) => void;
+  harmonicaKeyLabelStyle: HarmonicaNoteLabelStyle;
+  targetKeyPreferFlats: boolean;
+  dropdownSize?: ResponsiveControlSize;
+  extraRowStyle?: any;
+  testIdPrefix: 'scales' | 'tabs';
+};
+
+// Top row for the Scales and Tabs -> Transpose workspaces. Default view is
+// Harmonica + Target Position/Key dropdowns. The ⇄ swap toggle on the right
+// flips to a Target-Key-first view that lists practical (harp, position)
+// pairs as the second dropdown — useful when you know the song's key and
+// want to pick the right harmonica.
+function HarmonicaPickerTopRow(props: HarmonicaPickerTopRowProps) {
+  const [inverted, setInverted] = useState(false);
+  const rowStyle = props.extraRowStyle ? [styles.topRow, props.extraRowStyle] : styles.topRow;
+
+  if (inverted) {
+    const targetPc = noteToPc(props.scaleRoot);
+    const suggestions = getHarmonicaSuggestions(targetPc);
+    const targetKeyOptions: DropdownOption<NoteName>[] = Array.from({ length: 12 }, (_, pc) => {
+      const note = pcToNote(pc, props.targetKeyPreferFlats);
+      return { label: note, value: note };
+    });
+    const suggestionOptions: DropdownOption<string>[] = suggestions.map(
+      ({ harmonicaPc, positionNumber }) => {
+        const harpLabel = formatHarmonicaKeyLabel(harmonicaPc, props.harmonicaKeyLabelStyle);
+        return {
+          label: `${harpLabel} · ${formatOrdinal(positionNumber)}`,
+          value: `${harmonicaPc}:${positionNumber}`,
+        };
+      },
+    );
+    const currentPositionNumber = getPositionNumberForTargetRootPc(props.harmonicaKey.pc, targetPc);
+    const currentSuggestionValue = `${props.harmonicaKey.pc}:${currentPositionNumber}`;
+
+    return (
+      <View style={rowStyle}>
+        <View style={styles.topRowKey}>
+          <Dropdown
+            label="Target Key"
+            value={props.scaleRoot}
+            size={props.dropdownSize}
+            options={targetKeyOptions}
+            onChange={(nextRoot) => {
+              const nextTargetPc = noteToPc(nextRoot);
+              const nextPosition = getPositionNumberForTargetRootPc(
+                props.harmonicaKey.pc,
+                nextTargetPc,
+              );
+              props.onApplyHarpAndTarget(props.harmonicaKey.pc, nextPosition);
+            }}
+          />
+        </View>
+        <View style={styles.topRowKey}>
+          <Dropdown
+            label="Harmonica + Position"
+            value={currentSuggestionValue}
+            size={props.dropdownSize}
+            options={suggestionOptions}
+            onChange={(encoded) => {
+              const [harpStr, positionStr] = encoded.split(':');
+              props.onApplyHarpAndTarget(Number(harpStr), Number(positionStr));
+            }}
+          />
+        </View>
+        <Pressable
+          testID={`${props.testIdPrefix}-invert-toggle`}
+          onPress={() => setInverted(false)}
+          style={[styles.topRowSwapToggle, styles.topRowSwapToggleActive]}
+          accessibilityLabel="Switch back to harmonica-first view"
+        >
+          <Text style={styles.topRowSwapToggleText}>⇄</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={rowStyle}>
+      <View style={styles.topRowKey}>
+        <Dropdown
+          label="Harmonica key"
+          value={props.harmonicaKey.pc}
+          size={props.dropdownSize}
+          options={props.harmonicaKeyDropdownOptions}
+          onChange={(pc) => {
+            const nextKey = HARMONICA_KEYS.find((item) => item.pc === pc);
+            if (nextKey) props.onHarmonicaKeyChange(nextKey);
+          }}
+        />
+      </View>
+      <View style={styles.topRowKey}>
+        <Dropdown
+          label="Target Position/Key"
+          value={props.scaleRoot}
+          size={props.dropdownSize}
+          options={props.scaleKeyDropdownOptions}
+          onChange={props.onScaleRootChange}
+        />
+      </View>
+      <Pressable
+        testID={`${props.testIdPrefix}-invert-toggle`}
+        onPress={() => setInverted(true)}
+        style={styles.topRowSwapToggle}
+        accessibilityLabel="Switch to target-key-first view"
+      >
+        <Text style={styles.topRowSwapToggleText}>⇄</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function formatHarmonicaKeyLabel(harmonicaPc: number, style: HarmonicaNoteLabelStyle): string {
+  if (style === 'standard') {
+    const match = HARMONICA_KEYS.find((key) => key.pc === harmonicaPc);
+    if (match) return match.label;
+  }
+  return pcToNote(harmonicaPc, style === 'flat');
+}
+
 const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspaceProps) {
   const {
     isListening,
@@ -675,29 +809,20 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
   return (
     <View testID="scales-workspace-shell" style={scalesWorkspaceShellStyle}>
       <View testID="scales-workspace" style={[styles.scalesWorkspace, scalesWorkspaceStyle]}>
-        <View style={[styles.topRow, scalesTopRowStyle]}>
-          <View style={styles.topRowKey}>
-            <Dropdown
-              label="Harmonica key"
-              value={props.harmonicaKey.pc}
-              size={props.scalesLayout.controlSize}
-              options={props.harmonicaKeyDropdownOptions}
-              onChange={(pc) => {
-                const nextKey = HARMONICA_KEYS.find((item) => item.pc === pc);
-                if (nextKey) props.onHarmonicaKeyChange(nextKey);
-              }}
-            />
-          </View>
-          <View style={styles.topRowKey}>
-            <Dropdown
-              label="Target Position/Key"
-              value={props.scaleRoot}
-              size={props.scalesLayout.controlSize}
-              options={props.scaleKeyDropdownOptions}
-              onChange={props.onScaleRootChange}
-            />
-          </View>
-        </View>
+        <HarmonicaPickerTopRow
+          harmonicaKey={props.harmonicaKey}
+          harmonicaKeyDropdownOptions={props.harmonicaKeyDropdownOptions}
+          onHarmonicaKeyChange={props.onHarmonicaKeyChange}
+          scaleRoot={props.scaleRoot}
+          scaleKeyDropdownOptions={props.scaleKeyDropdownOptions}
+          onScaleRootChange={props.onScaleRootChange}
+          onApplyHarpAndTarget={props.onApplyHarpAndTarget}
+          harmonicaKeyLabelStyle={props.harmonicaKeyLabelStyle}
+          targetKeyPreferFlats={props.targetKeyPreferFlats}
+          dropdownSize={props.scalesLayout.controlSize}
+          extraRowStyle={scalesTopRowStyle}
+          testIdPrefix="scales"
+        />
 
         <View style={[styles.listenCard, scalesListenCardStyle]}>
           <View style={[styles.listenRow, scalesListenRowStyle]}>
@@ -1031,27 +1156,18 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
 
   return (
     <>
-      <View style={styles.topRow}>
-        <View style={styles.topRowKey}>
-          <Dropdown
-            label="Harmonica key"
-            value={props.harmonicaKey.pc}
-            options={props.harmonicaKeyDropdownOptions}
-            onChange={(pc) => {
-              const nextKey = HARMONICA_KEYS.find((item) => item.pc === pc);
-              if (nextKey) props.onHarmonicaKeyChange(nextKey);
-            }}
-          />
-        </View>
-        <View style={styles.topRowKey}>
-          <Dropdown
-            label="Target Position/Key"
-            value={props.scaleRoot}
-            options={props.scaleKeyDropdownOptions}
-            onChange={props.onScaleRootChange}
-          />
-        </View>
-      </View>
+      <HarmonicaPickerTopRow
+        harmonicaKey={props.harmonicaKey}
+        harmonicaKeyDropdownOptions={props.harmonicaKeyDropdownOptions}
+        onHarmonicaKeyChange={props.onHarmonicaKeyChange}
+        scaleRoot={props.scaleRoot}
+        scaleKeyDropdownOptions={props.scaleKeyDropdownOptions}
+        onScaleRootChange={props.onScaleRootChange}
+        onApplyHarpAndTarget={props.onApplyHarpAndTarget}
+        harmonicaKeyLabelStyle={props.harmonicaKeyLabelStyle}
+        targetKeyPreferFlats={props.targetKeyPreferFlats}
+        testIdPrefix="tabs"
+      />
       <View style={[styles.transposerCard, styles.transposerCardGrow]}>
         <View style={styles.transposerFollowControls}>
           <Pressable
@@ -1440,6 +1556,33 @@ function HelpScreen() {
         <HelpParagraph>
           Tap Listen to start mic detection. A caret moves between tabs to show your detected pitch. If mic access is
           unavailable, HarpPilot falls back to a simulated input so the UI still works.
+        </HelpParagraph>
+      </HelpSection>
+
+      <HelpSection title="Choosing a harmonica for a song's key">
+        <HelpParagraph>
+          The default top-row workflow assumes you start with a harp and want to know what key it plays in. If
+          instead you know the song's key and need to pick a harp, tap the ⇄ button on the right edge of the
+          top row to flip the two dropdowns.
+        </HelpParagraph>
+        <HelpBullet>
+          The first dropdown becomes <Text style={styles.helpEmphasis}>Target Key</Text> (all 12 keys, not narrowed
+          by the Positions filter) and the second becomes <Text style={styles.helpEmphasis}>Harmonica + Position</Text>.
+        </HelpBullet>
+        <HelpBullet>
+          The Harmonica + Position list is ordered practical-first: 1st, 2nd, 3rd, and 5th come at the top (major,
+          blues, minor-blues, natural minor), then 4th and the rest.
+        </HelpBullet>
+        <HelpBullet>
+          Picking a Target Key keeps your current harp and adjusts the position to match. Picking a Harmonica +
+          Position switches the harp (and its position) to play the current target.
+        </HelpBullet>
+        <HelpBullet>
+          If the new position isn't visible in your current Positions filter, HarpPilot expands the filter to All
+          so the selection is reachable.
+        </HelpBullet>
+        <HelpParagraph>
+          Tap ⇄ again to return to the default harmonica-first view. The same toggle is available in Tabs → Transpose.
         </HelpParagraph>
       </HelpSection>
 
@@ -2320,6 +2463,9 @@ export default function App() {
                   setScaleRoot(nextRoot);
                   setTransposerOctaveOffset(0);
                 }}
+                onApplyHarpAndTarget={applyHarpAndTargetSelection}
+                harmonicaKeyLabelStyle={harmonicaKeyLabelStyle}
+                targetKeyPreferFlats={targetKeyPreferFlats}
                 transposerSourceTabId={transposerSourceTabId}
                 onTransposerSourceTabChange={setTransposerSourceTabId}
                 transposerOctaveOffset={transposerOctaveOffset}
@@ -2356,6 +2502,8 @@ export default function App() {
               setScaleRoot(nextRoot);
               setTransposerOctaveOffset(0);
             }}
+            onApplyHarpAndTarget={applyHarpAndTargetSelection}
+            harmonicaKeyLabelStyle={harmonicaKeyLabelStyle}
             scaleId={scaleId}
             onScaleIdChange={setScaleId}
             scale={scale}
@@ -3763,6 +3911,26 @@ const styles = StyleSheet.create({
     color: '#fda4af',
     fontSize: 12,
     fontWeight: '600',
+  },
+  topRowSwapToggle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  topRowSwapToggleText: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  topRowSwapToggleActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: '#0b3b4a',
   },
   dialogActionRow: {
     flexDirection: 'row',

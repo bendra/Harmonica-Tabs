@@ -14,10 +14,9 @@ SafeAreaView (styles.safeArea)
       ├─ Scales Workspace (`screen === 'scales'`)
       │  ├─ Responsive Shell (`testID="scales-workspace-shell"`, wide screens may cap width)
       │  │  └─ Scales Content (`styles.scalesWorkspace`)
-      │  ├─ Fixed Top Row
-      │  │  └─ Container (styles.topRow)
-      │  │     ├─ Harmonica Key (styles.topRowKey + styles.dropdown*)
-      │  │     └─ Target Position/Key (styles.topRowKey + styles.dropdown*)
+      │  ├─ Fixed Top Row (styles.topRow) — swap toggle (`testID="scales-invert-toggle"`, `styles.topRowSwapToggle`, "⇄", right edge) flips the two dropdowns into target-key-first mode
+      │  │  ├─ Default: Harmonica Key + Target Position/Key (styles.topRowKey + styles.dropdown*)
+      │  │  └─ Inverted: Target Key (all 12) + Harmonica + Position (practical-first list)
       │  ├─ Listen Card (styles.listenCard)
       │  │  ├─ Listen Row (styles.listenRow) — contains Listen Button only
       │  │  ├─ Status Line (styles.listenValue) — frequency/note data when on; prompt when off
@@ -32,9 +31,9 @@ SafeAreaView (styles.safeArea)
       │        └─ Arpeggio Section (styles.arpeggioSection, conditional)
       ├─ Tabs Workspace (`screen === 'tabs'`)
       │  ├─ Transpose View (`tabsSubview === 'transpose'`)
-      │  │  ├─ Fixed Top Row (styles.topRow)
-      │  │  │  ├─ Harmonica Key (styles.topRowKey + styles.dropdown*)
-      │  │  │  └─ Target Position/Key (styles.topRowKey + styles.dropdown*)
+      │  │  ├─ Fixed Top Row (styles.topRow) — swap toggle (`testID="tabs-invert-toggle"`, `styles.topRowSwapToggle`, "⇄", right edge) flips the two dropdowns into target-key-first mode
+      │  │  │  ├─ Default: Harmonica Key + Target Position/Key (styles.topRowKey + styles.dropdown*)
+      │  │  │  └─ Inverted: Target Key (all 12) + Harmonica + Position (practical-first list)
       │  │  └─ Transposer Card (styles.transposerCard)
       │  │     ├─ Tone Follow Controls (styles.transposerFollowControls)
       │  │     │  ├─ Shared Listen Button (styles.listenButton)
@@ -108,7 +107,7 @@ SafeAreaView (styles.safeArea)
 ## Naming Reference
 
 - **Header / Screen Nav**: `headerRow`, `title`, `gearButton`, `gearButtonText`
-- **Top Row (Main)**: `topRow`, `topRowKey`
+- **Top Row (Main)**: `topRow`, `topRowKey`, `topRowSwapToggle`, `topRowSwapToggleText`, `topRowSwapToggleActive`
 - **Workspace Nav**: `workspaceNavRow`, `workspaceNavButton`, `workspaceNavText`
 - **Page 1 Header**: `pageOneHeader`, `topRowToggle`, `scalePickerColumn`
 - **Dropdowns**: `dropdown`, `dropdownLabel`, `dropdownTrigger`, `dropdownItem`

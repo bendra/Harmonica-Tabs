@@ -8,6 +8,7 @@
 - `harmonica-tabs/src/logic/transposer-follow.ts`: Pure transposer cursor-advance logic driven by detector snapshots.
 - `harmonica-tabs/src/logic/app-storage.ts`: App-owned async string-storage wrapper.
 - `harmonica-tabs/src/logic/saved-tab-library.ts`: Saved-tab record parsing, sorting, title helpers, and persistence service.
+- `harmonica-tabs/src/logic/harmonica-suggestions.ts`: Pure helper that, given a target pitch class, returns all 12 (harmonica, position) pairs ordered practical-first (1, 2, 3, 5, then the rest). Used by the top-row swap toggle to populate the "Harmonica + Position" suggestion dropdown.
 
 ## Key Decisions (Current)
 - Standard 10-hole Richter tuning only.
@@ -46,6 +47,7 @@
 - Native audio sends raw PCM over the unbounded Expo bridge FIFO, which caused detection latency to grow over time. Fixed by producer-side rate limiting in the Swift module (`minSendIntervalMs`, default `50`, live-tunable via a temporary Properties "Send interval ms (debug)" field). Moving YIN fully into Swift (the definitive fix) was evaluated and deliberately deferred since rate limiting met the responsiveness bar. See `docs/ARCHITECTURE.md` flow 5C.
 - Shared YIN single-note detection now has a conservative octave-low correction: when the first accepted CMND lag is a likely subharmonic and a local dip near half that lag only barely missed the YIN threshold, the detector prefers the shorter lag. This fixed recorded high-register wrong-octave frames without changing the native audio bridge.
 - Native iOS `.measurement` capture mode was tried for the high-register octave-low issue and made many notes disappear, so iOS capture is back on `.default`. Further native-audio work should avoid blind capture-mode/threshold tuning; compare against the WebView audio spike in `docs/WEBVIEW_AUDIO_SPIKE.md` or export PCM fixtures for offline analysis.
+- The top row in both `Scales` and `Tabs → Transpose` shows a swap toggle (⇄) on the right edge that flips into target-key-first mode. In that inverted mode the left dropdown lists all 12 target keys (not filtered by `positionKeyFilter`); the right dropdown lists every (harp · position) pair that yields the chosen target, ordered practical-first (1, 2, 3, 5, then the rest). Selecting either dropdown applies the (harp, position) pair via `applyHarpAndTargetSelection`, which auto-expands `positionKeyFilter` to `all` when the chosen position would otherwise be hidden.
 
 ## UI Summary
 - Top-level workspace switcher exposes `Scales` and `Tabs`.
