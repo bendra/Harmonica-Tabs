@@ -133,6 +133,27 @@ When you open a saved tab whose stored harp/position doesn't match your current 
 2. **Keep current harp, switch position to preserve the saved target key** — useful if you've changed harps but want to hear the same song.
 3. **Keep current selection** — just loads the tab without changing anything.
 
+### Importing tabs from HarpTabs.com
+
+HarpTabs.com is a large community library of harmonica tabs. Most tabs there are key‑agnostic: the numbers describe a shape on any 10‑hole diatonic harp, and the harp key you choose determines the sounding key.
+
+To copy a tab into HarpPilot:
+
+- Find the song on HarpTabs.com and choose a diatonic tab. Tabs marked `§` are diatonic.
+- Copy just the tab body — usually the lines of numbers and lyrics. Skip the song header, ratings, key, difficulty, and footnotes when you can.
+- In HarpPilot, go to **Tabs → Library**, tap **New Tab**, add a title, and paste the copied text into the editor.
+- Tap **Clean Input** to strip non‑tab content and normalize spacing, then tap **Save**.
+
+The saved tab can now be opened in the Transposer. If you did not save key/position context, HarpPilot treats the source as a neutral tab shape: the numbers mean the same thing on any harp.
+
+To play it:
+
+- Pick up the harp that fits the song key or the band you are playing with.
+- In the Transposer top row, set **Harmonica Key** to that harp and **Target Position/Key** to the position you want. 1st position plays in the harp's own key; 2nd position plays a fifth above, the classic blues cross‑harp sound.
+- Use **Down / Up** if the melody sits too high or low on your harp.
+
+Tip: many shared tabs are written with a C harp in mind. If the tab feels natural as written, leave it in 1st position and simply set **Harmonica Key** to the harp in your hand.
+
 ---
 
 ## Properties

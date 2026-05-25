@@ -1684,6 +1684,35 @@ function HelpScreen() {
         </HelpParagraph>
       </HelpSection>
 
+      <HelpSection title="Importing tabs from HarpTabs.com">
+        <HelpParagraph>
+          HarpTabs.com is a large community library. Most tabs there are key-agnostic: the numbers describe a shape
+          on any 10-hole diatonic harp, and the harp key you choose determines the sounding key.
+        </HelpParagraph>
+        <HelpBullet>
+          Find a song and choose a diatonic tab. Tabs marked § are diatonic.
+        </HelpBullet>
+        <HelpBullet>
+          Copy just the tab body: usually the lines of numbers and lyrics. Skip the song header, ratings, key,
+          difficulty, and footnotes when you can.
+        </HelpBullet>
+        <HelpBullet>
+          In HarpPilot, go to Tabs → Library, tap New Tab, add a title, paste the text, then use Clean Input before Save.
+        </HelpBullet>
+        <HelpBullet>
+          Open the saved tab in the Transposer. If you did not save key/position context, HarpPilot treats it as a
+          neutral tab shape that can be played on any harp.
+        </HelpBullet>
+        <HelpBullet>
+          Set Harmonica Key to the harp in your hand and Target Position/Key to the position you want. Use Down / Up
+          if the melody sits too high or low.
+        </HelpBullet>
+        <HelpParagraph>
+          Tip: many shared tabs are written with a C harp in mind. If the tab feels natural as written, leave it in 1st
+          position and simply set Harmonica Key to the harp in your hand.
+        </HelpParagraph>
+      </HelpSection>
+
       <HelpSection title="Properties">
         <HelpBullet>
           <Text style={styles.helpEmphasis}>Overbend Symbol</Text>
