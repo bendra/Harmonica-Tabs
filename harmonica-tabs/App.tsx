@@ -1697,7 +1697,7 @@ function HelpScreen() {
           difficulty, and footnotes when you can.
         </HelpBullet>
         <HelpBullet>
-          In HarpPilot, go to Tabs → Library, tap New Tab, add a title, paste the text, then use Clean Input before Save.
+          In HarpPilot, go to Tabs → Library, tap New Tab, add a title, paste the text, then use Clean Input (or not if you want the lyrics) before Save.
         </HelpBullet>
         <HelpBullet>
           Open the saved tab in the Transposer. If you did not save key/position context, HarpPilot treats it as a
