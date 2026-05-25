@@ -180,8 +180,9 @@ export function parsePreferences(rawValue: string | null): PersistedPreferences 
         DEFAULT_PREFERENCES.musicalSelection.notation,
       ),
       positionKeyFilter: pickEnum(
-        musical.positionKeyFilter,
-        ['1-2-3', '1-2-3-5', 'all'] as const,
+        // Legacy `'1-2-3-5'` (pre-4th-position) migrates to the new `'1-2-3-4-5'` value.
+        musical.positionKeyFilter === '1-2-3-5' ? '1-2-3-4-5' : musical.positionKeyFilter,
+        ['1-2-3', '1-2-3-4-5', 'all'] as const,
         DEFAULT_PREFERENCES.musicalSelection.positionKeyFilter,
       ),
       gAltPreference: pickEnum(

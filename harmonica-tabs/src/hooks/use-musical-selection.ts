@@ -79,7 +79,7 @@ export function getPreferredTabOption(group: TabGroup, gAltPreference: '-2' | '3
   return group.options[0];
 }
 
-export type PositionKeyFilter = '1-2-3' | '1-2-3-5' | 'all';
+export type PositionKeyFilter = '1-2-3' | '1-2-3-4-5' | 'all';
 
 export type MusicalSelectionInitial = {
   harmonicaKeyPc?: number;
@@ -160,7 +160,7 @@ export function useMusicalSelection(initial: MusicalSelectionInitial = {}) {
     if (positionKeyFilter === '1-2-3') {
       return scaleKeyOptions.filter((option) => option.position <= 3);
     }
-    return scaleKeyOptions.filter((option) => option.position <= 3 || option.position === 5);
+    return scaleKeyOptions.filter((option) => option.position <= 5);
   }, [scaleKeyOptions, positionKeyFilter]);
 
   const scaleKeyDropdownOptions = useMemo<DropdownOption<NoteName>[]>(

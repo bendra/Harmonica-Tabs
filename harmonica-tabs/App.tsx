@@ -1567,6 +1567,9 @@ function HelpScreen() {
         HarpPilot helps you visualize playable scales and chords on a 10-hole diatonic harmonica,
         transpose tabs between keys, and play along while the app listens through your microphone.
       </HelpParagraph>
+      <HelpParagraph>
+        HarpPilot is designed for standard 10-hole Richter-tuned diatonic harmonica.
+      </HelpParagraph>
 
       <HelpSection title="Quick orientation">
         <HelpParagraph>
@@ -1718,6 +1721,10 @@ function HelpScreen() {
         </HelpBullet>
         <HelpBullet>
           If repeated notes don't advance the cursor, articulate the attack more or raise Note Separation.
+        </HelpBullet>
+        <HelpBullet>
+          For minor key songs, try 2nd position with the Dorian scale — it's the most natural-sounding minor on a
+          diatonic harp and requires fewer bends than Natural Minor.
         </HelpBullet>
       </HelpSection>
     </View>
@@ -2419,7 +2426,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
                   value={positionKeyFilter}
                   options={[
                     { label: '1st, 2nd, 3rd', value: '1-2-3' },
-                    { label: '1st, 2nd, 3rd, 5th', value: '1-2-3-5' },
+                    { label: '1st, 2nd, 3rd, 4th, 5th', value: '1-2-3-4-5' },
                     { label: 'All', value: 'all' },
                   ]}
                   onChange={(value) => setPositionKeyFilter(value as PositionKeyFilter)}
