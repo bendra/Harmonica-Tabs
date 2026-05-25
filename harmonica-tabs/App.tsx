@@ -1675,7 +1675,7 @@ function HelpScreen() {
         </HelpBullet>
         <HelpBullet>
           <Text style={styles.helpEmphasis}>Editor</Text>
-          {' — paste or type tabs; use Clean Input to strip non-tab content. Save overwrites; Save As always creates a new record.'}
+          {' — paste or type tabs; if you like you can use Clean Input to strip non-tab contenti or leave the lyrics if you prefer. Save overwrites; Save As always creates a new record.'}
         </HelpBullet>
         <HelpParagraph>
           Tone follow is automatically on while listening is on. The cursor advances as you play, wrapping back to the
@@ -1742,7 +1742,7 @@ function HelpScreen() {
 
       <HelpSection title="Tips">
         <HelpBullet>
-          Major Pentatonic and Minor Pentatonic are great starting points for soloing — they have no bends in most
+          Major Pentatonic and Minor Pentatonic are great starting points for soloing — they have no bends in many
           positions, so the tabs are simpler.
         </HelpBullet>
         <HelpBullet>
