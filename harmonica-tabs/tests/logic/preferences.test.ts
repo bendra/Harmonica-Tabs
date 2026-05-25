@@ -57,7 +57,7 @@ describe('parsePreferences', () => {
 
   it('round-trips a fully valid preferences blob', () => {
     const sample: PersistedPreferences = {
-      version: 1,
+      version: 2,
       musicalSelection: {
         harmonicaKeyPc: 9, // A
         scaleRoot: 'E',
@@ -71,6 +71,7 @@ describe('parsePreferences', () => {
       },
       audioSettings: {
         showDebug: true,
+        nativeAudioSource: 'webview',
         toneToleranceInput: '45',
         toneFollowMinConfidenceInput: '0.5',
         noteSeparationRatioInput: '0.55',
@@ -92,7 +93,7 @@ describe('parsePreferences', () => {
 
   it('falls back per field when individual values are wrong shapes', () => {
     const raw = JSON.stringify({
-      version: 1,
+      version: 2,
       musicalSelection: {
         harmonicaKeyPc: 'not a number',
         scaleRoot: 'NotANote',
@@ -106,6 +107,7 @@ describe('parsePreferences', () => {
       },
       audioSettings: {
         showDebug: 'yes',
+        nativeAudioSource: 'bluetooth',
         toneToleranceInput: 12, // wrong type
       },
       ui: {
@@ -162,13 +164,50 @@ describe('parsePreferences', () => {
   });
 
   it('fills in missing sections with defaults', () => {
-    const raw = JSON.stringify({ version: 1 });
+    const raw = JSON.stringify({ version: 2 });
     expect(parsePreferences(raw)).toEqual(DEFAULT_PREFERENCES);
+  });
+
+  it('defaults a missing native audio source to WebView', () => {
+    const raw = JSON.stringify({
+      version: 2,
+      audioSettings: {
+        showDebug: true,
+      },
+    });
+
+    expect(parsePreferences(raw).audioSettings.nativeAudioSource).toBe('webview');
+  });
+
+  it('migrates legacy native audio source preferences to WebView', () => {
+    const legacyRaw = JSON.stringify({
+      ...DEFAULT_PREFERENCES,
+      version: 1,
+      audioSettings: {
+        ...DEFAULT_PREFERENCES.audioSettings,
+        nativeAudioSource: 'native',
+      },
+    });
+
+    expect(parsePreferences(legacyRaw).audioSettings.nativeAudioSource).toBe('webview');
+    expect(parsePreferences(legacyRaw).version).toBe(2);
+  });
+
+  it('preserves an intentional native fallback selection in current preferences', () => {
+    const raw = JSON.stringify({
+      ...DEFAULT_PREFERENCES,
+      audioSettings: {
+        ...DEFAULT_PREFERENCES.audioSettings,
+        nativeAudioSource: 'native',
+      },
+    });
+
+    expect(parsePreferences(raw).audioSettings.nativeAudioSource).toBe('native');
   });
 
   it('preserves valid fields while replacing invalid neighbors', () => {
     const raw = JSON.stringify({
-      version: 1,
+      version: 2,
       musicalSelection: {
         ...DEFAULT_PREFERENCES.musicalSelection,
         scaleRoot: 'F#',

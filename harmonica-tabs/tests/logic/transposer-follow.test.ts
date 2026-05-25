@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createTransposerFollowState,
   evaluateTransposerFollow as evaluateTransposerFollowBase,
+  isMicDetectorSource,
   type DetectorSnapshot,
 } from '../../src/logic/transposer-follow';
 import { midiToFrequency } from '../../src/logic/pitch';
@@ -13,6 +14,16 @@ const TOKENS = [
   { tokenIndex: 1, text: '-4', midi: 73 },
   { tokenIndex: 2, text: '-4', midi: 73 },
 ];
+
+describe('isMicDetectorSource', () => {
+  it('treats web, native, and webview as real microphone sources', () => {
+    expect(isMicDetectorSource('web')).toBe(true);
+    expect(isMicDetectorSource('native')).toBe(true);
+    expect(isMicDetectorSource('webview')).toBe(true);
+    expect(isMicDetectorSource('sim')).toBe(false);
+    expect(isMicDetectorSource(null)).toBe(false);
+  });
+});
 
 function createDetectorSnapshot(overrides: Partial<DetectorSnapshot> = {}): DetectorSnapshot {
   return {

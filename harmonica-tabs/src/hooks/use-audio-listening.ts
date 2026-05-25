@@ -6,13 +6,15 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { Platform } from 'react-native';
-import { DetectorSnapshot, DetectorSource } from '../logic/transposer-follow';
+import { DetectorSnapshot, DetectorSource, isMicDetectorSource } from '../logic/transposer-follow';
 import { DetectionCandidate, YinFrameDiagnostic } from '../logic/fft-detector';
 import { createWebAudioPitchDetector } from '../logic/web-audio';
+import { createWebViewAudioPitchDetector, WebViewAudioDetectorHost } from '../logic/webview-audio';
 import { buildHarmonicaVocabulary } from '../logic/harmonica-frequencies';
 import { frequencyToMidi } from '../logic/pitch';
 import { DEFAULT_AUDIO_SETTINGS } from '../config/default-settings';
 import { createLatencyProfiler, LatencySnapshot, PitchUpdateTrace } from '../logic/audio-latency';
+import type { NativeAudioSource } from './use-audio-settings';
 
 /**
  * Temporal smoothing: how many recent frames to consider, and how many must
@@ -124,6 +126,7 @@ type AudioListeningParams = {
   simHz: number | null;
   harmonicaPc: number;
   minSendIntervalMs: number;
+  nativeAudioSource: NativeAudioSource;
 };
 
 type AudioListeningState = {
@@ -157,6 +160,14 @@ type AudioListeningStore = ReturnType<typeof createAudioListeningStore>;
 
 const AudioListeningContext = createContext<AudioListeningStore | null>(null);
 
+export function resolveAudioDetectorKind(
+  platformOs: string,
+  nativeAudioSource: NativeAudioSource,
+): 'web' | 'native' | 'webview' {
+  if (platformOs === 'web') return 'web';
+  return platformOs === 'ios' && nativeAudioSource === 'webview' ? 'webview' : 'native';
+}
+
 function createInitialState(): AudioListeningState {
   return {
     isListening: false,
@@ -181,6 +192,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
   let params = initialParams;
   let state = createInitialState();
   let detector: ReturnType<typeof createWebAudioPitchDetector> | null = null;
+  let detectorKind: 'web' | 'native' | 'webview' | null = null;
   let isDisposed = false;
   let listenSession = 0;
   let smoothingBuffer: (number | null)[] = [];
@@ -233,10 +245,21 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     });
   }
 
+  function getDesiredDetectorKind(): 'web' | 'native' | 'webview' {
+    return resolveAudioDetectorKind(Platform.OS, params.nativeAudioSource);
+  }
+
   function ensureDetector() {
+    const desiredKind = getDesiredDetectorKind();
+    if (detector && detectorKind === desiredKind) return detector;
     if (detector) return detector;
-    if (Platform.OS === 'web') {
+    detectorKind = desiredKind;
+    if (desiredKind === 'web') {
       detector = createWebAudioPitchDetector();
+      return detector;
+    }
+    if (desiredKind === 'webview') {
+      detector = createWebViewAudioPitchDetector();
       return detector;
     }
 
@@ -254,7 +277,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
       isStablePath &&
       lastDetectedAt !== null &&
       now - lastDetectedAt < DEFAULT_AUDIO_SETTINGS.signalHoldMs;
-    const isMicSource = state.listenSource === 'web' || state.listenSource === 'native';
+    const isMicSource = isMicDetectorSource(state.listenSource);
     const effectiveMicFrequency =
       state.detectedConfidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate && detectedFrequency
         ? detectedFrequency
@@ -284,6 +307,7 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
     const simHzChanged = params.simHz !== nextParams.simHz;
     const harmonicaChanged = params.harmonicaPc !== nextParams.harmonicaPc;
     const intervalChanged = params.minSendIntervalMs !== nextParams.minSendIntervalMs;
+    const sourceChanged = params.nativeAudioSource !== nextParams.nativeAudioSource;
     params = nextParams;
 
     if (intervalChanged) {
@@ -291,14 +315,21 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
         ?.setMinSendIntervalMs?.(nextParams.minSendIntervalMs);
     }
 
-    if (!state.isListening) return;
+    if (!state.isListening) {
+      if (sourceChanged) {
+        detector?.stop();
+        detector = null;
+        detectorKind = null;
+      }
+      return;
+    }
     if (state.listenSource === 'sim' && simHzChanged) {
       refreshSnapshot();
       emit();
       return;
     }
 
-    if ((state.listenSource === 'web' || state.listenSource === 'native') && harmonicaChanged) {
+    if ((state.listenSource === 'web' || state.listenSource === 'native' || state.listenSource === 'webview') && harmonicaChanged) {
       const nextVocabulary = buildHarmonicaVocabulary(nextParams.harmonicaPc);
       (detector as { updateVocabulary?: (vocabulary: ReturnType<typeof buildHarmonicaVocabulary>) => void } | null)
         ?.updateVocabulary?.(nextVocabulary);
@@ -333,7 +364,8 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
       return !isDisposed && listenSession === currentListenSession;
     }
 
-    if (Platform.OS !== 'web') {
+    const desiredDetectorKind = getDesiredDetectorKind();
+    if (Platform.OS !== 'web' && desiredDetectorKind !== 'webview') {
       const { Audio } = require('expo-av');
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) {
@@ -420,13 +452,16 @@ function createAudioListeningStore(initialParams: AudioListeningParams) {
           ?.setMinSendIntervalMs?.(params.minSendIntervalMs);
         setState({
           isListening: true,
-          listenSource: Platform.OS === 'web' ? 'web' : 'native',
+          listenSource: desiredDetectorKind,
         });
-      } catch {
+      } catch (error) {
         if (!isCurrentListenSession()) return;
+        const message = error instanceof Error ? error.message : null;
         setState({
           isListening: true,
-          listenError: 'Mic blocked or unavailable (using sim)',
+          listenError: message
+            ? `Mic blocked or unavailable (using sim): ${message}`
+            : 'Mic blocked or unavailable (using sim)',
           listenSource: 'sim',
         });
       }
@@ -474,20 +509,26 @@ export function AudioListeningProvider({
   simHz,
   harmonicaPc,
   minSendIntervalMs,
+  nativeAudioSource,
   children,
 }: AudioListeningParams & { children: React.ReactNode }) {
   const storeRef = useRef<AudioListeningStore | null>(null);
   if (!storeRef.current) {
-    storeRef.current = createAudioListeningStore({ simHz, harmonicaPc, minSendIntervalMs });
+    storeRef.current = createAudioListeningStore({ simHz, harmonicaPc, minSendIntervalMs, nativeAudioSource });
   }
 
   useEffect(() => {
-    storeRef.current?.setParams({ simHz, harmonicaPc, minSendIntervalMs });
-  }, [simHz, harmonicaPc, minSendIntervalMs]);
+    storeRef.current?.setParams({ simHz, harmonicaPc, minSendIntervalMs, nativeAudioSource });
+  }, [simHz, harmonicaPc, minSendIntervalMs, nativeAudioSource]);
 
   useEffect(() => () => storeRef.current?.dispose(), []);
 
-  return React.createElement(AudioListeningContext.Provider, { value: storeRef.current }, children);
+  return React.createElement(
+    AudioListeningContext.Provider,
+    { value: storeRef.current },
+    React.createElement(WebViewAudioDetectorHost),
+    children,
+  );
 }
 
 export function useAudioListening() {

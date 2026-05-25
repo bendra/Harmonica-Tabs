@@ -30,6 +30,7 @@ export const AUDIO_SETTINGS_LIMITS = {
 
 export const DEFAULT_AUDIO_SETTINGS = {
   showDebug: false,
+  nativeAudioSource: 'webview',
   toneToleranceInput: '60',
   toneToleranceCents: 60,
   toneFollowMinConfidenceInput: '0.35',

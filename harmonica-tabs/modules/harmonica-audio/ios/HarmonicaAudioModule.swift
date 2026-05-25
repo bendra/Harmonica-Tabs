@@ -17,6 +17,23 @@ public class HarmonicaAudioModule: Module {
 
     Events("onAudioFrame")
 
+    View(HarmonicaAudioView.self) {
+      Events(
+        "onLoad",
+        "onWebViewDetectorReady",
+        "onWebViewDetectorError",
+        "onWebViewPitchUpdate"
+      )
+
+      Prop("active") { (view: HarmonicaAudioView, active: Bool) in
+        view.setActive(active)
+      }
+
+      Prop("vocabularyJson") { (view: HarmonicaAudioView, vocabularyJson: String) in
+        view.setVocabularyJson(vocabularyJson)
+      }
+    }
+
     // Starts microphone capture. Returns the hardware sample rate so JS can
     // pass it to the pitch detector. No frequencies or thresholds needed here —
     // all detection logic runs in TypeScript.

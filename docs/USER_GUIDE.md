@@ -171,7 +171,7 @@ Open the gear icon in the top right.
 - **Debug** — toggles a status panel with raw detector frame data. Useful only when troubleshooting.
 - **Help** — opens this user guide.
 
-There is also a temporary **Send interval ms (debug)** field used while tuning native audio performance; you can leave it at its default.
+There is also a temporary **Native send interval ms (debug)** field used while tuning the native fallback audio path; you can leave it at its default.
 
 ---
 

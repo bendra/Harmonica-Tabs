@@ -1,0 +1,449 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<script>
+(function () {
+  const MIN_RMS = 0.005;
+  const YIN_THRESHOLD = 0.15;
+  const OCTAVE_CHECK_RADIUS = 2;
+  const OCTAVE_CHECK_MAX_CMND = YIN_THRESHOLD + 0.03;
+
+  let audioContext = null;
+  let source = null;
+  let processor = null;
+  let gainNode = null;
+  let stream = null;
+  let running = false;
+  let startPromise = null;
+  let generation = 0;
+  let currentVocabulary = { allNotes: [] };
+
+  function post(type, payload) {
+    window.webkit?.messageHandlers?.harmonicaAudio?.postMessage(
+      type === 'pitch' ? { type, payload } : (payload === undefined ? { type } : { type, ...payload })
+    );
+  }
+
+  function nowMs() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
+
+  function calculateRms(input) {
+    let sum = 0;
+    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    return Math.sqrt(sum / input.length);
+  }
+
+  function complexFFT(re, im, inverse) {
+    const N = re.length;
+    for (let i = 1, j = 0; i < N; i++) {
+      let bit = N >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        let tmp = re[i]; re[i] = re[j]; re[j] = tmp;
+        tmp = im[i]; im[i] = im[j]; im[j] = tmp;
+      }
+    }
+
+    for (let len = 2; len <= N; len <<= 1) {
+      const halfLen = len >> 1;
+      const angle = (inverse ? 2 : -2) * Math.PI / len;
+      const wBaseRe = Math.cos(angle);
+      const wBaseIm = Math.sin(angle);
+      for (let i = 0; i < N; i += len) {
+        let wRe = 1;
+        let wIm = 0;
+        for (let j = 0; j < halfLen; j++) {
+          const uRe = re[i + j];
+          const uIm = im[i + j];
+          const vRe = re[i + j + halfLen] * wRe - im[i + j + halfLen] * wIm;
+          const vIm = re[i + j + halfLen] * wIm + im[i + j + halfLen] * wRe;
+          re[i + j] = uRe + vRe;
+          im[i + j] = uIm + vIm;
+          re[i + j + halfLen] = uRe - vRe;
+          im[i + j + halfLen] = uIm - vIm;
+          const nextWRe = wRe * wBaseRe - wIm * wBaseIm;
+          wIm = wRe * wBaseIm + wIm * wBaseRe;
+          wRe = nextWRe;
+        }
+      }
+    }
+  }
+
+  function yinDifferenceFFT(input, maxLag) {
+    const N = input.length;
+    const re = new Float32Array(N);
+    const im = new Float32Array(N);
+
+    for (let i = 0; i < N; i++) {
+      const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+      re[i] = input[i] * w;
+    }
+
+    complexFFT(re, im, false);
+
+    for (let i = 0; i < N; i++) {
+      re[i] = re[i] * re[i] + im[i] * im[i];
+      im[i] = 0;
+    }
+
+    complexFFT(re, im, true);
+
+    const r0 = re[0] / N;
+    const d = new Float32Array(maxLag + 1);
+    for (let tau = 1; tau <= maxLag; tau++) {
+      d[tau] = Math.max(0, 2 * (r0 - re[tau] / N));
+    }
+    return d;
+  }
+
+  function yinCmnd(d) {
+    const cmnd = new Float32Array(d.length);
+    cmnd[0] = 1;
+    let runningSum = 0;
+    for (let tau = 1; tau < d.length; tau++) {
+      runningSum += d[tau];
+      cmnd[tau] = runningSum === 0 ? 0 : (d[tau] * tau) / runningSum;
+    }
+    return cmnd;
+  }
+
+  function parabolicInterpolation(cmnd, tau) {
+    if (tau <= 0 || tau >= cmnd.length - 1) return tau;
+    const prev = cmnd[tau - 1];
+    const curr = cmnd[tau];
+    const next = cmnd[tau + 1];
+    const denom = 2 * (prev - 2 * curr + next);
+    return denom === 0 ? tau : tau + (prev - next) / denom;
+  }
+
+  function isLocalDip(cmnd, tau) {
+    return tau > 0 && tau < cmnd.length - 1 && cmnd[tau] <= cmnd[tau - 1] && cmnd[tau] <= cmnd[tau + 1];
+  }
+
+  function findLocalDipNear(cmnd, center, radius, minLag, maxLag) {
+    const start = Math.max(minLag, center - radius);
+    const end = Math.min(maxLag, center + radius);
+    let bestTau = null;
+    let bestCmnd = Infinity;
+
+    for (let tau = start; tau <= end; tau++) {
+      if (!isLocalDip(cmnd, tau)) continue;
+      if (cmnd[tau] < bestCmnd) {
+        bestCmnd = cmnd[tau];
+        bestTau = tau;
+      }
+    }
+
+    return bestTau;
+  }
+
+  function octaveCandidateIsComparable(halfCmnd) {
+    return halfCmnd <= OCTAVE_CHECK_MAX_CMND;
+  }
+
+  function preferredFrequency(sampleRate, cmnd, lag) {
+    return sampleRate / parabolicInterpolation(cmnd, lag);
+  }
+
+  function analyzeYinOctave(cmnd, sampleRate, minLag, maxLag) {
+    for (let tau = minLag; tau <= maxLag; tau++) {
+      if (cmnd[tau] < YIN_THRESHOLD) {
+        while (tau + 1 <= maxLag && cmnd[tau + 1] < cmnd[tau]) tau++;
+
+        const acceptedLag = tau;
+        const acceptedCmnd = cmnd[acceptedLag];
+        const halfCenter = Math.round(acceptedLag / 2);
+        const halfLag = findLocalDipNear(cmnd, halfCenter, OCTAVE_CHECK_RADIUS, minLag, maxLag);
+
+        if (halfLag === null) {
+          return {
+            acceptedLag,
+            acceptedCmnd,
+            halfLag: null,
+            halfCmnd: null,
+            preferredLag: acceptedLag,
+            preferredCmnd: acceptedCmnd,
+            preferredFrequency: preferredFrequency(sampleRate, cmnd, acceptedLag),
+            reason: halfCenter < minLag || halfCenter > maxLag ? 'half-lag-out-of-range' : 'half-lag-not-local-dip',
+          };
+        }
+
+        const halfCmnd = cmnd[halfLag];
+        if (!octaveCandidateIsComparable(halfCmnd)) {
+          return {
+            acceptedLag,
+            acceptedCmnd,
+            halfLag,
+            halfCmnd,
+            preferredLag: acceptedLag,
+            preferredCmnd: acceptedCmnd,
+            preferredFrequency: preferredFrequency(sampleRate, cmnd, acceptedLag),
+            reason: 'half-lag-too-weak',
+          };
+        }
+
+        return {
+          acceptedLag,
+          acceptedCmnd,
+          halfLag,
+          halfCmnd,
+          preferredLag: halfLag,
+          preferredCmnd: halfCmnd,
+          preferredFrequency: preferredFrequency(sampleRate, cmnd, halfLag),
+          reason: 'prefer-half-lag',
+        };
+      }
+    }
+
+    return {
+      acceptedLag: null,
+      acceptedCmnd: null,
+      halfLag: null,
+      halfCmnd: null,
+      preferredLag: null,
+      preferredCmnd: null,
+      preferredFrequency: null,
+      reason: 'no-accepted-lag',
+    };
+  }
+
+  function analyzeYinFrame(input, sampleRate, minFreq, maxFreq) {
+    const minLag = Math.floor(sampleRate / maxFreq);
+    const maxLag = Math.floor(sampleRate / minFreq);
+
+    if (input.length < maxLag * 2) {
+      return {
+        sampleRate,
+        frameLength: input.length,
+        octave: {
+          acceptedLag: null,
+          acceptedCmnd: null,
+          halfLag: null,
+          halfCmnd: null,
+          preferredLag: null,
+          preferredCmnd: null,
+          preferredFrequency: null,
+          reason: 'no-accepted-lag',
+        },
+      };
+    }
+
+    const d = yinDifferenceFFT(input, maxLag);
+    const cmnd = yinCmnd(d);
+    return { sampleRate, frameLength: input.length, octave: analyzeYinOctave(cmnd, sampleRate, minLag, maxLag) };
+  }
+
+  function centsTolerance(confidenceThreshold) {
+    return (50 * (1 - confidenceThreshold)) / 0.7;
+  }
+
+  function detectSingleNote(input, sampleRate, vocabulary) {
+    const rms = calculateRms(input);
+    if (rms < MIN_RMS) {
+      return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [] };
+    }
+
+    const allNotes = vocabulary?.allNotes || [];
+    if (allNotes.length === 0) {
+      return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [] };
+    }
+
+    const minFreq = allNotes[0].frequency * 0.9;
+    const maxFreq = allNotes[allNotes.length - 1].frequency * 1.1;
+    const yinDiagnostic = analyzeYinFrame(input, sampleRate, minFreq, maxFreq);
+    const fundamental = yinDiagnostic.octave.preferredFrequency;
+    if (fundamental === null) {
+      return { frequency: null, rawFrequency: null, confidence: 0, rms, candidates: [], yinDiagnostic };
+    }
+
+    const detectedMidi = 69 + 12 * Math.log2(fundamental / 440);
+    let nearestNote = null;
+    let nearestCents = Infinity;
+
+    for (const note of allNotes) {
+      const cents = Math.abs((detectedMidi - note.midi) * 100);
+      if (cents < nearestCents) {
+        nearestCents = cents;
+        nearestNote = note;
+      }
+    }
+
+    if (nearestNote === null) {
+      return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [], yinDiagnostic };
+    }
+
+    const tolerance = centsTolerance(nearestNote.confidenceThreshold);
+    if (nearestCents > tolerance) {
+      return { frequency: null, rawFrequency: fundamental, confidence: 0, rms, candidates: [], yinDiagnostic };
+    }
+
+    const confidence = 1 - nearestCents / tolerance;
+    const candidates = allNotes
+      .map((note) => ({
+        frequency: note.frequency,
+        confidence: Math.max(0, 1 - (Math.abs(detectedMidi - note.midi) * 100) / 100),
+      }))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 3);
+
+    return { frequency: nearestNote.frequency, rawFrequency: fundamental, confidence, rms, candidates, yinDiagnostic };
+  }
+
+  async function cleanupResources(resources) {
+    const tracks = resources.stream?.getTracks?.() || [];
+    tracks.forEach((track) => { track.onended = null; });
+    if (resources.processor) resources.processor.onaudioprocess = null;
+
+    try { resources.processor?.disconnect?.(); } catch {}
+    try { resources.source?.disconnect?.(); } catch {}
+    try { resources.gainNode?.disconnect?.(); } catch {}
+
+    tracks.forEach((track) => {
+      try { track.stop?.(); } catch {}
+    });
+
+    try { await resources.audioContext?.close?.(); } catch {}
+  }
+
+  function releaseGlobals(resources) {
+    if (processor === resources.processor) processor = null;
+    if (source === resources.source) source = null;
+    if (gainNode === resources.gainNode) gainNode = null;
+    if (stream === resources.stream) stream = null;
+    if (audioContext === resources.audioContext) audioContext = null;
+  }
+
+  async function start() {
+    if (running) {
+      post('ready', { supported: true });
+      return;
+    }
+    if (startPromise) {
+      await startPromise;
+      return;
+    }
+
+    const mediaDevices = navigator?.mediaDevices;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!mediaDevices?.getUserMedia || !AudioContextCtor) {
+      post('error', { message: 'WebView audio is not supported in this context.' });
+      return;
+    }
+
+    const startGeneration = ++generation;
+    const resources = { audioContext: null, source: null, processor: null, gainNode: null, stream: null };
+
+    startPromise = (async () => {
+      try {
+        resources.stream = await mediaDevices.getUserMedia({ audio: true });
+        if (generation !== startGeneration) {
+          await cleanupResources(resources);
+          return;
+        }
+
+        resources.audioContext = new AudioContextCtor();
+        if (resources.audioContext.state === 'suspended') {
+          await resources.audioContext.resume();
+        }
+        if (generation !== startGeneration) {
+          await cleanupResources(resources);
+          return;
+        }
+
+        resources.source = resources.audioContext.createMediaStreamSource(resources.stream);
+        resources.processor = resources.audioContext.createScriptProcessor(4096, 1, 1);
+        resources.gainNode = resources.audioContext.createGain();
+        resources.gainNode.gain.value = 0.001;
+
+        resources.stream.getTracks?.().forEach((track) => {
+          track.onended = () => {
+            if (generation !== startGeneration || !running) return;
+            post('pitch', { frequency: null, rawFrequency: null, confidence: 0, rms: 0 });
+          };
+        });
+
+        resources.processor.onaudioprocess = (event) => {
+          if (generation !== startGeneration || !running || !resources.audioContext) return;
+          const input = event.inputBuffer?.getChannelData(0);
+          if (!input) return;
+
+          const callbackAtMs = nowMs();
+          const detectorStartAtMs = callbackAtMs;
+          const result = detectSingleNote(input, resources.audioContext.sampleRate, currentVocabulary);
+          const detectorEndAtMs = nowMs();
+          const frameDurationMs = (input.length / resources.audioContext.sampleRate) * 1000;
+          post('pitch', {
+            ...result,
+            trace: {
+              frameDurationMs,
+              callbackAtMs,
+              estimatedFrameStartAtMs: callbackAtMs - frameDurationMs,
+              detectorStartAtMs,
+              detectorEndAtMs,
+              detectorDurationMs: detectorEndAtMs - detectorStartAtMs,
+            },
+          });
+        };
+
+        resources.source.connect(resources.processor);
+        resources.processor.connect(resources.gainNode);
+        resources.gainNode.connect(resources.audioContext.destination);
+
+        if (generation !== startGeneration) {
+          await cleanupResources(resources);
+          return;
+        }
+
+        audioContext = resources.audioContext;
+        source = resources.source;
+        processor = resources.processor;
+        gainNode = resources.gainNode;
+        stream = resources.stream;
+        running = true;
+        post('ready', { supported: true });
+      } catch (error) {
+        await cleanupResources(resources);
+        post('error', { message: error?.message || 'WebView audio detector failed to start.' });
+      } finally {
+        if (startPromise) startPromise = null;
+      }
+    })();
+
+    await startPromise;
+  }
+
+  function stop() {
+    generation += 1;
+    running = false;
+    startPromise = null;
+    const resources = { audioContext, source, processor, gainNode, stream };
+    audioContext = null;
+    source = null;
+    processor = null;
+    gainNode = null;
+    stream = null;
+    releaseGlobals(resources);
+    void cleanupResources(resources);
+  }
+
+  function updateVocabulary(vocabularyJson) {
+    try {
+      const parsed = JSON.parse(vocabularyJson || '{"allNotes":[]}');
+      currentVocabulary = Array.isArray(parsed?.allNotes) ? parsed : { allNotes: [] };
+    } catch {
+      currentVocabulary = { allNotes: [] };
+    }
+  }
+
+  window.HarmonicaDetector = { start, stop, updateVocabulary };
+})();
+</script>
+</body>
+</html>

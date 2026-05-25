@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { AUDIO_SETTINGS_LIMITS, DEFAULT_AUDIO_SETTINGS } from '../config/default-settings';
 
+export type NativeAudioSource = 'native' | 'webview';
+
 function sanitizeDecimalInput(value: string): string {
   let sawDot = false;
   let result = '';
@@ -33,6 +35,7 @@ export function parseBoundedInteger(value: string, fallback: number, min: number
 
 export type AudioSettingsInitial = {
   showDebug?: boolean;
+  nativeAudioSource?: NativeAudioSource;
   toneToleranceInput?: string;
   toneFollowMinConfidenceInput?: string;
   noteSeparationRatioInput?: string;
@@ -42,6 +45,9 @@ export type AudioSettingsInitial = {
 
 export function useAudioSettings(initial: AudioSettingsInitial = {}) {
   const [showDebug, setShowDebug] = useState<boolean>(initial.showDebug ?? DEFAULT_AUDIO_SETTINGS.showDebug);
+  const [nativeAudioSource, setNativeAudioSource] = useState<NativeAudioSource>(
+    initial.nativeAudioSource ?? DEFAULT_AUDIO_SETTINGS.nativeAudioSource,
+  );
   const [toneToleranceInput, setToneToleranceInput] = useState<string>(
     initial.toneToleranceInput ?? DEFAULT_AUDIO_SETTINGS.toneToleranceInput,
   );
@@ -106,6 +112,8 @@ export function useAudioSettings(initial: AudioSettingsInitial = {}) {
   return {
     showDebug,
     setShowDebug,
+    nativeAudioSource,
+    setNativeAudioSource,
     toneToleranceInput,
     setToneToleranceInput: (value: string) => setToneToleranceInput(sanitizeDecimalInput(value)),
     toneFollowMinConfidenceInput,

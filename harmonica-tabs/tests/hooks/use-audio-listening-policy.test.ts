@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createResponsiveCommitState,
   nextResponsiveFrequency,
+  resolveAudioDetectorKind,
   smoothedFrequency,
 } from '../../src/hooks/use-audio-listening';
 import { midiToFrequency } from '../../src/logic/pitch';
@@ -56,5 +57,12 @@ describe('audio listening commit policies', () => {
 
     const noSignal = nextResponsiveFrequency(state, null, 0.9, 0.2);
     expect(noSignal.frequency).toBeNull();
+  });
+
+  it('selects the WebView detector only for native platforms when the debug source is WebView', () => {
+    expect(resolveAudioDetectorKind('web', 'webview')).toBe('web');
+    expect(resolveAudioDetectorKind('ios', 'native')).toBe('native');
+    expect(resolveAudioDetectorKind('ios', 'webview')).toBe('webview');
+    expect(resolveAudioDetectorKind('android', 'webview')).toBe('native');
   });
 });

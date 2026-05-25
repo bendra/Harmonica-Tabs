@@ -14,6 +14,7 @@ function createHostComponent(name: string, imperativeHandle?: () => Record<strin
 export function resetReactNativeMocks() {
   scrollToSpy.mockClear();
   windowDimensions = { width: 400, height: 800, scale: 1, fontScale: 1 };
+  Platform.OS = 'web';
 }
 
 export function setReactNativeWindowDimensions(nextDimensions: Partial<typeof windowDimensions>) {

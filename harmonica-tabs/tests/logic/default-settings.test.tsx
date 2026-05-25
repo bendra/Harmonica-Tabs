@@ -28,6 +28,7 @@ describe('shared default settings', () => {
 
     expect(snapshot).not.toBeNull();
     expect(snapshot!.audio.showDebug).toBe(DEFAULT_AUDIO_SETTINGS.showDebug);
+    expect(snapshot!.audio.nativeAudioSource).toBe(DEFAULT_AUDIO_SETTINGS.nativeAudioSource);
     expect(snapshot!.audio.toneToleranceInput).toBe(DEFAULT_AUDIO_SETTINGS.toneToleranceInput);
     expect(snapshot!.audio.toneToleranceCents).toBe(DEFAULT_AUDIO_SETTINGS.toneToleranceCents);
     expect(snapshot!.audio.toneFollowMinConfidenceInput).toBe(DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput);

@@ -14,7 +14,7 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-const { asyncStorageMock, asyncStorageValues, detectorMockState, savedTabDb } = vi.hoisted(() => {
+const { asyncStorageMock, asyncStorageValues, detectorMockState, webViewDetectorMockState, savedTabDb } = vi.hoisted(() => {
   function createMockSavedTabDatabase() {
     const rows = new Map<
       string,
@@ -108,6 +108,25 @@ const { asyncStorageMock, asyncStorageValues, detectorMockState, savedTabDb } = 
         ) => void
       >,
     },
+    webViewDetectorMockState: {
+      isSupported: true,
+      startSpy: vi.fn(),
+      stopSpy: vi.fn(),
+      setMinSendIntervalMsSpy: vi.fn(),
+      updateHandlers: [] as Array<
+        (
+          update: {
+            frequency: number | null;
+            rawFrequency?: number | null;
+            confidence: number;
+            rms: number;
+            candidates?: Array<{ frequency: number; confidence: number }>;
+            trace?: Record<string, number | null>;
+            yinDiagnostic?: unknown;
+          },
+        ) => void
+      >,
+    },
   };
 });
 
@@ -139,6 +158,32 @@ vi.mock('../../src/logic/web-audio', () => ({
     },
     stop: () => detectorMockState.stopSpy(),
     setMinSendIntervalMs: (ms: number) => detectorMockState.setMinSendIntervalMsSpy(ms),
+  }),
+}));
+
+vi.mock('../../src/logic/webview-audio', () => ({
+  WebViewAudioDetectorHost: () => null,
+  createWebViewAudioPitchDetector: () => ({
+    isSupported: () => webViewDetectorMockState.isSupported,
+    start: (
+      onUpdate: (
+        update: {
+          frequency: number | null;
+          rawFrequency?: number | null;
+          confidence: number;
+          rms: number;
+          candidates?: Array<{ frequency: number; confidence: number }>;
+          trace?: Record<string, number | null>;
+          yinDiagnostic?: unknown;
+        },
+      ) => void,
+    ) => {
+      webViewDetectorMockState.updateHandlers.push(onUpdate);
+      webViewDetectorMockState.startSpy(onUpdate);
+      return Promise.resolve();
+    },
+    stop: () => webViewDetectorMockState.stopSpy(),
+    setMinSendIntervalMs: (ms: number) => webViewDetectorMockState.setMinSendIntervalMsSpy(ms),
   }),
 }));
 
@@ -250,6 +295,11 @@ describe('App listening lifecycle', () => {
     detectorMockState.stopSpy.mockClear();
     detectorMockState.setMinSendIntervalMsSpy.mockClear();
     detectorMockState.updateHandlers = [];
+    webViewDetectorMockState.isSupported = true;
+    webViewDetectorMockState.startSpy.mockClear();
+    webViewDetectorMockState.stopSpy.mockClear();
+    webViewDetectorMockState.setMinSendIntervalMsSpy.mockClear();
+    webViewDetectorMockState.updateHandlers = [];
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
@@ -575,4 +625,5 @@ describe('App listening lifecycle', () => {
       renderer.unmount();
     });
   });
+
 });

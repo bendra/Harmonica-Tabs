@@ -30,6 +30,12 @@ class HarmonicaAudioModule : Module() {
     Function("stop") {
       stopCapture()
     }
+
+    Function("setMinSendIntervalMs") { _: Double ->
+      // iOS uses this to rate-limit the Expo bridge. Android currently reads
+      // one 4096-sample frame per blocking call, so keep the shared JS detector
+      // interface satisfied without changing Android capture behavior.
+    }
   }
 
   private fun startCapture() {

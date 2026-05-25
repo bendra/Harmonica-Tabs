@@ -9,15 +9,17 @@ import type {
   NoteLabelStyle,
   PositionKeyFilter,
 } from '../hooks/use-musical-selection';
+import type { NativeAudioSource } from '../hooks/use-audio-settings';
 
 export const PREFERENCES_STORAGE_KEY = 'harmonica-tabs:user-preferences:v1';
-const PREFERENCES_VERSION = 1;
+const PREFERENCES_VERSION = 2;
+const LEGACY_PREFERENCES_VERSION = 1;
 
 export type ArpeggioSelection = 'triads' | 'sevenths' | 'blues' | null;
 export type PersistedScreen = 'scales' | 'tabs';
 
 export type PersistedPreferences = {
-  version: 1;
+  version: 2;
   musicalSelection: {
     harmonicaKeyPc: number;
     scaleRoot: NoteName;
@@ -31,6 +33,7 @@ export type PersistedPreferences = {
   };
   audioSettings: {
     showDebug: boolean;
+    nativeAudioSource: NativeAudioSource;
     toneToleranceInput: string;
     toneFollowMinConfidenceInput: string;
     noteSeparationRatioInput: string;
@@ -62,6 +65,7 @@ export const DEFAULT_PREFERENCES: PersistedPreferences = {
   },
   audioSettings: {
     showDebug: DEFAULT_AUDIO_SETTINGS.showDebug,
+    nativeAudioSource: DEFAULT_AUDIO_SETTINGS.nativeAudioSource,
     toneToleranceInput: DEFAULT_AUDIO_SETTINGS.toneToleranceInput,
     toneFollowMinConfidenceInput: DEFAULT_AUDIO_SETTINGS.toneFollowMinConfidenceInput,
     noteSeparationRatioInput: DEFAULT_AUDIO_SETTINGS.noteSeparationRatioInput,
@@ -148,10 +152,14 @@ export function parsePreferences(rawValue: string | null): PersistedPreferences 
     return DEFAULT_PREFERENCES;
   }
 
-  if (!isObject(parsed) || parsed.version !== PREFERENCES_VERSION) {
+  if (
+    !isObject(parsed) ||
+    (parsed.version !== PREFERENCES_VERSION && parsed.version !== LEGACY_PREFERENCES_VERSION)
+  ) {
     return DEFAULT_PREFERENCES;
   }
 
+  const isLegacyV1 = parsed.version === LEGACY_PREFERENCES_VERSION;
   const musical = isObject(parsed.musicalSelection) ? parsed.musicalSelection : {};
   const audio = isObject(parsed.audioSettings) ? parsed.audioSettings : {};
   const ui = isObject(parsed.ui) ? parsed.ui : {};
@@ -193,6 +201,16 @@ export function parsePreferences(rawValue: string | null): PersistedPreferences 
     },
     audioSettings: {
       showDebug: pickBoolean(audio.showDebug, DEFAULT_PREFERENCES.audioSettings.showDebug),
+      // v1 shipped while Native was the default, so most saved "native" values
+      // were implicit. Migrate them to the new iOS-safe default; v2 preserves
+      // an intentional Native fallback selection.
+      nativeAudioSource: isLegacyV1
+        ? DEFAULT_PREFERENCES.audioSettings.nativeAudioSource
+        : pickEnum(
+            audio.nativeAudioSource,
+            ['native', 'webview'] as const,
+            DEFAULT_PREFERENCES.audioSettings.nativeAudioSource,
+          ),
       toneToleranceInput: pickString(
         audio.toneToleranceInput,
         DEFAULT_PREFERENCES.audioSettings.toneToleranceInput,

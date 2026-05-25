@@ -1,6 +1,6 @@
 import { matchFrequencyToTabs } from './pitch';
 
-export type DetectorSource = 'web' | 'native' | 'sim' | null;
+export type DetectorSource = 'web' | 'native' | 'webview' | 'sim' | null;
 
 export type DetectorSnapshot = {
   frequency: number | null;
@@ -9,6 +9,10 @@ export type DetectorSnapshot = {
   source: DetectorSource;
   lastDetectedAt: number | null;
 };
+
+export function isMicDetectorSource(source: DetectorSource): boolean {
+  return source === 'web' || source === 'native' || source === 'webview';
+}
 
 export type FollowableToken = {
   tokenIndex: number;

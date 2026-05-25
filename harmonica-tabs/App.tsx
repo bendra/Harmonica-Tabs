@@ -39,7 +39,7 @@ import {
 } from './src/logic/saved-tab-library';
 import { parseTabText } from './src/logic/transposer';
 import { useSavedTabLibrary } from './src/hooks/use-saved-tab-library';
-import { useAudioSettings } from './src/hooks/use-audio-settings';
+import { NativeAudioSource, useAudioSettings } from './src/hooks/use-audio-settings';
 import {
   usePersistedPreferences,
   usePersistPreferencesEffect,
@@ -483,9 +483,11 @@ function ToneFollowDebugPanel(props: {
       ? 'Mic input (web)'
       : props.listenSource === 'native'
         ? 'Mic input (native)'
-        : props.listenSource === 'sim'
-          ? 'Simulated Hz (fallback)'
-          : '—';
+        : props.listenSource === 'webview'
+          ? 'Mic input (webview)'
+          : props.listenSource === 'sim'
+            ? 'Simulated Hz (fallback)'
+            : '—';
 
   return (
     <View style={styles.debugPanel}>
@@ -1830,6 +1832,8 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
   const {
     showDebug,
     setShowDebug,
+    nativeAudioSource,
+    setNativeAudioSource,
     toneToleranceInput,
     setToneToleranceInput,
     toneFollowMinConfidenceInput,
@@ -1847,6 +1851,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
     simHz,
   } = useAudioSettings({
     showDebug: initialPreferences.audioSettings.showDebug,
+    nativeAudioSource: initialPreferences.audioSettings.nativeAudioSource,
     toneToleranceInput: initialPreferences.audioSettings.toneToleranceInput,
     toneFollowMinConfidenceInput: initialPreferences.audioSettings.toneFollowMinConfidenceInput,
     noteSeparationRatioInput: initialPreferences.audioSettings.noteSeparationRatioInput,
@@ -1968,7 +1973,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
   const persistedScreen: 'scales' | 'tabs' = screen === 'tabs' ? 'tabs' : 'scales';
   usePersistPreferencesEffect(
     {
-      version: 1,
+      version: 2,
       musicalSelection: {
         harmonicaKeyPc: harmonicaKey.pc,
         scaleRoot,
@@ -1982,6 +1987,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
       },
       audioSettings: {
         showDebug,
+        nativeAudioSource,
         toneToleranceInput,
         toneFollowMinConfidenceInput,
         noteSeparationRatioInput,
@@ -2510,6 +2516,23 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
                 <Text style={styles.debugToggleText}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
               </Pressable>
             </View>
+            {Platform.OS === 'ios' && (
+              <View style={styles.propertiesCompactDropdownRow}>
+                <View style={styles.propertiesCompactDropdownField}>
+                  <Dropdown
+                    compact
+                    testID="native-audio-source-dropdown"
+                    label="Audio source (debug)"
+                    value={nativeAudioSource}
+                    options={[
+                      { label: 'WebView', value: 'webview' },
+                      { label: 'Native', value: 'native' },
+                    ]}
+                    onChange={(value) => setNativeAudioSource(value as NativeAudioSource)}
+                  />
+                </View>
+              </View>
+            )}
             <Text style={styles.propertiesTitle}>Tone Follow</Text>
             <View style={styles.propertiesInlineFields}>
               <View style={styles.propertiesInlineField}>
@@ -2572,7 +2595,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
             <View style={styles.propertiesInlineFields}>
               <View style={styles.propertiesInlineField}>
                 <View style={styles.propertiesLabelWithHelp}>
-                  <Text style={styles.dropdownLabel}>Send interval ms (debug)</Text>
+                  <Text style={styles.dropdownLabel}>Native send interval ms (debug)</Text>
                 </View>
                 <TextInput
                   testID="send-interval-debug-input"
@@ -2867,7 +2890,12 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
   }
 
   return (
-    <AudioListeningProvider simHz={simHz} harmonicaPc={harmonicaKey.pc} minSendIntervalMs={minSendIntervalMs}>
+    <AudioListeningProvider
+      simHz={simHz}
+      harmonicaPc={harmonicaKey.pc}
+      minSendIntervalMs={minSendIntervalMs}
+      nativeAudioSource={nativeAudioSource}
+    >
       <SafeAreaView style={styles.safeArea}>
         {isTabsLibraryScreen || isScalesScreen ? (
           <View style={styles.staticContainer}>{renderMainContent()}</View>

@@ -5,8 +5,22 @@
 Test whether an iOS WebView can reproduce the same reliable microphone input that
 iPad Safari provides for the web app, without replacing the native UI.
 
-This is a spike, not the default architecture. The current native path still uses
-`HarmonicaAudioModule` to send PCM frames to shared TypeScript detection.
+The spike is now validated on iPad and promoted to the default iOS audio path.
+The native AVAudioEngine path remains available as a temporary debug fallback.
+
+## Implementation Status
+
+Implemented as a detector-only iOS path behind the temporary Properties
+`Audio source (debug)` dropdown. `WebView` is the iOS default; selecting
+`Native` switches back to the AVAudioEngine path for comparison/fallback.
+The WebView path mounts a hidden `HarmonicaAudioView`, loads a bundled
+WKWebView detector page from the iOS module resources, runs 4096-sample Web
+Audio/YIN detection there, and forwards pitch updates into the existing shared
+`useAudioListening` path as `listenSource: 'webview'`.
+
+On-device iPad validation passed on 2026-05-25: the WebView path responded like
+the web app in Scales/Tabs follow and correctly handled the known high-note and
+low-guard-note cases called out below.
 
 ## Current Evidence
 
@@ -15,10 +29,13 @@ This is a spike, not the default architecture. The current native path still use
   octave-low YIN frames.
 - Switching native iOS capture to `.measurement` made practical detection worse,
   so that mode should stay reverted unless a later experiment proves otherwise.
-- The generated `HarmonicaAudioView` WebView files in the custom Expo module are
-  template scaffolding only. They do not currently register a usable detector
-  view, load native props, request media permission, or post pitch updates back
-  to React Native.
+- `HarmonicaAudioView` now registers a usable iOS detector view with native
+  props, WKWebView script-message events, microphone media-capture permission
+  handling, and pitch updates back to React Native. Android remains native-only
+  for this spike.
+- The bundled detector page is stored as `webview-detector.html` in the iOS
+  module resources and loaded with `https://harmonica-tabs.local/` as the base
+  URL so WKWebView keeps the secure-origin behavior required by `getUserMedia`.
 
 ## Spike Shape
 
