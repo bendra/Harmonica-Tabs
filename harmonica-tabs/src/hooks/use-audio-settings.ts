@@ -33,6 +33,16 @@ export function parseBoundedInteger(value: string, fallback: number, min: number
   return Math.max(min, Math.min(max, parsed));
 }
 
+export type RangeStatus = { kind: 'min' | 'max'; limit: number } | null;
+
+export function checkRange(value: string, min: number, max: number): RangeStatus {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed < min) return { kind: 'min', limit: min };
+  if (parsed > max) return { kind: 'max', limit: max };
+  return null;
+}
+
 export type AudioSettingsInitial = {
   showDebug?: boolean;
   nativeAudioSource?: NativeAudioSource;

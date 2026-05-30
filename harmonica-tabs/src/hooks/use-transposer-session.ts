@@ -199,7 +199,8 @@ export function useTransposerSession({
       nextState.activeTokenIndex === transposerFollowState.activeTokenIndex &&
       nextState.waitingForRelease === transposerFollowState.waitingForRelease &&
       nextState.peakRmsSinceAdvance === transposerFollowState.peakRmsSinceAdvance &&
-      nextState.lastAmplitudeReleaseRms === transposerFollowState.lastAmplitudeReleaseRms
+      nextState.releaseFloorRms === transposerFollowState.releaseFloorRms &&
+      nextState.prevAttackPeak === transposerFollowState.prevAttackPeak
     ) {
       return;
     }

@@ -9,6 +9,7 @@
     "device": "EXPO_PUBLIC_BUILD_ID=$(node ./scripts/print-build-id.js) expo run:ios --device",
     "web": "EXPO_PUBLIC_BUILD_ID=$(node ./scripts/print-build-id.js) expo start --web",
     "web:tunnel": "EXPO_PUBLIC_BUILD_ID=$(node ./scripts/print-build-id.js) NODE_PATH=$(npm root -g) expo start --web --tunnel --clear",
+    "web:cf-tunnel": "node ./scripts/web-cf-tunnel.js",
     "build:web": "EXPO_PUBLIC_BUILD_ID=$(node ./scripts/print-build-id.js) expo export -p web",
     "build:netlify": "EXPO_PUBLIC_BUILD_ID=$(node ./scripts/print-build-id.js) expo export -p web && node ./scripts/netlify-headers.js",
     "test": "vitest run",

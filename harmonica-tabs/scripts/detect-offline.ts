@@ -147,7 +147,8 @@ type FollowFrameTrace = {
   waitingBefore: boolean;
   waitingAfter: boolean;
   peakRmsAfter: number;
-  lastAmplitudeReleaseRmsAfter: number | null;
+  releaseFloorRmsAfter: number;
+  prevAttackPeakAfter: number | null;
   advanced: boolean;
 };
 
@@ -768,7 +769,8 @@ function main() {
               waitingBefore: previousState.waitingForRelease,
               waitingAfter: followState.waitingForRelease,
               peakRmsAfter: followState.peakRmsSinceAdvance,
-              lastAmplitudeReleaseRmsAfter: followState.lastAmplitudeReleaseRms,
+              releaseFloorRmsAfter: followState.releaseFloorRms,
+              prevAttackPeakAfter: followState.prevAttackPeak,
               advanced: followResult.status === 'advanced',
             });
             if (followResult.status === 'advanced') {
@@ -928,7 +930,7 @@ function main() {
         console.log('  app advances: none');
       }
       if (lastTrace) {
-        console.log(`  final app state: active=${lastTrace.activeAfter} waiting=${lastTrace.waitingAfter} peakRms=${fmtRms(lastTrace.peakRmsAfter)} lastReleaseRms=${lastTrace.lastAmplitudeReleaseRmsAfter == null ? 'null' : fmtRms(lastTrace.lastAmplitudeReleaseRmsAfter)}`);
+        console.log(`  final app state: active=${lastTrace.activeAfter} waiting=${lastTrace.waitingAfter} peakRms=${fmtRms(lastTrace.peakRmsAfter)} releaseFloor=${Number.isFinite(lastTrace.releaseFloorRmsAfter) ? fmtRms(lastTrace.releaseFloorRmsAfter) : '∞'} prevAttackPeak=${lastTrace.prevAttackPeakAfter == null ? 'null' : fmtRms(lastTrace.prevAttackPeakAfter)}`);
       }
       console.log();
     }

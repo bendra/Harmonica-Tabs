@@ -32,14 +32,14 @@ import {
 } from './src/hooks/use-musical-selection';
 import { matchFrequencyToTabs, TabPitchMatch } from './src/logic/pitch';
 import { getHarmonicaSuggestions } from './src/logic/harmonica-suggestions';
-import { DEFAULT_AUDIO_SETTINGS } from './src/config/default-settings';
+import { AUDIO_SETTINGS_LIMITS, DEFAULT_AUDIO_SETTINGS } from './src/config/default-settings';
 import {
   getSavedTabContext,
   SavedTabRecord,
 } from './src/logic/saved-tab-library';
 import { parseTabText } from './src/logic/transposer';
 import { useSavedTabLibrary } from './src/hooks/use-saved-tab-library';
-import { NativeAudioSource, useAudioSettings } from './src/hooks/use-audio-settings';
+import { checkRange, NativeAudioSource, useAudioSettings } from './src/hooks/use-audio-settings';
 import {
   usePersistedPreferences,
   usePersistPreferencesEffect,
@@ -2019,6 +2019,17 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
     );
   }
 
+  function renderRangeWarning(value: string, limits: { min: number; max: number }) {
+    const status = checkRange(value, limits.min, limits.max);
+    if (!status) return null;
+    const label = status.kind === 'max' ? 'Above max' : 'Below min';
+    return (
+      <Text style={styles.propertiesFieldWarning}>
+        {label} — using {status.limit}
+      </Text>
+    );
+  }
+
   function ensurePositionVisible(positionNumber: number) {
     if (visibleScaleKeyOptions.some((option) => option.position === positionNumber)) {
       return;
@@ -2552,6 +2563,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
                   placeholderTextColor="#64748b"
                   style={styles.propertiesNumberInput}
                 />
+                {renderRangeWarning(toneToleranceInput, AUDIO_SETTINGS_LIMITS.toneToleranceCents)}
               </View>
               <View style={styles.propertiesInlineField}>
                 <View style={styles.propertiesLabelWithHelp}>
@@ -2570,6 +2582,10 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
                   placeholderTextColor="#64748b"
                   style={styles.propertiesNumberInput}
                 />
+                {renderRangeWarning(
+                  toneFollowMinConfidenceInput,
+                  AUDIO_SETTINGS_LIMITS.toneFollowMinConfidence,
+                )}
               </View>
             </View>
             <View style={styles.propertiesInlineFields}>
@@ -2590,6 +2606,10 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
                   placeholderTextColor="#64748b"
                   style={styles.propertiesNumberInput}
                 />
+                {renderRangeWarning(
+                  noteSeparationRatioInput,
+                  AUDIO_SETTINGS_LIMITS.noteSeparationRatio,
+                )}
               </View>
             </View>
             <View style={styles.propertiesInlineFields}>
@@ -2610,6 +2630,10 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
                   placeholderTextColor="#64748b"
                   style={styles.propertiesNumberInput}
                 />
+                {renderRangeWarning(
+                  minSendIntervalMsInput,
+                  AUDIO_SETTINGS_LIMITS.minSendIntervalMs,
+                )}
               </View>
             </View>
             <View style={styles.propertiesRow}>
@@ -3101,6 +3125,10 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontFamily: 'Courier',
     fontSize: 13,
+  },
+  propertiesFieldWarning: {
+    color: '#fda4af',
+    fontSize: 11,
   },
   dropdownTrigger: {
     flexDirection: 'row',

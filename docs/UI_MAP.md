@@ -82,12 +82,12 @@ SafeAreaView (styles.safeArea)
       │     ├─ Harmonica Keys Standard/Flat/Sharp Select (styles.propertiesField + styles.dropdown*)
       │     ├─ Target Keys Flat/Sharp Select (styles.propertiesField + styles.dropdown*)
       │     ├─ 2 Draw / 3 Blow Preference Select + Help Button (styles.dropdownLabelRow + styles.helpIconButton)
-      │     ├─ Tone Tolerance Input + Help Button (styles.propertiesInlineField + styles.helpIconButton)
-      │     ├─ Minimum Confidence Input + Help Button (styles.propertiesInlineField + styles.helpIconButton)
-      │     ├─ Note Separation Input + Help Button (styles.propertiesInlineField + styles.helpIconButton)
+      │     ├─ Tone Tolerance Input + Help Button (styles.propertiesInlineField + styles.helpIconButton) — shows inline range warning (styles.propertiesFieldWarning) when typed value is outside the allowed range
+      │     ├─ Minimum Confidence Input + Help Button (styles.propertiesInlineField + styles.helpIconButton) — shows inline range warning (styles.propertiesFieldWarning) when out of range
+      │     ├─ Note Separation Input + Help Button (styles.propertiesInlineField + styles.helpIconButton) — shows inline range warning (styles.propertiesFieldWarning) when out of range
       │     ├─ Debug Toggle Button (styles.propertiesRow + styles.debugToggle)
       │     ├─ Audio Source Debug Select (iOS only, temporary WebView audio spike)
-      │     ├─ Native Send Interval Debug Input (`testID="send-interval-debug-input"`, native fallback only)
+      │     ├─ Native Send Interval Debug Input (`testID="send-interval-debug-input"`, native fallback only) — shows inline range warning (styles.propertiesFieldWarning) when out of range
       │     └─ Help Button (styles.propertiesRow + styles.debugToggle)
       ├─ Help Screen (`screen === 'help'`)
       │  └─ Help Card (styles.propertiesCard)
@@ -115,7 +115,7 @@ SafeAreaView (styles.safeArea)
 - **Page 1 Header**: `pageOneHeader`, `topRowToggle`, `scalePickerColumn`
 - **Dropdowns**: `dropdown`, `dropdownLabel`, `dropdownTrigger`, `dropdownItem`
 - **Toggle Group**: `toggleGroup`, `toggleRow`, `toggleItem`
-- **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`
+- **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`, `propertiesFieldWarning`
 - **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
 - **Help / Tab Symbols**: `helpSection`, `helpSectionTitle`, `helpBody`, `helpEmphasis`, `helpBulletRow`, `helpBulletDot`, `helpBulletText`, `symbolRow`, `symbolKey`, `symbolMeaning`
 - **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue` (status line below button row), `debugPanel`, `debugPanelLabel`
