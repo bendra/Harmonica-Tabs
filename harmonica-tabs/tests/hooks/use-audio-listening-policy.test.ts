@@ -28,7 +28,7 @@ describe('audio listening commit policies', () => {
     expect(secondFrame.frequency).toBeCloseTo(d4, 3);
   });
 
-  it('responsive path switches faster than the stable path during a C-to-D transition', () => {
+  it('responsive and stable paths both commit on the second consecutive new frame during a known transition', () => {
     const c4 = midiToFrequency(60);
     const d4 = midiToFrequency(62);
     let state = createResponsiveCommitState();
@@ -43,7 +43,23 @@ describe('audio listening commit policies', () => {
     expect(secondD.frequency).toBeCloseTo(d4, 3);
 
     expect(smoothedFrequency([c4, c4, c4, c4, d4])).toBeCloseTo(c4, 3);
-    expect(smoothedFrequency([c4, c4, c4, d4, d4])).toBeCloseTo(c4, 3);
+    expect(smoothedFrequency([c4, c4, c4, d4, d4])).toBeCloseTo(d4, 3);
+  });
+
+  it('stable fast-path does not fire when the last two frames disagree or include silence', () => {
+    const c4 = midiToFrequency(60);
+    const d4 = midiToFrequency(62);
+
+    expect(smoothedFrequency([c4, c4, c4, c4, null])).toBeCloseTo(c4, 3);
+    expect(smoothedFrequency([c4, c4, c4, d4, null])).toBeCloseTo(c4, 3);
+    expect(smoothedFrequency([c4, c4, c4, null, d4])).toBeCloseTo(c4, 3);
+  });
+
+  it('stable fast-path stays inert during an attack from silence (no prior winner)', () => {
+    const a4 = midiToFrequency(69);
+
+    expect(smoothedFrequency([null, null, null, a4, a4])).toBeNull();
+    expect(smoothedFrequency([null, null, a4, a4, a4])).toBeCloseTo(a4, 3);
   });
 
   it('responsive path drops immediately when confidence or signal is lost', () => {
