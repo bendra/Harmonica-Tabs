@@ -83,6 +83,17 @@ The same swap toggle is available in **Tabs → Transpose**, with the same behav
 
 ---
 
+## Detecting the key (Detect key)
+
+When you're sitting in at a jam and don't know what key the band is in, tap **Detect key** (next to **Listen** on the Scales screen) and let HarpPilot hear the band for a few seconds. It estimates the song's key and suggests which harps fit. It works on web, Android, and iOS.
+
+- **Your harp stays put.** Detect key keeps the harmonica you already have selected and just moves to the position that plays the detected key on that harp — so you can immediately see which notes work. If that position turns out to be awkward, that's a useful signal: grab a better-suited harp (see the suggestions below) or sit the tune out.
+- **Harp suggestions.** Two lines show the harps that fit best, separate from what's selected. For a **major** key you'll see 1st position (**straight harp**) and 2nd position (**cross harp**); for a **minor** key, 3rd position. For example, detected D major shows: `D major: D harp 1st (straight) · G harp 2nd (cross)`.
+- **The relative key.** A second line offers the relative major/minor — e.g. `or B minor: A harp 3rd`. A major key and its relative minor use the exact same notes, so this is a genuinely different way to play the same song. It's also the part HarpPilot is least certain about (major vs. minor sound identical by notes alone), so if the tune *feels* minor, trust your ear and try that option.
+- **No lock?** If it's too noisy or you caught it between songs, it'll say it couldn't lock onto a key — just tap **Detect key** again.
+
+---
+
 ## Tabs workspace
 
 The Tabs workspace is for saving, organizing, and playing along with your own tabs. It has two views:

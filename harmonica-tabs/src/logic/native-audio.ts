@@ -5,6 +5,12 @@ import { isStaleFrame } from './native-audio-policy';
 
 type PitchUpdateHandler = (update: SingleNoteResult) => void;
 
+/**
+ * Optional raw-frame tap. Receives each captured audio frame, used by key
+ * detection to build a chromagram. Valid synchronously during the call.
+ */
+type FrameHandler = (samples: Float32Array, sampleRate: number) => void;
+
 // Safety-net drop for backlogged frames. With Swift-side producer rate limiting
 // (minSendIntervalMs) the bridge queue stays bounded, so this rarely fires in
 // practice; it remains as a guard against stale frames from start/stop races.
@@ -26,13 +32,14 @@ export function createNativeAudioPitchDetector() {
     return true;
   }
 
-  async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary) {
+  async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary, onFrame?: FrameHandler) {
     currentVocabulary = vocabulary;
     // Subscribe before starting so no frames are missed.
     subscription = HarmonicaAudioModule.addListener('onAudioFrame', (event) => {
       if (!currentVocabulary) return;
       if (isStaleFrame(event.capturedAt, Date.now(), STALE_FRAME_MS)) return;
       const samples = new Float32Array(event.samples);
+      onFrame?.(samples, event.sampleRate);
       const result = detectSingleNote(samples, event.sampleRate, currentVocabulary);
       onUpdate(result);
     });

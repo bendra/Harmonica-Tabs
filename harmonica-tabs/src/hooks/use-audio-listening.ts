@@ -35,6 +35,11 @@ const RESPONSIVE_MIN_CONSECUTIVE_FRAMES = 2;
  *
  * Comparison is by rounded MIDI number so that tiny frame-to-frame pitch drift
  * doesn't split votes between two bins for the same note.
+ *
+ * Recent-dominance fast-path: once a winner exists, two consecutive new-MIDI
+ * frames at the end of the buffer commit immediately, instead of waiting for
+ * the new MIDI to outvote the buffer. This accelerates note transitions while
+ * keeping the full 3-vote requirement for first-time commits out of silence.
  */
 export function smoothedFrequency(buffer: (number | null)[]): number | null {
   const freqsByMidi = new Map<number, number[]>();
@@ -45,12 +50,27 @@ export function smoothedFrequency(buffer: (number | null)[]): number | null {
     freqsByMidi.get(midi)!.push(freq);
   }
 
+  let bestMidi: number | null = null;
   let bestFreqs: number[] = [];
-  for (const freqs of freqsByMidi.values()) {
-    if (freqs.length > bestFreqs.length) bestFreqs = freqs;
+  for (const [midi, freqs] of freqsByMidi.entries()) {
+    if (freqs.length > bestFreqs.length) {
+      bestFreqs = freqs;
+      bestMidi = midi;
+    }
   }
 
   if (bestFreqs.length < SMOOTHING_MIN_VOTES) return null;
+
+  const last = buffer[buffer.length - 1];
+  const secondLast = buffer[buffer.length - 2];
+  if (last != null && secondLast != null) {
+    const lastMidi = Math.round(frequencyToMidi(last));
+    const secondLastMidi = Math.round(frequencyToMidi(secondLast));
+    if (lastMidi === secondLastMidi && lastMidi !== bestMidi) {
+      return last;
+    }
+  }
+
   return bestFreqs[bestFreqs.length - 1];
 }
 

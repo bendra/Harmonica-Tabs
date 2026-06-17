@@ -17,6 +17,13 @@ type PitchUpdate = {
 type PitchUpdateHandler = (update: PitchUpdate) => void;
 
 /**
+ * Optional raw-frame tap. Receives each captured audio frame alongside the
+ * pitch update, used by key detection to build a chromagram. The frame is only
+ * valid synchronously during the call (it may be reused by the audio engine).
+ */
+type FrameHandler = (samples: Float32Array, sampleRate: number) => void;
+
+/**
  * Creates a minimal Web Audio pitch detector with start/stop controls.
  */
 export function createWebAudioPitchDetector() {
@@ -29,6 +36,7 @@ export function createWebAudioPitchDetector() {
   let startPromise: Promise<void> | null = null;
   let generation = 0;
   let onUpdateRef: PitchUpdateHandler | null = null;
+  let onFrameRef: FrameHandler | null = null;
   let currentVocabulary: HarmonicaVocabulary | null = null;
 
   function nowMs() {
@@ -127,8 +135,9 @@ export function createWebAudioPitchDetector() {
    * the Goertzel algorithm to distinguish adjacent harmonica notes (~20–30 Hz
    * apart in the middle octave, requiring <10 Hz frequency resolution).
    */
-  async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary) {
+  async function start(onUpdate: PitchUpdateHandler, vocabulary: HarmonicaVocabulary, onFrame?: FrameHandler) {
     onUpdateRef = onUpdate;
+    onFrameRef = onFrame ?? null;
     currentVocabulary = vocabulary;
     if (running) return;
     if (startPromise) {
@@ -184,6 +193,7 @@ export function createWebAudioPitchDetector() {
           if (generation !== startGeneration || !running || !resources.audioContext) return;
           const input = event.inputBuffer?.getChannelData(0);
           if (!input || !currentVocabulary) return;
+          onFrameRef?.(input, resources.audioContext.sampleRate);
           const callbackAtMs = nowMs();
           const detectorStartAtMs = callbackAtMs;
           const result = detectSingleNote(input, resources.audioContext.sampleRate, currentVocabulary);
@@ -248,6 +258,7 @@ export function createWebAudioPitchDetector() {
     stream = null;
     currentVocabulary = null;
     onUpdateRef = null;
+    onFrameRef = null;
     void cleanupResources(resources, { clearCallback: false, resetGlobal: false });
   }
 

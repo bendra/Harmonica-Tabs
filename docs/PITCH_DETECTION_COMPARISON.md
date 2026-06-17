@@ -268,6 +268,21 @@ High-register caution:
 
 Taken together, the low- and middle-register screenshot sequences are strong evidence that `harmonica-tabs` often identifies the new note before it updates the visible stable note. That makes smoothing/stabilization the leading explanation for the visible delay in ordinary note transitions. The highest-register example should remain flagged as a potentially separate problem, because it looks more like a pitch/register-selection disagreement than a simple smoothing delay.
 
+## Evidence From `debug-6-6` Screenshots (2026-06-06)
+
+A second side-by-side capture (Eb harmonica, hole 1 blow and draw) used enlarged frames so the `harmonica-tabs` debug panel was finally fully readable. It confirms and sharpens the `debug-04-25` conclusion: the lag is entirely post-detection.
+
+**Blow attack (Eb1 ≈ 311 Hz).** At the exact frame `tuner` first commits `D♯4`, the debug panel already reads `Raw 311.0`, `Snap 311.1`, `Labels Raw D♯4 · Snap D♯4 · Stable —`, `Gate pass`, `Vote 1/3`. The detector found the note simultaneously with `tuner`; the only thing missing was votes. The visible delay was purely the 3-vote requirement walking 1/3 → 2/3 → 3/3.
+
+**Draw transition (Eb1 ≈ 349 Hz, after a blow note).** Even before `tuner` had switched off `D♯4`, the panel already read `Raw F4 · Snap F4 · Stable D♯4` — i.e. the YIN detector was *slightly ahead of* `tuner` on the transition. The visible `1 — 311.1 Hz` persisting on screen was the 5-frame majority vote still resolving (`[A,A,A,A,F]` → `[A,A,A,F,F]` → `[A,A,F,F,F]`), not the detector being slow.
+
+**Takeaway:** the "`tuner` feels snappier" perception is a UI-pipeline artifact, not an algorithm gap. `harmonica-tabs`'s detector is competitive with, or slightly faster than, `tuner`'s. The cost is concentrated in the stable-path smoothing/hold.
+
+### Actions taken
+
+- **Done — recent-dominance fast-path** in `smoothedFrequency` (`src/hooks/use-audio-listening.ts`): once a majority winner exists, two consecutive new-MIDI frames at the end of the buffer commit immediately, so transitions resolve in ~186 ms (2 frames) instead of ~280 ms (3 frames). The full 3-vote requirement is preserved for the first commit out of silence, and the fast-path does not fire if either of the last two frames is `null`. Covered by new cases in `tests/hooks/use-audio-listening-policy.test.ts`. Subjectively confirmed good.
+- **Deferred — lowering `SMOOTHING_MIN_VOTES` 3 → 2.** This only affects **attack from silence** (the fast-path above deliberately does not fire without a prior winner, so the first note of a phrase still walks 3 votes). After the fast-path landed, the remaining ~93 ms bites only once per phrase, and lowering the vote count would spend the jitter-suppression margin exactly where the detector is least settled — the blow capture shows `Vote 1/3` while `Raw` is still wobbling 311 → 309 Hz. Decision: leave the 3-vote attack requirement as-is. Revisit only if a fresh recording shows the first-note-after-silence delay is annoying, and verify there is no attack flicker before keeping the change.
+
 ## Bottom Line
 
 `tuner` is better at one narrow job: general note detection with a mature external detector and very little post-processing.
