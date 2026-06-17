@@ -20,8 +20,10 @@ SafeAreaView (styles.safeArea)
       │  │  ├─ Default: Harmonica Key + Target Position/Key (styles.topRowKey + styles.dropdown*)
       │  │  └─ Inverted: Target Key (all 12) + Harmonica + Position (practical-first list)
       │  ├─ Listen Card (styles.listenCard)
-      │  │  ├─ Listen Row (styles.listenRow) — contains Listen Button only
+      │  │  ├─ Listen Row (styles.listenRow) — Listen Button (`testID="scales-listen-button"`) + Detect Key Button (`testID="scales-detect-key-button"`, "🎯 Detect key" / "✕ Stop"; runs a ~6s key-detection session)
       │  │  ├─ Status Line (styles.listenValue) — frequency/note data when on; prompt when off
+      │  │  ├─ Key Detect Guidance (`testID="scales-detect-key-status"`, styles.listenValue, conditional) — listening countdown, retry/error prompt, or (confident) the detected key + its idiomatic harps (e.g. "D major: D harp 1st (straight) · G harp 2nd (cross)"). Apply always keeps the selected harp; this line is informational
+      │  │  ├─ Key Detect Relative (`testID="scales-detect-key-alt"`, styles.listenValue + styles.listenValueAlt, conditional) — dimmer second line: the relative major/minor + its idiomatic harps (e.g. "or B minor: A harp 3rd")
       │  │  └─ Debug Panel (styles.debugPanel, conditional)
       │  ├─ Header Controls (styles.pageOneHeader)
       │  │  ├─ Scale Name (styles.scalePickerColumn + styles.dropdown*)
@@ -118,7 +120,7 @@ SafeAreaView (styles.safeArea)
 - **Properties**: `propertiesCard`, `propertiesTitle`, `propertiesField`, `propertiesRow`, `debugToggle`, `propertiesFieldWarning`
 - **Properties Toggles**: `propertiesToggleButton`, `propertiesToggleText`
 - **Help / Tab Symbols**: `helpSection`, `helpSectionTitle`, `helpBody`, `helpEmphasis`, `helpBulletRow`, `helpBulletDot`, `helpBulletText`, `symbolRow`, `symbolKey`, `symbolMeaning`
-- **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue` (status line below button row), `debugPanel`, `debugPanelLabel`
+- **Listen Area (Main)**: `listenCard`, `listenRow`, `listenButton`, `listenValue` (status line below button row), `debugPanel`, `debugPanelLabel`; Scales adds a Detect Key button (`testID="scales-detect-key-button"`), key-detect guidance line (`testID="scales-detect-key-status"`), and a dimmer relative-key alternative line (`testID="scales-detect-key-alt"`, `listenValueAlt`)
 - **Scales Workspace**: `scalesWorkspace`, responsive shell via `testID="scales-workspace-shell"`, results scroller via `testID="scales-results-scroll"`
 - **Results**: `resultsList`, `resultRow`, `resultHeader`, `resultTitle`
 - **Main Tabs**: `tabGroupList`, `tabGroup`, `resultTabs`

@@ -32,6 +32,13 @@
 - After more iOS WebView audio soak testing, decide when to remove the temporary native fallback/debug controls: the Properties "Audio source (debug)" selector, the native AVAudioEngine detector path, and the native-only "Native send interval ms (debug)" tuning field. Keep `docs/WEBVIEW_AUDIO_SPIKE.md` as the validation record until that decision is made.
 - Keep an eye on high-register detector/register-selection edge cases beyond octave-low YIN errors, especially if new E-harmonica hole 10 blow/draw samples reproduce a distinct issue.
 - Improve arpeggio tone-follow feedback: replace the floating caret with per-note highlighting that shows which arpeggio note is currently being played (within tolerance), and add recognition of chords (multiple simultaneous notes).
+- Key detection (`Detect key` on `Scales`) follow-ups:
+  - Tune accuracy against real band audio using `scripts/key-detect-offline.ts` (frequency band, `minRms`, `KEY_CONFIDENCE_MIN`); current thresholds are conservative placeholders validated only on synthetic signals.
+  - Consider supporting Detect Key on the default iOS WebView audio path by computing the chromagram inside `webview-detector.html` (currently Detect Key forces the native path on iOS).
+  - Consider an in-app "analyze a recorded file" entry point (file picker + decode) — the pure `key-detector.ts` module already supports offline frames.
+  - Revisit the major-vs-relative-minor disambiguation (the shakiest part); possibly weight the chroma by detected bass/root energy.
+  - Add a Help "Reading the key suggestions" section (progressive disclosure: relative keys, what straight/cross/positions mean) so the live screen can stay terse.
+  - Consider making the suggested harps in the guidance tappable to apply (currently informational text; apply always keeps the selected harp).
 - accessibility
 - localization
 - Investigate errors encountered on ipad through idevicesyslog | grep harmonicatabs | grep \<Error\>

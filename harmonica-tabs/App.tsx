@@ -46,6 +46,9 @@ import {
 } from './src/hooks/use-persisted-preferences';
 import { PersistedPreferences } from './src/logic/preferences';
 import { AudioListeningProvider, useAudioListening } from './src/hooks/use-audio-listening';
+import { useKeyDetection } from './src/hooks/use-key-detection';
+import { KeyEstimate, isConfidentKey } from './src/logic/key-detector';
+import { recommendedForQuality, relativeKey, idiomaticHarpsForKey } from './src/logic/key-suggestions';
 import { useTransposerSession } from './src/hooks/use-transposer-session';
 import { useTabEditor, SaveTabMode, TabsSubview } from './src/hooks/use-tab-editor';
 import { LatencySnapshot } from './src/logic/audio-latency';
@@ -409,6 +412,7 @@ type ScalesWorkspaceProps = {
   transposerFollowStatus: string;
   topRowInverted: boolean;
   onTopRowInvertedChange: (next: boolean) => void;
+  onApplyDetectedKey: (estimate: KeyEstimate) => void;
 };
 
 type TabsTransposeViewProps = {
@@ -735,6 +739,9 @@ function formatHarmonicaKeyLabel(harmonicaPc: number, style: HarmonicaNoteLabelS
   return pcToNote(harmonicaPc, style === 'flat');
 }
 
+/** How long a Detect Key session listens before estimating the band's key. */
+const KEY_DETECT_WINDOW_MS = 6000;
+
 const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspaceProps) {
   const {
     isListening,
@@ -754,6 +761,20 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
     startListening,
     stopListening,
   } = useAudioListening();
+  const keyDetection = useKeyDetection(KEY_DETECT_WINDOW_MS);
+  const lastAppliedKeyRef = useRef<KeyEstimate | null>(null);
+  const isDetectingKey = keyDetection.status === 'listening';
+
+  // Apply a confident detection once: seed the "Need harp?" view with the key.
+  useEffect(() => {
+    if (keyDetection.status !== 'done') return;
+    const estimate = keyDetection.result;
+    if (estimate && isConfidentKey(estimate) && lastAppliedKeyRef.current !== estimate) {
+      lastAppliedKeyRef.current = estimate;
+      props.onApplyDetectedKey(estimate);
+    }
+  }, [keyDetection.status, keyDetection.result, props]);
+
   const [tabLayouts, setTabLayouts] = useState<LayoutRect[]>([]);
   const [arpeggioLayouts, setArpeggioLayouts] = useState<Record<string, LayoutRect[]>>({});
   const [mainSelected, setMainSelected] = useState(true);
@@ -776,6 +797,53 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
         : 'No signal'
     : 'Tap to start pitch detection';
   const caretSize = 18;
+
+  const keyDetect: { main: string | null; alt: string | null } = (() => {
+    if (keyDetection.status === 'listening') {
+      const remaining = Math.max(1, Math.ceil((1 - keyDetection.progress) * (KEY_DETECT_WINDOW_MS / 1000)));
+      return { main: `Listening for the band… ${remaining}s — hold steady`, alt: null };
+    }
+    if (keyDetection.status === 'error') {
+      return { main: keyDetection.error ?? 'Key detection unavailable', alt: null };
+    }
+    if (keyDetection.status === 'done') {
+      const estimate = keyDetection.result;
+      if (!estimate || !isConfidentKey(estimate)) {
+        return { main: 'Couldn’t lock a key — try again', alt: null };
+      }
+
+      // Format the idiomatic harps for a key, e.g. "D harp 1st (straight) · G harp 2nd (cross)".
+      const formatHarps = (tonicPc: number, quality: typeof estimate.quality) =>
+        idiomaticHarpsForKey(tonicPc, quality)
+          .map((choice) => {
+            const harpLabel = formatHarmonicaKeyLabel(choice.harmonicaPc, props.harmonicaKeyLabelStyle);
+            const feel = choice.feel ? ` (${choice.feel})` : '';
+            return `${harpLabel} harp ${formatOrdinal(choice.positionNumber)}${feel}`;
+          })
+          .join(' · ');
+
+      const keyLabel = `${pcToNote(estimate.tonicPc, props.targetKeyPreferFlats)} ${estimate.quality}`;
+      const main = `${keyLabel}: ${formatHarps(estimate.tonicPc, estimate.quality)}`;
+
+      // The relative major/minor — same notes, the other tonal reading — with its
+      // own idiomatic harps. Covers the detector's least-certain (major vs minor) call.
+      const rel = relativeKey(estimate.tonicPc, estimate.quality);
+      const relKeyLabel = `${pcToNote(rel.tonicPc, props.targetKeyPreferFlats)} ${rel.quality}`;
+      const alt = `or ${relKeyLabel}: ${formatHarps(rel.tonicPc, rel.quality)}`;
+      return { main, alt };
+    }
+    return { main: null, alt: null };
+  })();
+
+  function handleDetectKeyPress() {
+    if (isDetectingKey) {
+      keyDetection.cancel();
+      return;
+    }
+    // Only one mic tap at a time — stop note-follow listening before detecting.
+    if (isListening) stopListening();
+    void keyDetection.start();
+  }
 
   useEffect(() => {
     const caretVisible = caretPos !== null;
@@ -899,14 +967,22 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
         <View style={[styles.listenCard, scalesListenCardStyle]}>
           <View style={[styles.listenRow, scalesListenRowStyle]}>
             <Pressable
+              testID="scales-listen-button"
+              disabled={isDetectingKey}
               onPress={() => {
+                if (isDetectingKey) return;
                 if (isListening) {
                   stopListening();
                 } else {
                   void startListening();
                 }
               }}
-              style={[styles.listenButton, scalesListenButtonStyle, isListening && styles.listenButtonActive]}
+              style={[
+                styles.listenButton,
+                scalesListenButtonStyle,
+                isListening && styles.listenButtonActive,
+                isDetectingKey && styles.listenButtonDisabled,
+              ]}
             >
               <View style={styles.listenButtonContent}>
                 <Text
@@ -914,14 +990,52 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
                     styles.listenButtonTitle,
                     scalesListenButtonTitleStyle,
                     isListening && styles.listenButtonTextActive,
+                    isDetectingKey && styles.listenButtonTextDisabled,
                   ]}
                 >
                   🎤 Listen
                 </Text>
               </View>
             </Pressable>
+            <Pressable
+              testID="scales-detect-key-button"
+              onPress={handleDetectKeyPress}
+              style={[
+                styles.listenButton,
+                scalesListenButtonStyle,
+                isDetectingKey && styles.listenButtonActive,
+              ]}
+            >
+              <View style={styles.listenButtonContent}>
+                <Text
+                  style={[
+                    styles.listenButtonTitle,
+                    scalesListenButtonTitleStyle,
+                    isDetectingKey && styles.listenButtonTextActive,
+                  ]}
+                >
+                  {isDetectingKey ? '✕ Stop' : '🎯 Detect key'}
+                </Text>
+              </View>
+            </Pressable>
           </View>
           <Text style={[styles.listenValue, scalesListenValueStyle]}>{statusText}</Text>
+          {keyDetect.main && (
+            <Text
+              testID="scales-detect-key-status"
+              style={[styles.listenValue, scalesListenValueStyle]}
+            >
+              {keyDetect.main}
+            </Text>
+          )}
+          {keyDetect.alt && (
+            <Text
+              testID="scales-detect-key-alt"
+              style={[styles.listenValue, scalesListenValueStyle, styles.listenValueAlt]}
+            >
+              {keyDetect.alt}
+            </Text>
+          )}
           {props.showDebug && (
             <ToneFollowDebugPanel
               detectedRms={detectedRms}
@@ -1663,6 +1777,32 @@ function HelpScreen() {
         </HelpParagraph>
       </HelpSection>
 
+      <HelpSection title="Detecting the key (Detect key)">
+        <HelpParagraph>
+          At a jam, tap Detect key (next to Listen on the Scales screen) and let it hear the band for a few seconds.
+          HarpPilot estimates the song's key and suggests which harps fit. It works on web, Android, and iOS.
+        </HelpParagraph>
+        <HelpBullet>
+          It always keeps the harp you already have selected — it just moves to the position that plays the detected
+          key on that harp, so you can see which notes work. If that position is awkward, that's your cue to grab a
+          different harp (or sit the tune out).
+        </HelpBullet>
+        <HelpBullet>
+          Below that, two lines suggest the harps that fit best. For a major key you'll see 1st position (straight
+          harp) and 2nd position (cross harp); for a minor key, 3rd position. Example for D major:
+          {' '}<Text style={styles.helpEmphasis}>D major: D harp 1st (straight) · G harp 2nd (cross)</Text>.
+        </HelpBullet>
+        <HelpBullet>
+          The second line offers the relative key — e.g. <Text style={styles.helpEmphasis}>or B minor: A harp 3rd</Text>.
+          A major key and its relative minor share the exact same notes, so this is a genuinely different way to play
+          the same song. It's also the call HarpPilot is least sure about, so if the tune feels minor, trust your ear
+          and try that option.
+        </HelpBullet>
+        <HelpBullet>
+          If it can't lock onto a key (too noisy, or between songs), it says so — just tap Detect key again.
+        </HelpBullet>
+      </HelpSection>
+
       <HelpSection title="Tabs workspace">
         <HelpParagraph>
           The Tabs workspace has two views: Library (manage saved tabs) and Transposer (play a saved tab back).
@@ -2050,6 +2190,17 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
     }
     setScaleRoot(nextTargetRoot);
     setTransposerOctaveOffset(0);
+  }
+
+  function applyDetectedKey(estimate: KeyEstimate) {
+    // Always keep the harp already in hand: just move to the position that lands
+    // the detected tonic on it, and set the scale to the song's mode (major →
+    // Mixolydian, minor → Dorian). The textual suggestions show ideal harps; the
+    // player switches via the dropdown / ⇄ Need harp? if they want to.
+    const { scaleId: nextScaleId } = recommendedForQuality(estimate.quality);
+    const positionNumber = getPositionNumberForTargetRootPc(harmonicaKey.pc, estimate.tonicPc);
+    applyHarpAndTargetSelection(harmonicaKey.pc, positionNumber);
+    setScaleId(nextScaleId);
   }
 
   function openSavedTabInTransposer(record: SavedTabRecord) {
@@ -2788,6 +2939,7 @@ function HydratedApp({ initialPreferences }: { initialPreferences: PersistedPref
             transposerFollowStatus={transposerFollowStatus}
             topRowInverted={topRowInverted}
             onTopRowInvertedChange={setTopRowInverted}
+            onApplyDetectedKey={applyDetectedKey}
           />
         )}
         {activePropertiesHelp && (
@@ -3633,6 +3785,10 @@ const styles = StyleSheet.create({
   listenValue: {
     color: '#e2e8f0',
     fontWeight: '600',
+  },
+  listenValueAlt: {
+    color: '#94a3b8',
+    fontWeight: '500',
   },
   arpeggioSection: {
     marginTop: 4,

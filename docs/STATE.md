@@ -11,6 +11,9 @@
 - `harmonica-tabs/src/logic/preferences.ts`: User-preferences persistence (single JSON blob in app storage), with versioned schema and per-field fallback to defaults on malformed/missing data.
 - `harmonica-tabs/src/hooks/use-persisted-preferences.ts`: Loads persisted preferences once on mount and exposes a debounced auto-save effect.
 - `harmonica-tabs/src/logic/harmonica-suggestions.ts`: Pure helper that, given a target pitch class, returns all 12 (harmonica, position) pairs ordered practical-first (1, 2, 3, 5, then the rest). Used by the top-row swap toggle to populate the "Harmonica + Position" suggestion dropdown.
+- `harmonica-tabs/src/logic/key-detector.ts`: Pure musical key detection. Accumulates a 12-bin chromagram from the FFT magnitude spectrum (reusing `magnitudeSpectrum`/`complexFFT` from `fft-detector.ts`) over several seconds, then correlates it against the 24 Krumhansl–Schmuckler major/minor key profiles to estimate `{ tonicPc, quality, confidence, ranked }`. Polyphonic/band analysis, distinct from the monophonic YIN single-note detector.
+- `harmonica-tabs/src/logic/key-suggestions.ts`: Maps a detected key quality to the harp approach we pre-select (major → 2nd position / Mixolydian, minor → 3rd position / Dorian).
+- `harmonica-tabs/src/hooks/use-key-detection.ts`: Runs a fixed-window "Detect Key" session, feeding raw capture frames into `key-detector.ts`. Independent of the note-follow listening pipeline.
 
 ## Key Decisions (Current)
 - Standard 10-hole Richter tuning only.
@@ -54,6 +57,9 @@
 - The app remembers user preferences across launches via a single JSON blob in app storage (`harmonica-tabs:user-preferences:v1`, schema version 2). Persisted: musical selection (harmonica key, target position/key, scale name, arpeggio selection), all Properties screen settings, active workspace (`scales` or `tabs` only — Properties/Help are not persisted), the shared top-row swap-toggle state, and the transposer's source-tab id and octave offset. Explicitly not persisted: listening on/off, the Tabs subview (which is derived from whether a source tab is active). Hydration happens once at startup; the app shows a brief blank screen until the load resolves to avoid flashing default values. Version 1 preference blobs migrate the old implicit native iOS audio source default to WebView.
 - The `⇄` top-row swap toggle is now App-level state shared by both the `Scales` and `Tabs → Transpose` top rows (previously each row tracked its own local state). This keeps the chosen orientation persistent across workspaces.
 - The top row in both `Scales` and `Tabs → Transpose` shows a labeled swap toggle (`⇄ Need harp?` / `⇄ Have harp?`) on the right edge that flips into target-key-first mode. In that inverted mode the left dropdown lists all 12 target keys (not filtered by `positionKeyFilter`); the right dropdown lists every (harp · position) pair that yields the chosen target, ordered practical-first (1, 2, 3, 5, then the rest). Selecting either dropdown applies the (harp, position) pair via `applyHarpAndTargetSelection`, which auto-expands `positionKeyFilter` to `all` when the chosen position would otherwise be hidden.
+- The `Scales` Listen card has a `Detect key` button beside `Listen` that runs a ~6s key-detection session (chromagram + Krumhansl–Schmuckler correlation). On a confident result, "apply" **always keeps the currently selected harp** — it just moves the position to land the detected tonic on that harp and sets the scale to the song's quality (major → Mixolydian, minor → Dorian). Even an impractical kept-harp position is intentional: the player sees which notes work on the harp they own (or that it's their cue to sit out). Low-confidence results prompt a retry and apply nothing.
+- The guidance shows two **quality-aware, informational** lines (separate from the kept-harp selection): the detected key with the harps that fit its quality, and the relative major/minor with its harps. Major shows 1st position (straight) and 2nd (cross); minor shows 3rd. Example — detected D major → `D major: D harp 1st (straight) · G harp 2nd (cross)` and `or B minor: A harp 3rd`. This is quality-aware on purpose: 3rd-position-on-the-tonic would be Dorian (two notes off a major song), so the genuine third option is the relative key, which also covers the detector's least-certain (major vs minor) call. Plain `major`/`minor` + position numbers + `straight`/`cross` are used on the live screen; modal names appear only in the Scale Name picker. (There is no longer a keep-harp/suggest-harp Properties setting — apply always keeps the harp.)
+- Detect Key captures audio wherever raw frames reach JS — web (Web Audio), Android native, and iOS native — and deliberately forces the native path on iOS rather than the default WebView audio path (the WebView detector does not expose frames to RN). Note-follow listening is stopped before a detect session so only one mic tap is active at a time.
 
 ## UI Summary
 - Top-level workspace switcher exposes `Scales` and `Tabs`.
@@ -107,6 +113,10 @@
   - Single-note and chord detector basics.
   - Recorded-frame regressions for high-register YIN octave-low correction.
   - Guard coverage that real low G-harmonica notes are not promoted upward.
+- `harmonica-tabs/tests/logic/key-detector.test.ts`
+  - Pearson correlation edge cases, chroma → key estimation for major/minor triads, and the streaming detector resolving synthetic D-major / E-minor signals (plus silence/reset handling).
+- `harmonica-tabs/tests/logic/key-suggestions.test.ts`
+  - Quality → recommended position/scale mapping (major → 2nd/Mixolydian, minor → 3rd/Dorian).
 - `harmonica-tabs/tests/hooks/use-audio-listening-policy.test.ts`
   - Stable path still requires 3 agreeing frames, while the responsive path commits after 2 consecutive snapped frames and drops immediately on signal loss.
 - `harmonica-tabs/tests/logic/transposer-input.test.ts`

@@ -151,9 +151,10 @@ const OCTAVE_CHECK_MAX_CMND = YIN_THRESHOLD + 0.03;
  *   1. Bit-reversal permutation reorders samples for in-place butterfly passes.
  *   2. Log₂(N) butterfly stages build up the DFT from length-2 sub-problems.
  *
- * Only used internally by yinDifferenceFFT.
+ * Exported so other analyses (e.g. the chromagram in key-detector.ts) can reuse
+ * this FFT instead of re-implementing one.
  */
-function complexFFT(re: Float32Array, im: Float32Array, inverse: boolean): void {
+export function complexFFT(re: Float32Array, im: Float32Array, inverse: boolean): void {
   const N = re.length;
   // Bit-reversal permutation
   for (let i = 1, j = 0; i < N; i++) {
@@ -188,6 +189,33 @@ function complexFFT(re: Float32Array, im: Float32Array, inverse: boolean): void 
       }
     }
   }
+}
+
+/**
+ * Computes the single-sided magnitude spectrum of a real input frame.
+ *
+ * Applies a Hann window (to reduce spectral leakage), runs a forward FFT, and
+ * returns the magnitude |X(f)| for bins 0..N/2-1. Bin k corresponds to frequency
+ * k * sampleRate / N. Exposed for chroma/key analysis (key-detector.ts) that
+ * needs per-bin energy across the whole spectrum rather than YIN's single
+ * fundamental. `input.length` must be a power of two.
+ */
+export function magnitudeSpectrum(input: Float32Array): Float32Array {
+  const N = input.length;
+  const re = new Float32Array(N);
+  const im = new Float32Array(N); // stays zero — input is real
+  for (let i = 0; i < N; i++) {
+    const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+    re[i] = input[i] * w;
+  }
+  complexFFT(re, im, false);
+
+  const half = N >> 1;
+  const mag = new Float32Array(half);
+  for (let k = 0; k < half; k++) {
+    mag[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+  }
+  return mag;
 }
 
 /**
