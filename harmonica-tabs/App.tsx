@@ -739,7 +739,7 @@ function formatHarmonicaKeyLabel(harmonicaPc: number, style: HarmonicaNoteLabelS
   return pcToNote(harmonicaPc, style === 'flat');
 }
 
-/** How long a Detect Key session listens before estimating the band's key. */
+/** How long a Find song key session listens before estimating the band's key. */
 const KEY_DETECT_WINDOW_MS = 6000;
 
 const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspaceProps) {
@@ -795,13 +795,13 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
       : activeTab && effectiveConfidence >= DEFAULT_AUDIO_SETTINGS.confidenceGate
         ? `${activeTab.tab} • ${frequency?.toFixed(1)} Hz ${pitchMatch ? formatCents(pitchMatch.centsOffset) : ''}`
         : 'No signal'
-    : 'Tap to start pitch detection';
+    : 'Track pitch highlights the note you play';
   const caretSize = 18;
 
   const keyDetect: { main: string | null; alt: string | null } = (() => {
     if (keyDetection.status === 'listening') {
       const remaining = Math.max(1, Math.ceil((1 - keyDetection.progress) * (KEY_DETECT_WINDOW_MS / 1000)));
-      return { main: `Listening for the band… ${remaining}s — hold steady`, alt: null };
+      return { main: `Finding song key… ${remaining}s — let the band play`, alt: null };
     }
     if (keyDetection.status === 'error') {
       return { main: keyDetection.error ?? 'Key detection unavailable', alt: null };
@@ -809,7 +809,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
     if (keyDetection.status === 'done') {
       const estimate = keyDetection.result;
       if (!estimate || !isConfidentKey(estimate)) {
-        return { main: 'Couldn’t lock a key — try again', alt: null };
+        return { main: 'Couldn’t find a key — try again', alt: null };
       }
 
       // Format the idiomatic harps for a key, e.g. "D harp 1st (straight) · G harp 2nd (cross)".
@@ -993,7 +993,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
                     isDetectingKey && styles.listenButtonTextDisabled,
                   ]}
                 >
-                  🎤 Listen
+                  🎤 Track pitch
                 </Text>
               </View>
             </Pressable>
@@ -1014,7 +1014,7 @@ const ScalesWorkspace = React.memo(function ScalesWorkspace(props: ScalesWorkspa
                     isDetectingKey && styles.listenButtonTextActive,
                   ]}
                 >
-                  {isDetectingKey ? '✕ Stop' : '🎯 Detect key'}
+                  {isDetectingKey ? '✕ Stop' : '🎯 Find song key'}
                 </Text>
               </View>
             </Pressable>
@@ -1383,7 +1383,7 @@ const TabsTransposeView = React.memo(function TabsTransposeView(props: TabsTrans
                   !canListenOnTransposer && !isListening && styles.listenButtonTextDisabled,
                 ]}
               >
-                🎤 Listen
+                🎤 Track pitch
               </Text>
             </View>
           </Pressable>
@@ -1745,7 +1745,7 @@ function HelpScreen() {
           {' — optionally show triads, 7th chords, or common blues chords for the scale\'s root.'}
         </HelpBullet>
         <HelpParagraph>
-          Tap Listen to start mic detection. A caret moves between tabs to show your detected pitch. If mic access is
+          Tap Track pitch to start mic detection. A caret moves between tabs to show your detected pitch. If mic access is
           unavailable, HarpPilot falls back to a simulated input so the UI still works.
         </HelpParagraph>
       </HelpSection>
@@ -1777,9 +1777,9 @@ function HelpScreen() {
         </HelpParagraph>
       </HelpSection>
 
-      <HelpSection title="Detecting the key (Detect key)">
+      <HelpSection title="Finding the song key">
         <HelpParagraph>
-          At a jam, tap Detect key (next to Listen on the Scales screen) and let it hear the band for a few seconds.
+          At a jam, tap Find song key (next to Track pitch on the Scales screen) and let it hear the band for a few seconds.
           HarpPilot estimates the song's key and suggests which harps fit. It works on web, Android, and iOS.
         </HelpParagraph>
         <HelpBullet>
@@ -1799,7 +1799,7 @@ function HelpScreen() {
           and try that option.
         </HelpBullet>
         <HelpBullet>
-          If it can't lock onto a key (too noisy, or between songs), it says so — just tap Detect key again.
+          If it can't find a key (too noisy, or between songs), it says so — just tap Find song key again.
         </HelpBullet>
       </HelpSection>
 
@@ -1820,7 +1820,7 @@ function HelpScreen() {
           {' — paste or type tabs; if you like you can use Clean Input to strip non-tab contenti or leave the lyrics if you prefer. Save overwrites; Save As always creates a new record.'}
         </HelpBullet>
         <HelpParagraph>
-          Tone follow is automatically on while listening is on. The cursor advances as you play, wrapping back to the
+          Tone follow is automatically on while Track pitch is on. The cursor advances as you play, wrapping back to the
           first playable note at the end. Repeated identical notes require a brief release (pitch change or volume dip)
           before the cursor advances again.
         </HelpParagraph>

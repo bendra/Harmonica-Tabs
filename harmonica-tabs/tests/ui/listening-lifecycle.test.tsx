@@ -328,7 +328,7 @@ describe('App listening lifecycle', () => {
     const root = renderer.root;
 
     await act(async () => {
-      findPressableByText(root, '🎤 Listen').props.onPress();
+      findPressableByText(root, '🎤 Track pitch').props.onPress();
       await Promise.resolve();
     });
 
@@ -357,7 +357,7 @@ describe('App listening lifecycle', () => {
     const root = renderer.root;
 
     await act(async () => {
-      const listenButton = findPressableByText(root, '🎤 Listen');
+      const listenButton = findPressableByText(root, '🎤 Track pitch');
       listenButton.props.onPress();
       await Promise.resolve();
       listenButton.props.onPress();
@@ -370,7 +370,7 @@ describe('App listening lifecycle', () => {
       await Promise.resolve();
     });
 
-    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Listen'))).toBe(false);
+    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Track pitch'))).toBe(false);
 
     await act(async () => {
       secondStart.resolve();
@@ -378,7 +378,7 @@ describe('App listening lifecycle', () => {
       await Promise.resolve();
     });
 
-    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Listen'))).toBe(true);
+    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Track pitch'))).toBe(true);
   });
 
   it('cleans up the transposer follow interval when the source tab is cleared', async () => {
@@ -441,7 +441,7 @@ describe('App listening lifecycle', () => {
     });
 
     await act(async () => {
-      findPressableByText(root, '🎤 Listen').props.onPress();
+      findPressableByText(root, '🎤 Track pitch').props.onPress();
       await Promise.resolve();
     });
 
@@ -599,7 +599,7 @@ describe('App listening lifecycle', () => {
     const root = renderer.root;
 
     await act(async () => {
-      findPressableByText(root, '🎤 Listen').props.onPress();
+      findPressableByText(root, '🎤 Track pitch').props.onPress();
       await Promise.resolve();
     });
 
