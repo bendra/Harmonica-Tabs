@@ -1165,10 +1165,10 @@ describe('App navigation', () => {
     expect(targetIndex).toBeGreaterThanOrEqual(0);
 
     await act(async () => {
-      findPressableByText(root, '🎤 Listen').props.onPress();
+      findPressableByText(root, '🎤 Track pitch').props.onPress();
       await Promise.resolve();
     });
-    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Listen'))).toBe(true);
+    expect(pressableHasActiveListenStyle(findPressableByText(root, '🎤 Track pitch'))).toBe(true);
 
     act(() => {
       groups.forEach((_, index) => {

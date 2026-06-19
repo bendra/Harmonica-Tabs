@@ -61,9 +61,9 @@ This is the fastest way to answer "what tabs do I need to play this scale on thi
 - The main result row shows the scale's notes laid out left‑to‑right as playable tabs.
 - If you turn on **Arpeggios**, additional rows appear below labeled with Roman numerals (`I maj`, `ii min`, etc.).
 
-**Listening (mic input):**
+**Pitch tracking (mic input):**
 
-- Tap **Listen** to start mic detection. While listening, a caret moves between adjacent tabs to show the pitch you're playing.
+- Tap **Track pitch** to start mic detection. While tracking, a caret moves between adjacent tabs to show the pitch you're playing.
 - The caret only moves if HarpPilot is confident in the detected note. You can tune confidence and tolerance in **Properties** (see below).
 - If your device doesn't grant mic access or doesn't support real‑time audio, HarpPilot falls back to a simulated input so you can still see how the UI behaves.
 
@@ -83,14 +83,14 @@ The same swap toggle is available in **Tabs → Transpose**, with the same behav
 
 ---
 
-## Detecting the key (Detect key)
+## Finding the song key
 
-When you're sitting in at a jam and don't know what key the band is in, tap **Detect key** (next to **Listen** on the Scales screen) and let HarpPilot hear the band for a few seconds. It estimates the song's key and suggests which harps fit. It works on web, Android, and iOS.
+When you're sitting in at a jam and don't know what key the band is in, tap **Find song key** (next to **Track pitch** on the Scales screen) and let HarpPilot hear the band for a few seconds. It estimates the song's key and suggests which harps fit. It works on web, Android, and iOS.
 
-- **Your harp stays put.** Detect key keeps the harmonica you already have selected and just moves to the position that plays the detected key on that harp — so you can immediately see which notes work. If that position turns out to be awkward, that's a useful signal: grab a better-suited harp (see the suggestions below) or sit the tune out.
+- **Your harp stays put.** Find song key keeps the harmonica you already have selected and just moves to the position that plays the detected key on that harp — so you can immediately see which notes work. If that position turns out to be awkward, that's a useful signal: grab a better-suited harp (see the suggestions below) or sit the tune out.
 - **Harp suggestions.** Two lines show the harps that fit best, separate from what's selected. For a **major** key you'll see 1st position (**straight harp**) and 2nd position (**cross harp**); for a **minor** key, 3rd position. For example, detected D major shows: `D major: D harp 1st (straight) · G harp 2nd (cross)`.
 - **The relative key.** A second line offers the relative major/minor — e.g. `or B minor: A harp 3rd`. A major key and its relative minor use the exact same notes, so this is a genuinely different way to play the same song. It's also the part HarpPilot is least certain about (major vs. minor sound identical by notes alone), so if the tune *feels* minor, trust your ear and try that option.
-- **No lock?** If it's too noisy or you caught it between songs, it'll say it couldn't lock onto a key — just tap **Detect key** again.
+- **No key found?** If it's too noisy or you caught it between songs, it'll say it couldn't find a key — just tap **Find song key** again.
 
 ---
 
@@ -122,7 +122,7 @@ Plays a saved tab back, optionally transposed.
 - The transposed tab is shown in a scrollable box. Tabs that successfully transpose are clickable to move the play cursor manually.
 - **Warnings** appear below the tab box if any tokens couldn't be transposed (for example, a note that doesn't exist on the current harp).
 
-**Tone follow** is automatically on while listening is on. As you play, the cursor advances through the tab, wrapping back to the first playable note when you finish. Repeated identical notes require a brief release (a pitch change or volume dip) before the cursor advances again.
+**Tone follow** is automatically on while **Track pitch** is on. As you play, the cursor advances through the tab, wrapping back to the first playable note when you finish. Repeated identical notes require a brief release (a pitch change or volume dip) before the cursor advances again.
 
 ### Editor
 
@@ -198,6 +198,6 @@ There is also a temporary **Native send interval ms (debug)** field used while t
 
 ## Troubleshooting
 
-- **"No mic input" / nothing happens when I tap Listen** — make sure the app has microphone permission in your OS settings. On web, you may need to use `https://` or `localhost` for the browser to allow mic access.
+- **"No mic input" / nothing happens when I tap Track pitch** — make sure the app has microphone permission in your OS settings. On web, you may need to use `https://` or `localhost` for the browser to allow mic access.
 - **The wrong note is being detected** — try a quieter environment, raise **Minimum Confidence**, or lower **Tone Tolerance** to require closer‑to‑pitch playing.
 - **Saved tabs disappeared after reinstalling** — HarpPilot stores saved tabs locally per device; there is no cloud sync yet. Back up by exporting (when that feature ships) or by copying tab text manually.
