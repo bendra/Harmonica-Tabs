@@ -33,7 +33,18 @@
 - Keep an eye on high-register detector/register-selection edge cases beyond octave-low YIN errors, especially if new E-harmonica hole 10 blow/draw samples reproduce a distinct issue.
 - Improve arpeggio tone-follow feedback: replace the floating caret with per-note highlighting that shows which arpeggio note is currently being played (within tolerance), and add recognition of chords (multiple simultaneous notes).
 - Key detection (`Find song key` on `Scales`) follow-ups:
-  - Tune accuracy against real band audio using `scripts/key-detect-offline.ts` (frequency band, `minRms`, `KEY_CONFIDENCE_MIN`); current thresholds are conservative placeholders validated only on synthetic signals.
+  - **(Done) Labelled corpus + baseline established.** 14 clips in `key-samples/`, baseline in `key-samples/results/baseline.json`: MIREX 0.31, exact 2/14, minor 0/7, a systematic A-minor/C-major front-end bias (see `docs/STATE.md`). Worth growing toward ~20–40 clips (more tonics, more minor keys) for a firmer signal, but the front-end fix can start now. No algorithm change ships without a measured before/after on this corpus.
+  - **Report the playability lens beside MIREX on every before/after.** The harness now also prints a playability score (notes the player would play over the *detected* key vs. the *true* key's scale; see `playabilityFor` in `scripts/key-detect-offline.ts`) — baseline ≈ 0.76. A front-end fix should move *both* MIREX and playability up; watch playability so a change that raises MIREX doesn't quietly make the consonant near-misses worse.
+  - **(Deferred UX, not this round) Surface a small set of compatible keys/positions instead of one over-confident answer.** The baseline shows the detector is over-confident and wrong, but its misses are mostly note-sharing (relative/fifth) — so offering e.g. "Eb / Bb minor — try Bb cross harp" turns those near-misses into useful alternatives rather than hidden errors. Pairs naturally with `relativeKey`/`idiomaticHarpsForKey` already in `key-suggestions.ts`. Revisit after the front-end fix.
+  - **Improvement backlog — order confirmed by the baseline's confusion profile** (the A-minor attractor + ubiquitous A/C chroma peaks point squarely at the chroma front-end, so #1–#2 lead):
+    1. Harmonic/overtone suppression in the chroma (harmonic product spectrum or harmonic weighting) — targets `fifth` confusions from overtone bleed.
+    2. Spectral whitening / log-magnitude / per-bin normalization — stops drums & distortion from dominating the chroma.
+    3. Bass resolution — larger FFT or log-frequency/constant-Q mapping or bin interpolation (current `44100/4096 ≈ 10.8 Hz` bins are too coarse for low notes).
+    4. Tuning estimation (global A4 offset) for non-A440 tracks.
+    5. Alternative key profiles (Temperley / Gómez / Albrecht–Shanahan, tuned for audio vs. symbolic K–S) — a cheap, measured swap.
+    6. Bass-note weighting to disambiguate major/minor and tonic (the `relative`/`parallel` axis is the detector's least-certain output).
+    7. Segment selection vs. whole-clip averaging (skip intros/modulations).
+  - Recalibrate `KEY_CONFIDENCE_MIN` from the harness's confidence-calibration buckets once accuracy improves (currently a conservative placeholder).
   - Consider supporting Find song key on the default iOS WebView audio path by computing the chromagram inside `webview-detector.html` (currently Find song key forces the native path on iOS).
   - Consider an in-app "analyze a recorded file" entry point (file picker + decode) — the pure `key-detector.ts` module already supports offline frames.
   - Revisit the major-vs-relative-minor disambiguation (the shakiest part); possibly weight the chroma by detected bass/root energy.
