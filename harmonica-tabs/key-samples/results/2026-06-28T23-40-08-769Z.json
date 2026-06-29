@@ -1,0 +1,500 @@
+{
+  "generatedAt": "2026-06-28T23:40:08.769Z",
+  "dir": "./key-samples",
+  "windowMs": 6000,
+  "keyConfidenceMin": 0.4,
+  "aggregates": {
+    "clipsScored": 14,
+    "mirexWholeClip": 0.3143,
+    "mirexWindowMean": 0.325,
+    "mirexWindowBest": 0.4643,
+    "playabilityMean": 0.7551,
+    "pentatonicMean": 0.8,
+    "exact": 2,
+    "confusion": {
+      "exact": 2,
+      "fifth": 3,
+      "relative": 3,
+      "parallel": 0,
+      "other": 6
+    }
+  },
+  "clips": [
+    {
+      "file": "60s_Classic_Ballad_Guitar_Backing_Track__C_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "C",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.894,
+        "margin": 0.134
+      },
+      "category": "relative",
+      "score": 0.3,
+      "windowMeanScore": 0.4,
+      "windowBestScore": 0.5,
+      "playability": 0.857,
+      "pentatonicContainment": 1,
+      "chroma": [
+        0.903,
+        0.166,
+        0.529,
+        0.102,
+        0.388,
+        0.456,
+        0.211,
+        0.593,
+        0.208,
+        1,
+        0.222,
+        0.335
+      ]
+    },
+    {
+      "file": "Alternative_Indie_Rock_Backing_Track__A_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "A",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "major",
+        "confidence": 0.753,
+        "margin": 0.018
+      },
+      "category": "exact",
+      "score": 1,
+      "windowMeanScore": 0.6,
+      "windowBestScore": 1,
+      "playability": 0.857,
+      "pentatonicContainment": 0.6,
+      "chroma": [
+        0.447,
+        0.361,
+        0.732,
+        0.145,
+        0.578,
+        0.446,
+        0.456,
+        0.412,
+        0.371,
+        1,
+        0.386,
+        0.355
+      ]
+    },
+    {
+      "file": "Clean_Guitar_Soft_Rock_Backing_Track__D_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "D",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "F",
+        "quality": "major",
+        "confidence": 0.843,
+        "margin": 0.053
+      },
+      "category": "relative",
+      "score": 0.3,
+      "windowMeanScore": 0.65,
+      "windowBestScore": 1,
+      "playability": 0.857,
+      "pentatonicContainment": 0.6,
+      "chroma": [
+        0.887,
+        0.187,
+        0.764,
+        0.138,
+        0.408,
+        0.81,
+        0.283,
+        0.46,
+        0.234,
+        1,
+        0.45,
+        0.237
+      ]
+    },
+    {
+      "file": "Fast_Hard_Rock_Power_Metal_Guitar_Backing_Track__D_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "D",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.806,
+        "margin": 0.213
+      },
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0,
+      "windowBestScore": 0,
+      "playability": 0.857,
+      "pentatonicContainment": 0.8,
+      "chroma": [
+        0.58,
+        0.227,
+        0.576,
+        0.136,
+        0.314,
+        0.314,
+        0.325,
+        0.432,
+        0.269,
+        1,
+        0.329,
+        0.269
+      ]
+    },
+    {
+      "file": "Groovy_Neo_Soul_Backing_Track__C_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "C",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "C",
+        "quality": "major",
+        "confidence": 0.811,
+        "margin": 0.013
+      },
+      "category": "exact",
+      "score": 1,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 1,
+      "playability": 0.857,
+      "pentatonicContainment": 0.6,
+      "chroma": [
+        1,
+        0.46,
+        0.823,
+        0.139,
+        0.733,
+        0.663,
+        0.314,
+        0.802,
+        0.29,
+        0.958,
+        0.483,
+        0.412
+      ]
+    },
+    {
+      "file": "Ido_Berg_Music_Funky_Guitar_Backing_Track__B_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "B",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "Gb",
+        "quality": "minor",
+        "confidence": 0.608,
+        "margin": 0.123
+      },
+      "category": "fifth",
+      "score": 0.5,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 0.5,
+      "playability": 0.714,
+      "pentatonicContainment": 1,
+      "chroma": [
+        0.396,
+        0.385,
+        0.576,
+        0.163,
+        0.353,
+        0.353,
+        0.833,
+        0.43,
+        0.625,
+        1,
+        0.783,
+        0.533
+      ]
+    },
+    {
+      "file": "ImprovizBackingTrack_Chill_Lofi_Hip_Hop_Backing_Track__D_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "D",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.827,
+        "margin": 0.159
+      },
+      "category": "fifth",
+      "score": 0.5,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 0.5,
+      "playability": 0.714,
+      "pentatonicContainment": 1,
+      "chroma": [
+        0.756,
+        0.178,
+        0.604,
+        0.081,
+        0.249,
+        0.465,
+        0.185,
+        0.475,
+        0.253,
+        1,
+        0.305,
+        0.19
+      ]
+    },
+    {
+      "file": "ImprovizBackingTrack_Chill_Lofi_Rnb_Backing_Track__Bb_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "Bb",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "D",
+        "quality": "minor",
+        "confidence": 0.794,
+        "margin": 0.041
+      },
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0,
+      "windowBestScore": 0,
+      "playability": 0.286,
+      "pentatonicContainment": 0.4,
+      "chroma": [
+        0.845,
+        0.549,
+        0.986,
+        0.207,
+        0.421,
+        0.989,
+        0.662,
+        0.661,
+        0.365,
+        1,
+        0.586,
+        0.214
+      ]
+    },
+    {
+      "file": "ImprovizBackingTrack_Jazz_Funk_Groove_backing_track__Eb_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "Eb",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "F",
+        "quality": "major",
+        "confidence": 0.796,
+        "margin": 0.183
+      },
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0,
+      "windowBestScore": 0,
+      "playability": 0.429,
+      "pentatonicContainment": 0.8,
+      "chroma": [
+        0.713,
+        0.476,
+        0.628,
+        0.369,
+        0.369,
+        0.938,
+        0.429,
+        0.48,
+        0.656,
+        1,
+        0.732,
+        0.365
+      ]
+    },
+    {
+      "file": "Intense_Rock_Ballad_Backing_Track__C_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "C",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.841,
+        "margin": 0.089
+      },
+      "category": "relative",
+      "score": 0.3,
+      "windowMeanScore": 0.4,
+      "windowBestScore": 0.5,
+      "playability": 0.857,
+      "pentatonicContainment": 1,
+      "chroma": [
+        0.851,
+        0.209,
+        0.558,
+        0.126,
+        0.406,
+        0.66,
+        0.314,
+        0.691,
+        0.258,
+        1,
+        0.335,
+        0.319
+      ]
+    },
+    {
+      "file": "Neo_Soul_Backing_Track__C_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "C",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.656,
+        "margin": 0.154
+      },
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0,
+      "windowBestScore": 0,
+      "playability": 0.429,
+      "pentatonicContainment": 0.6,
+      "chroma": [
+        0.579,
+        0.122,
+        0.592,
+        0.405,
+        0.235,
+        0.345,
+        0.154,
+        0.695,
+        0.275,
+        1,
+        0.338,
+        0.191
+      ]
+    },
+    {
+      "file": "Slow_Classic_Ballad_Backing_Track__G_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "G",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.787,
+        "margin": 0.124
+      },
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 1,
+      "playability": 1,
+      "pentatonicContainment": 1,
+      "chroma": [
+        0.657,
+        0.196,
+        0.706,
+        0.208,
+        0.373,
+        0.281,
+        0.325,
+        0.52,
+        0.204,
+        1,
+        0.299,
+        0.337
+      ]
+    },
+    {
+      "file": "Slow_Pop_Rock_Backing_Track_Ballad__B_major.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "B",
+        "quality": "major"
+      },
+      "detected": {
+        "note": "Gb",
+        "quality": "minor",
+        "confidence": 0.597,
+        "margin": 0.13
+      },
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0,
+      "windowBestScore": 0,
+      "playability": 0.857,
+      "pentatonicContainment": 0.8,
+      "chroma": [
+        0.843,
+        0.595,
+        0.58,
+        0.39,
+        0.284,
+        0.4,
+        0.825,
+        0.415,
+        0.429,
+        1,
+        0.522,
+        0.584
+      ]
+    },
+    {
+      "file": "mprovizBackingTrack_Guitar_Backing_Track__E_minor.wav",
+      "sampleRate": 44100,
+      "expected": {
+        "note": "E",
+        "quality": "minor"
+      },
+      "detected": {
+        "note": "A",
+        "quality": "minor",
+        "confidence": 0.843,
+        "margin": 0.141
+      },
+      "category": "fifth",
+      "score": 0.5,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 0.5,
+      "playability": 1,
+      "pentatonicContainment": 1,
+      "chroma": [
+        0.945,
+        0.101,
+        0.635,
+        0.075,
+        0.276,
+        0.394,
+        0.157,
+        0.493,
+        0.118,
+        1,
+        0.275,
+        0.284
+      ]
+    }
+  ]
+}

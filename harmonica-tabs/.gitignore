@@ -37,6 +37,14 @@ debug*
 # typescript
 *.tsbuildinfo
 
+# key-detection eval corpus: keep labels.json + results JSON, ignore the audio
+# itself (copyright + repo size). See key-samples/README.md.
+key-samples/**/*.wav
+key-samples/**/*.mp3
+key-samples/**/*.m4a
+key-samples/**/*.flac
+key-samples/**/*.ogg
+
 # generated native folders
 /ios
 /android
