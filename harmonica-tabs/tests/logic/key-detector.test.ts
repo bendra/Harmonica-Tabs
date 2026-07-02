@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chromaWeightForMagnitude,
   createKeyDetector,
   estimateKeyFromChroma,
   pearson,
@@ -28,6 +29,23 @@ function chordFrame(tones: Tone[], size = FRAME_SIZE): Float32Array {
       buf[i] += amplitude * Math.sin((2 * Math.PI * freq * i) / SAMPLE_RATE);
     }
   }
+  return buf;
+}
+
+/**
+ * Builds a frame for one note plus its overtones: pure sines at the fundamental
+ * and its exact integer multiples (2f, 3f, …), one amplitude per partial. Exact
+ * multiples (not tempered MIDI) keep the harmonics on the FFT bins the harmonic
+ * product spectrum reads, so the overtone-suppression behaviour is testable.
+ */
+function harmonicFrame(fundamentalHz: number, amplitudes: number[], size = FRAME_SIZE): Float32Array {
+  const buf = new Float32Array(size);
+  amplitudes.forEach((amp, idx) => {
+    const freq = fundamentalHz * (idx + 1);
+    for (let i = 0; i < size; i++) {
+      buf[i] += amp * Math.sin((2 * Math.PI * freq * i) / SAMPLE_RATE);
+    }
+  });
   return buf;
 }
 
@@ -77,6 +95,23 @@ describe('estimateKeyFromChroma', () => {
   });
 });
 
+describe('chromaWeightForMagnitude', () => {
+  it('keeps raw magnitudes unchanged for the live default', () => {
+    expect(chromaWeightForMagnitude(12, 'raw')).toBe(12);
+    expect(chromaWeightForMagnitude(0, 'raw')).toBe(0);
+  });
+
+  it('soft-compresses log magnitudes while preserving their order', () => {
+    const quiet = chromaWeightForMagnitude(1, 'softLogMagnitude');
+    const loud = chromaWeightForMagnitude(99, 'softLogMagnitude');
+
+    expect(quiet).toBeGreaterThan(0);
+    expect(quiet).toBeLessThan(loud);
+    expect(quiet).toBeGreaterThan(1 / 99);
+    expect(loud).toBeLessThan(99);
+  });
+});
+
 describe('createKeyDetector', () => {
   it('returns null before any audio is pushed', () => {
     const detector = createKeyDetector();
@@ -90,8 +125,10 @@ describe('createKeyDetector', () => {
     expect(detector.getFrameCounts()).toEqual({ frameCount: 5, usedFrameCount: 0 });
   });
 
-  it('detects D major from a D-rooted major signal', () => {
-    const detector = createKeyDetector();
+  it('detects D major from a D-rooted major signal (raw front-end)', () => {
+    // Pure sines have no overtones, so this exercises the raw front-end; the
+    // harmonic-product default needs real harmonics (covered separately below).
+    const detector = createKeyDetector({ chromaWeighting: 'raw' });
     // D major emphasis: tonic D, dominant A, mediant F# — matches the major
     // profile's three strongest degrees.
     feed(
@@ -111,8 +148,8 @@ describe('createKeyDetector', () => {
     expect(estimate!.confidence).toBeGreaterThan(0);
   });
 
-  it('detects E minor from an E-rooted minor signal', () => {
-    const detector = createKeyDetector();
+  it('detects E minor from an E-rooted minor signal (raw front-end)', () => {
+    const detector = createKeyDetector({ chromaWeighting: 'raw' });
     // E minor emphasis: tonic E, dominant B, minor third G.
     feed(
       detector,
@@ -128,6 +165,84 @@ describe('createKeyDetector', () => {
     expect(estimate).not.toBeNull();
     expect(estimate!.tonicPc).toBe(noteToPc('E'));
     expect(estimate!.quality).toBe('minor');
+  });
+
+  it('keeps clean major detection intact with soft-log chroma weighting', () => {
+    const detector = createKeyDetector({ chromaWeighting: 'softLogMagnitude' });
+    feed(
+      detector,
+      chordFrame([
+        { midi: 50, amplitude: 0.5 }, // D3
+        { midi: 57, amplitude: 0.35 }, // A3
+        { midi: 54, amplitude: 0.3 }, // F#3
+        { midi: 62, amplitude: 0.3 }, // D4
+      ]),
+    );
+
+    const estimate = detector.analyze();
+    expect(estimate).not.toBeNull();
+    expect(estimate!.tonicPc).toBe(noteToPc('D'));
+    expect(estimate!.quality).toBe('major');
+  });
+
+  it('detects major from a harmonic-rich major signal under harmonic suppression', () => {
+    // The harmonic product spectrum relies on real overtones, so each chord tone
+    // carries its natural decaying harmonic series (unlike the pure-sine fixtures).
+    const partials = [0.5, 0.25, 0.15, 0.1];
+    const frame = new Float32Array(FRAME_SIZE);
+    for (const midi of [50, 57, 54, 62]) {
+      // D3, A3, F#3, D4 — a D-major emphasis.
+      const voice = harmonicFrame(midiToFreq(midi), partials);
+      for (let i = 0; i < FRAME_SIZE; i++) frame[i] += voice[i];
+    }
+
+    const detector = createKeyDetector({ chromaWeighting: 'harmonicSuppression' });
+    feed(detector, frame);
+
+    const estimate = detector.analyze();
+    expect(estimate).not.toBeNull();
+    expect(estimate!.tonicPc).toBe(noteToPc('D'));
+    expect(estimate!.quality).toBe('major');
+  });
+
+  it('detects minor from a harmonic-rich minor signal under harmonic suppression', () => {
+    // Default config (harmonic suppression) with realistic overtone-bearing voices.
+    const partials = [0.5, 0.25, 0.15, 0.1];
+    const frame = new Float32Array(FRAME_SIZE);
+    for (const midi of [52, 59, 55, 64]) {
+      // E3, B3, G3, E4 — an E-minor emphasis.
+      const voice = harmonicFrame(midiToFreq(midi), partials);
+      for (let i = 0; i < FRAME_SIZE; i++) frame[i] += voice[i];
+    }
+
+    const detector = createKeyDetector();
+    feed(detector, frame);
+
+    const estimate = detector.analyze();
+    expect(estimate).not.toBeNull();
+    expect(estimate!.tonicPc).toBe(noteToPc('E'));
+    expect(estimate!.quality).toBe('minor');
+  });
+
+  it('suppresses an overtone pitch class relative to its fundamental', () => {
+    // A C fundamental with overtones: 3f lands on G (a fifth up) — the classic
+    // overtone that drives "fifth" key confusions. Harmonic suppression should
+    // shrink G's share of the chroma versus the raw front-end.
+    const cFundamental = midiToFreq(48); // C3
+    const frame = harmonicFrame(cFundamental, [0.5, 0.3, 0.3, 0.2]); // f, 2f, 3f(G), 4f
+
+    const share = (chroma: number[], pc: number) => {
+      const total = chroma.reduce((sum, v) => sum + v, 0);
+      return total > 0 ? chroma[pc] / total : 0;
+    };
+
+    const raw = createKeyDetector({ chromaWeighting: 'raw' });
+    feed(raw, frame);
+    const hps = createKeyDetector({ chromaWeighting: 'harmonicSuppression' });
+    feed(hps, frame);
+
+    const g = noteToPc('G');
+    expect(share(hps.getChroma(), g)).toBeLessThan(share(raw.getChroma(), g));
   });
 
   it('reset() clears accumulated chroma', () => {

@@ -78,7 +78,26 @@ export type KeyDetectorConfig = {
   maxFreq: number;
   /** Frames quieter than this RMS are skipped as silence. */
   minRms: number;
+  /**
+   * How the FFT spectrum contributes to chroma. `raw` is the live app's current
+   * behavior; `softLogMagnitude` is an offline experiment that compresses loud bins
+   * so drums/distortion are less able to dominate the pitch-class histogram;
+   * `harmonicSuppression` reinforces true fundamentals and suppresses pure overtones
+   * via a harmonic product spectrum (targets the overtone bleed behind the
+   * A-minor/C-major attractor).
+   */
+  chromaWeighting: ChromaWeighting;
 };
+
+export type ChromaWeighting = 'raw' | 'softLogMagnitude' | 'harmonicSuppression';
+const SOFT_LOG_SCALE = 0.01;
+/**
+ * How many harmonics the harmonic-product spectrum folds back into each bin.
+ * Swept on the 21-clip corpus: 2 (fold in just the octave) beat 3 and 4 on
+ * whole-clip MIREX — gentler suppression avoids the extra `fifth` confusions
+ * the deeper products introduce.
+ */
+const HPS_HARMONICS = 2;
 
 export const DEFAULT_KEY_DETECTOR_CONFIG: KeyDetectorConfig = {
   // Cover roughly A1 (bass) up to ~B6 — where most band fundamentals and chord
@@ -87,6 +106,10 @@ export const DEFAULT_KEY_DETECTOR_CONFIG: KeyDetectorConfig = {
   minFreq: 55,
   maxFreq: 2000,
   minRms: 0.001,
+  // Harmonic suppression (octave-fold HPS) was the first front-end experiment to
+  // beat raw magnitude on the 21-clip corpus (whole-clip MIREX 0.367→0.400, ~6s
+  // window 0.379→0.424). See docs/STATE.md for the measured before/after.
+  chromaWeighting: 'harmonicSuppression',
 };
 
 /**
@@ -148,11 +171,66 @@ export function estimateKeyFromChroma(chroma: number[]): KeyEstimate {
   };
 }
 
+export function chromaWeightForMagnitude(
+  magnitude: number,
+  weighting: ChromaWeighting,
+): number {
+  if (magnitude <= 0) return 0;
+  if (weighting === 'softLogMagnitude') {
+    return Math.log1p(magnitude * SOFT_LOG_SCALE) / SOFT_LOG_SCALE;
+  }
+  // `raw` and `harmonicSuppression` pass the (already-transformed) bin through
+  // unchanged; harmonicSuppression does its work at the spectrum level below.
+  return magnitude;
+}
+
+/**
+ * Harmonic Product Spectrum: reinforce true fundamentals and suppress pure
+ * overtones. A real fundamental at bin `k` also has energy at its harmonics
+ * `2k, 3k, …`, so multiplying those bins back into `k` makes fundamentals stand
+ * out, while a lone overtone (strong at `2k` but not at `4k, 6k…`) collapses
+ * toward zero. This directly targets the overtone bleed that feeds the detector's
+ * A-minor/C-major attractor.
+ *
+ * We use only a few harmonics, take their geometric mean so the result stays on a
+ * magnitude-like scale (a plain product explodes the dynamic range), and renormalize
+ * per frame so one loud frame can't dominate the accumulated chroma. Pure
+ * spectrum-level transform; the caller still folds the result to pitch classes with
+ * the usual nearest-MIDI rounding.
+ */
+export function suppressHarmonics(
+  mag: Float32Array,
+  harmonics = HPS_HARMONICS,
+): Float32Array {
+  const out = new Float32Array(mag.length);
+  // Above this bin, the higher harmonics fall outside the spectrum; keep the raw
+  // magnitude there so high fundamentals aren't zeroed just because `k*h` is out
+  // of range.
+  const productLimit = Math.floor((mag.length - 1) / harmonics);
+  let max = 0;
+  for (let k = 1; k < mag.length; k++) {
+    let value = mag[k];
+    if (k <= productLimit) {
+      let product = mag[k];
+      for (let h = 2; h <= harmonics; h++) product *= mag[k * h];
+      // Geometric mean keeps the result comparable to a raw magnitude.
+      value = product > 0 ? Math.pow(product, 1 / harmonics) : 0;
+    }
+    out[k] = value;
+    if (value > max) max = value;
+  }
+  if (max > 0) {
+    for (let k = 1; k < out.length; k++) out[k] /= max;
+  }
+  return out;
+}
+
 /**
  * Streaming key detector. Feed it audio frames over a few seconds, then call
  * analyze() to get the estimated key.
  */
-export function createKeyDetector(config: KeyDetectorConfig = DEFAULT_KEY_DETECTOR_CONFIG) {
+export function createKeyDetector(config: Partial<KeyDetectorConfig> = DEFAULT_KEY_DETECTOR_CONFIG) {
+  const resolvedConfig = { ...DEFAULT_KEY_DETECTOR_CONFIG, ...config };
   const chroma = new Array<number>(12).fill(0);
   let frameCount = 0;
   let usedFrameCount = 0;
@@ -164,19 +242,25 @@ export function createKeyDetector(config: KeyDetectorConfig = DEFAULT_KEY_DETECT
    */
   function pushFrame(samples: Float32Array, sampleRate: number) {
     frameCount++;
-    if (calculateRms(samples) < config.minRms) return;
+    if (calculateRms(samples) < resolvedConfig.minRms) return;
 
-    const mag = magnitudeSpectrum(samples);
+    const rawMag = magnitudeSpectrum(samples);
+    const mag =
+      resolvedConfig.chromaWeighting === 'harmonicSuppression'
+        ? suppressHarmonics(rawMag)
+        : rawMag;
     const N = samples.length;
-    const minBin = Math.max(1, Math.floor((config.minFreq * N) / sampleRate));
-    const maxBin = Math.min(mag.length - 1, Math.ceil((config.maxFreq * N) / sampleRate));
+    const minBin = Math.max(1, Math.floor((resolvedConfig.minFreq * N) / sampleRate));
+    const maxBin = Math.min(mag.length - 1, Math.ceil((resolvedConfig.maxFreq * N) / sampleRate));
 
     let added = false;
     for (let k = minBin; k <= maxBin; k++) {
       const freq = (k * sampleRate) / N;
       const midi = 69 + 12 * Math.log2(freq / 440);
       const pc = normalizePc(Math.round(midi));
-      chroma[pc] += mag[k];
+      const weight = chromaWeightForMagnitude(mag[k], resolvedConfig.chromaWeighting);
+      if (weight <= 0) continue;
+      chroma[pc] += weight;
       added = true;
     }
     if (added) usedFrameCount++;

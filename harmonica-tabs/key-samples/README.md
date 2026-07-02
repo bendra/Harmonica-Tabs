@@ -2,8 +2,8 @@
 
 Labelled audio clips for evaluating the "Find song key" detector with
 `npm run key-detect-offline`. This is how we measure the detector against
-reproducible audio **before** changing the algorithm — change one thing, re-run,
-keep it only if the MIREX score goes up.
+reproducible audio **before** changing live behavior — change one thing, re-run,
+keep it only if MIREX and playability both improve.
 
 ## What's tracked vs ignored
 
@@ -59,6 +59,8 @@ note name (`A`, `Bb`, `F#`); `quality` is `major` or `minor`.
 
 - **MIREX score** — the headline. 1.0 = exact; partial credit for near-misses
   (fifth 0.5, relative 0.3, parallel 0.2). One comparable number across runs.
+- **Playability** — the product-truth companion metric. It asks whether the
+  scale a player would use from the detected key fits the true key's notes.
 - **Confusion breakdown** — *where* the error is. Lots of `fifth`/`relative`
   confusions → a back-end (key-profile/weighting) issue; lots of `other` →
   the chroma front-end isn't even capturing the right notes.
@@ -69,5 +71,10 @@ note name (`A`, `Bb`, `F#`); `quality` is `major` or `minor`.
 - **Whole-clip vs ~6s window** — the app only hears ~6s, so the window numbers
   predict real-world behaviour; whole-clip is the easier upper reference.
 
-To set/update the regression baseline, copy a fresh `results/<timestamp>.json`
-to `results/baseline.json`.
+Every run writes both:
+
+- `results/<timestamp>.json` — full report for every front-end variant.
+- `results/baseline-candidate.json` — live-default-only, baseline-compatible report.
+
+To update the regression baseline from the current local WAV corpus, run:
+`npm run key-detect-offline -- ./key-samples --update-baseline`.

@@ -42,22 +42,54 @@ import {
   KeyEstimate,
   KeyDetector,
   KEY_CONFIDENCE_MIN,
+  KeyDetectorConfig,
 } from '../src/logic/key-detector';
 import { noteToPc, pcToNote, normalizePc, SHARP_NOTES, NoteName } from '../src/data/notes';
 import { SCALE_DEFINITIONS } from '../src/data/scales';
 import { recommendedForQuality } from '../src/logic/key-suggestions';
 
+const args = process.argv.slice(2);
+const UPDATE_BASELINE = args.includes('--update-baseline');
+const samplesArg = args.find((arg) => !arg.startsWith('--'));
+
 const FRAME_SIZE = 4096;
-const SAMPLES_DIR = process.argv[2] ?? path.resolve(process.cwd(), 'key-samples');
+const SAMPLES_DIR = samplesArg ?? path.resolve(process.cwd(), 'key-samples');
 // Pure-sine synthetic check assumes 44.1 kHz; real clips use their own rate.
 const SAMPLE_RATE = 44100;
 // The runtime "Find song key" window — mirrors DEFAULT_WINDOW_MS in
 // src/hooks/use-key-detection.ts. The app only ever hears this much audio, so we
 // also score ~6s windows to predict real behaviour, not just the whole clip.
 const WINDOW_MS = 6000;
+const EXPERIMENTS: KeyExperiment[] = [
+  {
+    id: 'raw',
+    label: 'raw magnitude (live default)',
+    detectorConfig: { chromaWeighting: 'raw' },
+  },
+  {
+    id: 'soft-log-magnitude',
+    label: 'soft-log-magnitude spectrum',
+    detectorConfig: { chromaWeighting: 'softLogMagnitude' },
+  },
+  {
+    id: 'harmonic-suppression',
+    label: 'harmonic product spectrum (overtone suppression)',
+    detectorConfig: { chromaWeighting: 'harmonicSuppression' },
+  },
+];
+
+// Which variant is the live app default. `baseline.json` tracks this variant so the
+// committed regression reference reflects shipping behaviour, and the before/after
+// block compares raw (the naive reference) against it.
+const LIVE_DEFAULT_ID = 'harmonic-suppression';
 
 type KeyLabel = { tonicPc: number; quality: 'major' | 'minor' };
 type Expected = KeyLabel | null;
+type KeyExperiment = {
+  id: string;
+  label: string;
+  detectorConfig: Partial<KeyDetectorConfig>;
+};
 
 /** One labels.json entry: provenance the filename can't carry. */
 type LabelEntry = {
@@ -144,8 +176,9 @@ function pushFrames(detector: KeyDetector, samples: Float32Array, sampleRate: nu
 function runWholeClip(
   samples: Float32Array,
   sampleRate: number,
+  detectorConfig: Partial<KeyDetectorConfig> = {},
 ): { estimate: KeyEstimate | null; chroma: number[] } {
-  const detector = createKeyDetector();
+  const detector = createKeyDetector(detectorConfig);
   pushFrames(detector, samples, sampleRate);
   return { estimate: detector.analyze(), chroma: detector.getChroma() };
 }
@@ -155,16 +188,20 @@ function runWholeClip(
  * app's eye view, where the user grabs one short snippet rather than the whole
  * track. Returns one estimate per window.
  */
-function runWindows(samples: Float32Array, sampleRate: number): KeyEstimate[] {
+function runWindows(
+  samples: Float32Array,
+  sampleRate: number,
+  detectorConfig: Partial<KeyDetectorConfig> = {},
+): KeyEstimate[] {
   const windowLen = Math.floor((WINDOW_MS / 1000) * sampleRate);
   const estimates: KeyEstimate[] = [];
   if (samples.length < windowLen) {
-    const { estimate } = runWholeClip(samples, sampleRate);
+    const { estimate } = runWholeClip(samples, sampleRate, detectorConfig);
     if (estimate) estimates.push(estimate);
     return estimates;
   }
   for (let start = 0; start + windowLen <= samples.length; start += windowLen) {
-    const detector = createKeyDetector();
+    const detector = createKeyDetector(detectorConfig);
     pushFrames(detector, samples.subarray(start, start + windowLen), sampleRate);
     const estimate = detector.analyze();
     if (estimate) estimates.push(estimate);
@@ -364,20 +401,23 @@ function runSyntheticSanityCheck() {
     },
   ];
 
-  let passed = 0;
-  for (const testCase of cases) {
-    const detector = createKeyDetector();
-    const frame = syntheticFrame(testCase.tones);
-    for (let i = 0; i < 20; i++) detector.pushFrame(frame, SAMPLE_RATE);
-    const estimate = detector.analyze();
-    const ok =
-      estimate?.tonicPc === testCase.expected.tonicPc &&
-      estimate?.quality === testCase.expected.quality;
-    if (ok) passed++;
-    console.log(`  ${ok ? '✓' : '✗'} ${testCase.label}`);
-    console.log(`      detected: ${describe(estimate)}`);
+  for (const experiment of EXPERIMENTS) {
+    let passed = 0;
+    console.log(`  ${experiment.label}`);
+    for (const testCase of cases) {
+      const detector = createKeyDetector(experiment.detectorConfig);
+      const frame = syntheticFrame(testCase.tones);
+      for (let i = 0; i < 20; i++) detector.pushFrame(frame, SAMPLE_RATE);
+      const estimate = detector.analyze();
+      const ok =
+        estimate?.tonicPc === testCase.expected.tonicPc &&
+        estimate?.quality === testCase.expected.quality;
+      if (ok) passed++;
+      console.log(`    ${ok ? '✓' : '✗'} ${testCase.label}`);
+      console.log(`        detected: ${describe(estimate)}`);
+    }
+    console.log(`    ${passed}/${cases.length} synthetic cases correct.\n`);
   }
-  console.log(`\n${passed}/${cases.length} synthetic cases correct.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,14 +442,31 @@ type ClipResult = {
   pentatonicContainment: number;
 };
 
+type AggregateResult = {
+  clipsScored: number;
+  mirexWholeClip: number;
+  mirexWindowMean: number;
+  mirexWindowBest: number;
+  playabilityMean: number;
+  pentatonicMean: number;
+  exact: number;
+  tonicOnly: number;
+  confusion: Record<MirexCategory, number>;
+};
+
+type ExperimentRun = KeyExperiment & {
+  results: ClipResult[];
+};
+
 function evaluateClip(
   filename: string,
   samples: Float32Array,
   sampleRate: number,
   expected: KeyLabel | null,
+  detectorConfig: Partial<KeyDetectorConfig> = {},
 ): ClipResult {
-  const { estimate, chroma } = runWholeClip(samples, sampleRate);
-  const windows = runWindows(samples, sampleRate);
+  const { estimate, chroma } = runWholeClip(samples, sampleRate, detectorConfig);
+  const windows = runWindows(samples, sampleRate, detectorConfig);
 
   let category: MirexCategory | null = null;
   let score = 0;
@@ -445,13 +502,33 @@ function evaluateClip(
   };
 }
 
-function printClip(result: ClipResult) {
+function aggregateResults(labelled: ClipResult[]): AggregateResult {
+  const cats: MirexCategory[] = ['exact', 'fifth', 'relative', 'parallel', 'other'];
+  return {
+    clipsScored: labelled.length,
+    mirexWholeClip: mean(labelled.map((r) => r.score)),
+    mirexWindowMean: mean(labelled.map((r) => r.windowMeanScore)),
+    mirexWindowBest: mean(labelled.map((r) => r.windowBestScore)),
+    playabilityMean: mean(labelled.map((r) => r.playability)),
+    pentatonicMean: mean(labelled.map((r) => r.pentatonicContainment)),
+    exact: labelled.filter((r) => r.category === 'exact').length,
+    tonicOnly: labelled.filter(
+      (r) => r.estimate && r.expected && r.estimate.tonicPc === r.expected.tonicPc,
+    ).length,
+    confusion: Object.fromEntries(
+      cats.map((c) => [c, labelled.filter((r) => r.category === c).length]),
+    ) as Record<MirexCategory, number>,
+  };
+}
+
+function printClip(result: ClipResult, variantLabel = '') {
   const { expected, estimate } = result;
   let verdict = '·';
   if (expected && result.category) {
     verdict = result.category === 'exact' ? '✓' : result.score > 0 ? '~' : '✗';
   }
-  console.log(`${verdict} ${result.file}  (${result.sampleRate} Hz)`);
+  const label = variantLabel ? ` [${variantLabel}]` : '';
+  console.log(`${verdict}${label} ${result.file}  (${result.sampleRate} Hz)`);
   if (expected) {
     console.log(
       `    expected: ${formatKey(expected.tonicPc, expected.quality)}` +
@@ -469,24 +546,20 @@ function printClip(result: ClipResult) {
   console.log(chromaSparkline(result.chroma));
 }
 
-function printSummary(labelled: ClipResult[]) {
-  console.log('\n========== SUMMARY ==========\n');
+function printSummary(label: string, labelled: ClipResult[]): AggregateResult {
+  console.log(`\n========== SUMMARY: ${label} ==========\n`);
+  const aggregate = aggregateResults(labelled);
 
   // Headline: MIREX-weighted scores.
-  const wholeScores = labelled.map((r) => r.score);
-  const exact = labelled.filter((r) => r.category === 'exact').length;
-  const tonicOnly = labelled.filter(
-    (r) => r.estimate && r.expected && r.estimate.tonicPc === r.expected.tonicPc,
-  ).length;
   console.log(`Clips scored: ${labelled.length}`);
-  console.log(`MIREX score (whole clip): ${mean(wholeScores).toFixed(3)}`);
+  console.log(`MIREX score (whole clip): ${aggregate.mirexWholeClip.toFixed(3)}`);
   console.log(
-    `MIREX score (~6s window mean): ${mean(labelled.map((r) => r.windowMeanScore)).toFixed(3)}` +
-      `   (best window: ${mean(labelled.map((r) => r.windowBestScore)).toFixed(3)})`,
+    `MIREX score (~6s window mean): ${aggregate.mirexWindowMean.toFixed(3)}` +
+      `   (best window: ${aggregate.mirexWindowBest.toFixed(3)})`,
   );
   console.log(
-    `Exact: ${exact}/${labelled.length}` +
-      `   Right tonic: ${tonicOnly}/${labelled.length}`,
+    `Exact: ${aggregate.exact}/${labelled.length}` +
+      `   Right tonic: ${aggregate.tonicOnly}/${labelled.length}`,
   );
 
   // Playability lens — the product-truth number beside the literature number.
@@ -495,18 +568,15 @@ function printSummary(labelled: ClipResult[]) {
   // means the misses are mostly consonant (relative/fifth); low playability means
   // they genuinely clash (parallel / distant).
   console.log(
-    `Playability (whole clip): ${mean(labelled.map((r) => r.playability)).toFixed(3)}` +
-      `   Pentatonic containment: ${mean(labelled.map((r) => r.pentatonicContainment)).toFixed(3)}`,
+    `Playability (whole clip): ${aggregate.playabilityMean.toFixed(3)}` +
+      `   Pentatonic containment: ${aggregate.pentatonicMean.toFixed(3)}`,
   );
 
   // Confusion breakdown — the "where is the error" diagnostic.
   const cats: MirexCategory[] = ['exact', 'fifth', 'relative', 'parallel', 'other'];
-  const counts = Object.fromEntries(
-    cats.map((c) => [c, labelled.filter((r) => r.category === c).length]),
-  ) as Record<MirexCategory, number>;
   const noSignal = labelled.filter((r) => !r.estimate).length;
   console.log('\nConfusion breakdown (whole clip):');
-  for (const c of cats) console.log(`  ${c.padEnd(9)} ${counts[c]}`);
+  for (const c of cats) console.log(`  ${c.padEnd(9)} ${aggregate.confusion[c]}`);
   if (noSignal > 0) console.log(`  (of which no-signal: ${noSignal})`);
 
   // Playability by MIREX category — the punchline. It makes visible that not all
@@ -571,52 +641,130 @@ function printSummary(labelled: ClipResult[]) {
   }
 
   console.log('\nLegend: ✓ exact   ~ partial credit (fifth/relative/parallel)   ✗ wrong   · unlabelled');
+  return aggregate;
 }
 
-function writeResults(dir: string, results: ClipResult[]) {
-  const labelled = results.filter((r) => r.expected);
-  const resultsDir = path.join(dir, 'results');
-  fs.mkdirSync(resultsDir, { recursive: true });
+function roundAggregate(aggregate: AggregateResult) {
+  return {
+    clipsScored: aggregate.clipsScored,
+    mirexWholeClip: Number(aggregate.mirexWholeClip.toFixed(4)),
+    mirexWindowMean: Number(aggregate.mirexWindowMean.toFixed(4)),
+    mirexWindowBest: Number(aggregate.mirexWindowBest.toFixed(4)),
+    playabilityMean: Number(aggregate.playabilityMean.toFixed(4)),
+    pentatonicMean: Number(aggregate.pentatonicMean.toFixed(4)),
+    exact: aggregate.exact,
+    tonicOnly: aggregate.tonicOnly,
+    confusion: aggregate.confusion,
+  };
+}
 
-  const cats: MirexCategory[] = ['exact', 'fifth', 'relative', 'parallel', 'other'];
-  const payload = {
-    generatedAt: new Date().toISOString(),
+function clipPayload(r: ClipResult) {
+  return {
+    file: r.file,
+    sampleRate: r.sampleRate,
+    expected: r.expected
+      ? { note: pcToNote(r.expected.tonicPc, true), quality: r.expected.quality }
+      : null,
+    detected: r.estimate
+      ? {
+          note: pcToNote(r.estimate.tonicPc, true),
+          quality: r.estimate.quality,
+          confidence: Number(r.estimate.confidence.toFixed(3)),
+          margin: Number(r.estimate.margin.toFixed(3)),
+        }
+      : null,
+    category: r.category,
+    score: r.score,
+    windowMeanScore: Number(r.windowMeanScore.toFixed(3)),
+    windowBestScore: Number(r.windowBestScore.toFixed(3)),
+    playability: Number(r.playability.toFixed(3)),
+    pentatonicContainment: Number(r.pentatonicContainment.toFixed(3)),
+    chroma: normalizedChroma(r.chroma),
+  };
+}
+
+function aggregateFromResultsPayload(payload: any): any | null {
+  if (payload?.aggregates) return payload.aggregates;
+  const liveVariant = Array.isArray(payload?.variants)
+    ? payload.variants.find((variant: any) => variant?.id === LIVE_DEFAULT_ID)
+    : null;
+  return liveVariant?.aggregates ?? null;
+}
+
+function metricDelta(after: number, before: number): string {
+  const delta = after - before;
+  const sign = delta > 0 ? '+' : '';
+  return `${after.toFixed(3)} (${sign}${delta.toFixed(3)})`;
+}
+
+function printExperimentComparison(before: AggregateResult, after: AggregateResult) {
+  console.log('\n========== BEFORE / AFTER ==========\n');
+  console.log(`MIREX whole clip:        ${metricDelta(after.mirexWholeClip, before.mirexWholeClip)}`);
+  console.log(`MIREX ~6s window mean:   ${metricDelta(after.mirexWindowMean, before.mirexWindowMean)}`);
+  console.log(`Playability whole clip:  ${metricDelta(after.playabilityMean, before.playabilityMean)}`);
+  console.log(`Exact detections:        ${after.exact}/${after.clipsScored} (${after.exact - before.exact >= 0 ? '+' : ''}${after.exact - before.exact})`);
+  console.log(
+    '\nAcceptance check: keep the experiment as live behavior only if MIREX and playability both move up.',
+  );
+}
+
+function printBaselineComparison(dir: string, currentLiveDefault: AggregateResult) {
+  const baselinePath = path.join(dir, 'results', 'baseline.json');
+  if (!fs.existsSync(baselinePath)) return;
+  try {
+    const baseline = aggregateFromResultsPayload(JSON.parse(fs.readFileSync(baselinePath, 'utf8')));
+    if (!baseline) return;
+    console.log('\n========== CURRENT LIVE DEFAULT VS baseline.json ==========\n');
+    console.log(
+      `Baseline clips: ${baseline.clipsScored}; current clips: ${currentLiveDefault.clipsScored}`,
+    );
+    console.log(
+      `MIREX whole clip:        ${metricDelta(currentLiveDefault.mirexWholeClip, baseline.mirexWholeClip)}`,
+    );
+    console.log(
+      `MIREX ~6s window mean:   ${metricDelta(currentLiveDefault.mirexWindowMean, baseline.mirexWindowMean)}`,
+    );
+    console.log(
+      `Playability whole clip:  ${metricDelta(currentLiveDefault.playabilityMean, baseline.playabilityMean)}`,
+    );
+  } catch (error) {
+    console.warn(`Could not compare baseline.json — ${(error as Error).message}`);
+  }
+}
+
+function baselinePayload(
+  generatedAt: string,
+  dir: string,
+  run: ExperimentRun,
+  aggregate: AggregateResult,
+) {
+  return {
+    generatedAt,
     dir,
     windowMs: WINDOW_MS,
     keyConfidenceMin: KEY_CONFIDENCE_MIN,
-    aggregates: {
-      clipsScored: labelled.length,
-      mirexWholeClip: Number(mean(labelled.map((r) => r.score)).toFixed(4)),
-      mirexWindowMean: Number(mean(labelled.map((r) => r.windowMeanScore)).toFixed(4)),
-      mirexWindowBest: Number(mean(labelled.map((r) => r.windowBestScore)).toFixed(4)),
-      playabilityMean: Number(mean(labelled.map((r) => r.playability)).toFixed(4)),
-      pentatonicMean: Number(mean(labelled.map((r) => r.pentatonicContainment)).toFixed(4)),
-      exact: labelled.filter((r) => r.category === 'exact').length,
-      confusion: Object.fromEntries(
-        cats.map((c) => [c, labelled.filter((r) => r.category === c).length]),
-      ),
-    },
-    clips: results.map((r) => ({
-      file: r.file,
-      sampleRate: r.sampleRate,
-      expected: r.expected
-        ? { note: pcToNote(r.expected.tonicPc, true), quality: r.expected.quality }
-        : null,
-      detected: r.estimate
-        ? {
-            note: pcToNote(r.estimate.tonicPc, true),
-            quality: r.estimate.quality,
-            confidence: Number(r.estimate.confidence.toFixed(3)),
-            margin: Number(r.estimate.margin.toFixed(3)),
-          }
-        : null,
-      category: r.category,
-      score: r.score,
-      windowMeanScore: Number(r.windowMeanScore.toFixed(3)),
-      windowBestScore: Number(r.windowBestScore.toFixed(3)),
-      playability: Number(r.playability.toFixed(3)),
-      pentatonicContainment: Number(r.pentatonicContainment.toFixed(3)),
-      chroma: normalizedChroma(r.chroma),
+    sourceVariant: run.id,
+    aggregates: roundAggregate(aggregate),
+    clips: run.results.map(clipPayload),
+  };
+}
+
+function writeResults(dir: string, runs: ExperimentRun[], aggregates: Record<string, AggregateResult>) {
+  const resultsDir = path.join(dir, 'results');
+  fs.mkdirSync(resultsDir, { recursive: true });
+  const generatedAt = new Date().toISOString();
+
+  const payload = {
+    generatedAt,
+    dir,
+    windowMs: WINDOW_MS,
+    keyConfidenceMin: KEY_CONFIDENCE_MIN,
+    variants: runs.map((run) => ({
+      id: run.id,
+      label: run.label,
+      detectorConfig: run.detectorConfig,
+      aggregates: roundAggregate(aggregates[run.id]),
+      clips: run.results.map(clipPayload),
     })),
   };
 
@@ -624,7 +772,22 @@ function writeResults(dir: string, results: ClipResult[]) {
   const outPath = path.join(resultsDir, `${stamp}.json`);
   fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
   console.log(`\nResults written to ${outPath}`);
-  console.log('(Copy it to key-samples/results/baseline.json to set the regression baseline.)');
+
+  const baselineRun = runs.find((run) => run.id === LIVE_DEFAULT_ID);
+  const baselineAggregate = aggregates[LIVE_DEFAULT_ID];
+  if (!baselineRun || !baselineAggregate) return;
+  const baselineFile = baselinePayload(generatedAt, dir, baselineRun, baselineAggregate);
+  const candidatePath = path.join(resultsDir, 'baseline-candidate.json');
+  fs.writeFileSync(candidatePath, JSON.stringify(baselineFile, null, 2));
+  console.log(`Baseline candidate written to ${candidatePath}`);
+
+  if (UPDATE_BASELINE) {
+    const baselinePath = path.join(resultsDir, 'baseline.json');
+    fs.writeFileSync(baselinePath, JSON.stringify(baselineFile, null, 2));
+    console.log(`Updated baseline at ${baselinePath}`);
+  } else {
+    console.log('(Run with --update-baseline to replace key-samples/results/baseline.json.)');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +817,10 @@ function main() {
     `${files.length} clip(s); labels from ${labels.size > 0 ? 'labels.json' : 'filenames'}.\n`,
   );
 
-  const results: ClipResult[] = [];
+  const runs: ExperimentRun[] = EXPERIMENTS.map((experiment) => ({
+    ...experiment,
+    results: [],
+  }));
   for (const filename of files) {
     const buffer = fs.readFileSync(path.join(SAMPLES_DIR, filename));
     let samples: Float32Array;
@@ -669,16 +835,28 @@ function main() {
     }
 
     const expected = labels.get(filename) ?? parseExpectedFromName(filename);
-    const result = evaluateClip(filename, samples, sampleRate, expected);
-    results.push(result);
-    printClip(result);
+    for (const run of runs) {
+      const result = evaluateClip(filename, samples, sampleRate, expected, run.detectorConfig);
+      run.results.push(result);
+      printClip(result, run.id);
+    }
     console.log('');
   }
 
-  const labelled = results.filter((r) => r.expected) as (ClipResult & { expected: KeyLabel })[];
-  if (labelled.length > 0) {
-    printSummary(labelled);
-    writeResults(SAMPLES_DIR, results);
+  const labelledCounts = runs.map((run) => run.results.filter((r) => r.expected).length);
+  if (labelledCounts.some((count) => count > 0)) {
+    const aggregates: Record<string, AggregateResult> = {};
+    for (const run of runs) {
+      const labelled = run.results.filter((r) => r.expected);
+      aggregates[run.id] = printSummary(run.label, labelled);
+    }
+    // `before` is raw (the naive reference); `after` is the live default variant.
+    // Every run is still scored and written individually above.
+    const before = aggregates[EXPERIMENTS[0].id];
+    const liveDefault = aggregates[LIVE_DEFAULT_ID];
+    if (before && liveDefault) printExperimentComparison(before, liveDefault);
+    if (liveDefault) printBaselineComparison(SAMPLES_DIR, liveDefault);
+    writeResults(SAMPLES_DIR, runs, aggregates);
   } else {
     console.log('No labelled clips — add labels.json or name files like song__D_major.wav.');
   }
