@@ -79,18 +79,24 @@ export type KeyDetectorConfig = {
   /** Frames quieter than this RMS are skipped as silence. */
   minRms: number;
   /**
-   * How the FFT spectrum contributes to chroma. `raw` is the live app's current
-   * behavior; `softLogMagnitude` is an offline experiment that compresses loud bins
-   * so drums/distortion are less able to dominate the pitch-class histogram;
-   * `harmonicSuppression` reinforces true fundamentals and suppresses pure overtones
-   * via a harmonic product spectrum (targets the overtone bleed behind the
-   * A-minor/C-major attractor).
+   * How the FFT spectrum contributes to chroma. `raw` is the naive reference;
+   * `softLogMagnitude` compresses loud bins so drums/distortion are less able to
+   * dominate the pitch-class histogram; `harmonicSuppression` reinforces true
+   * fundamentals and suppresses pure overtones via a harmonic product spectrum;
+   * `spectralWhitening` divides each bin by its local neighbourhood average
+   * before chroma folding.
    */
   chromaWeighting: ChromaWeighting;
 };
 
-export type ChromaWeighting = 'raw' | 'softLogMagnitude' | 'harmonicSuppression';
+export type ChromaWeighting =
+  | 'raw'
+  | 'softLogMagnitude'
+  | 'harmonicSuppression'
+  | 'spectralWhitening';
 const SOFT_LOG_SCALE = 0.01;
+const WHITENING_RADIUS_BINS = 8;
+const WHITENING_FLOOR = 1e-8;
 /**
  * How many harmonics the harmonic-product spectrum folds back into each bin.
  * Swept on the 21-clip corpus: 2 (fold in just the octave) beat 3 and 4 on
@@ -106,10 +112,10 @@ export const DEFAULT_KEY_DETECTOR_CONFIG: KeyDetectorConfig = {
   minFreq: 55,
   maxFreq: 2000,
   minRms: 0.001,
-  // Harmonic suppression (octave-fold HPS) was the first front-end experiment to
-  // beat raw magnitude on the 21-clip corpus (whole-clip MIREX 0.367→0.400, ~6s
-  // window 0.379→0.424). See docs/STATE.md for the measured before/after.
-  chromaWeighting: 'harmonicSuppression',
+  // Local spectral whitening beat the harmonic-suppression baseline on the
+  // 21-clip corpus (whole-clip MIREX 0.400→0.486, playability 0.748→0.803).
+  // See docs/STATE.md for the measured tradeoffs.
+  chromaWeighting: 'spectralWhitening',
 };
 
 /**
@@ -179,8 +185,7 @@ export function chromaWeightForMagnitude(
   if (weighting === 'softLogMagnitude') {
     return Math.log1p(magnitude * SOFT_LOG_SCALE) / SOFT_LOG_SCALE;
   }
-  // `raw` and `harmonicSuppression` pass the (already-transformed) bin through
-  // unchanged; harmonicSuppression does its work at the spectrum level below.
+  // Spectrum-level modes pass the already-transformed bin through unchanged.
   return magnitude;
 }
 
@@ -226,6 +231,33 @@ export function suppressHarmonics(
 }
 
 /**
+ * Local spectral whitening: reduce broad loudness trends by comparing every FFT
+ * bin with nearby bins. This keeps narrow tonal peaks useful while making a loud
+ * bass/drum/distortion band less able to swamp the whole chroma.
+ */
+export function whitenSpectrum(
+  mag: Float32Array,
+  radiusBins = WHITENING_RADIUS_BINS,
+): Float32Array {
+  const out = new Float32Array(mag.length);
+  let max = 0;
+  for (let k = 1; k < mag.length; k++) {
+    const lo = Math.max(1, k - radiusBins);
+    const hi = Math.min(mag.length - 1, k + radiusBins);
+    let localSum = 0;
+    for (let i = lo; i <= hi; i++) localSum += mag[i];
+    const localMean = localSum / (hi - lo + 1);
+    const value = localMean > WHITENING_FLOOR ? mag[k] / localMean : 0;
+    out[k] = value;
+    if (value > max) max = value;
+  }
+  if (max > 0) {
+    for (let k = 1; k < out.length; k++) out[k] /= max;
+  }
+  return out;
+}
+
+/**
  * Streaming key detector. Feed it audio frames over a few seconds, then call
  * analyze() to get the estimated key.
  */
@@ -248,7 +280,9 @@ export function createKeyDetector(config: Partial<KeyDetectorConfig> = DEFAULT_K
     const mag =
       resolvedConfig.chromaWeighting === 'harmonicSuppression'
         ? suppressHarmonics(rawMag)
-        : rawMag;
+        : resolvedConfig.chromaWeighting === 'spectralWhitening'
+          ? whitenSpectrum(rawMag)
+          : rawMag;
     const N = samples.length;
     const minBin = Math.max(1, Math.floor((resolvedConfig.minFreq * N) / sampleRate));
     const maxBin = Math.min(mag.length - 1, Math.ceil((resolvedConfig.maxFreq * N) / sampleRate));

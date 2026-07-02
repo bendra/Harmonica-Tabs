@@ -4,6 +4,7 @@ import {
   createKeyDetector,
   estimateKeyFromChroma,
   pearson,
+  whitenSpectrum,
 } from '../../src/logic/key-detector';
 import { noteToPc } from '../../src/data/notes';
 
@@ -96,7 +97,7 @@ describe('estimateKeyFromChroma', () => {
 });
 
 describe('chromaWeightForMagnitude', () => {
-  it('keeps raw magnitudes unchanged for the live default', () => {
+  it('keeps raw magnitudes unchanged', () => {
     expect(chromaWeightForMagnitude(12, 'raw')).toBe(12);
     expect(chromaWeightForMagnitude(0, 'raw')).toBe(0);
   });
@@ -109,6 +110,17 @@ describe('chromaWeightForMagnitude', () => {
     expect(quiet).toBeLessThan(loud);
     expect(quiet).toBeGreaterThan(1 / 99);
     expect(loud).toBeLessThan(99);
+  });
+});
+
+describe('whitenSpectrum', () => {
+  it('normalizes bins against their local neighbourhood', () => {
+    const mag = new Float32Array([0, 10, 10, 100, 10, 10]);
+    const whitened = whitenSpectrum(mag, 1);
+
+    expect(whitened[3]).toBe(1);
+    expect(whitened[2]).toBeLessThan(whitened[1]);
+    expect(whitened[4]).toBeLessThan(whitened[5]);
   });
 });
 
@@ -205,8 +217,25 @@ describe('createKeyDetector', () => {
     expect(estimate!.quality).toBe('major');
   });
 
+  it('keeps clean major detection intact with spectral whitening', () => {
+    const detector = createKeyDetector({ chromaWeighting: 'spectralWhitening' });
+    feed(
+      detector,
+      chordFrame([
+        { midi: 50, amplitude: 0.5 }, // D3
+        { midi: 57, amplitude: 0.35 }, // A3
+        { midi: 54, amplitude: 0.3 }, // F#3
+        { midi: 62, amplitude: 0.3 }, // D4
+      ]),
+    );
+
+    const estimate = detector.analyze();
+    expect(estimate).not.toBeNull();
+    expect(estimate!.tonicPc).toBe(noteToPc('D'));
+    expect(estimate!.quality).toBe('major');
+  });
+
   it('detects minor from a harmonic-rich minor signal under harmonic suppression', () => {
-    // Default config (harmonic suppression) with realistic overtone-bearing voices.
     const partials = [0.5, 0.25, 0.15, 0.1];
     const frame = new Float32Array(FRAME_SIZE);
     for (const midi of [52, 59, 55, 64]) {
@@ -215,7 +244,7 @@ describe('createKeyDetector', () => {
       for (let i = 0; i < FRAME_SIZE; i++) frame[i] += voice[i];
     }
 
-    const detector = createKeyDetector();
+    const detector = createKeyDetector({ chromaWeighting: 'harmonicSuppression' });
     feed(detector, frame);
 
     const estimate = detector.analyze();
