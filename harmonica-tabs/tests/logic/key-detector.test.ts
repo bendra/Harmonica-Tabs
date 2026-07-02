@@ -3,6 +3,7 @@ import {
   chromaWeightForMagnitude,
   createKeyDetector,
   estimateKeyFromChroma,
+  interpolatedBinOffset,
   pearson,
   whitenSpectrum,
 } from '../../src/logic/key-detector';
@@ -124,6 +125,20 @@ describe('whitenSpectrum', () => {
   });
 });
 
+describe('interpolatedBinOffset', () => {
+  it('estimates a sub-bin peak location from neighboring magnitudes', () => {
+    const mag = new Float32Array([0, 1, 4, 2, 0]);
+
+    expect(interpolatedBinOffset(mag, 2)).toBeGreaterThan(0);
+    expect(interpolatedBinOffset(mag, 2)).toBeLessThanOrEqual(0.5);
+  });
+
+  it('stays at the bin center when interpolation is not meaningful', () => {
+    expect(interpolatedBinOffset(new Float32Array([0, 1, 1, 1, 0]), 2)).toBe(0);
+    expect(interpolatedBinOffset(new Float32Array([0, 1, 4, 2, 0]), 0)).toBe(0);
+  });
+});
+
 describe('createKeyDetector', () => {
   it('returns null before any audio is pushed', () => {
     const detector = createKeyDetector();
@@ -219,6 +234,24 @@ describe('createKeyDetector', () => {
 
   it('keeps clean major detection intact with spectral whitening', () => {
     const detector = createKeyDetector({ chromaWeighting: 'spectralWhitening' });
+    feed(
+      detector,
+      chordFrame([
+        { midi: 50, amplitude: 0.5 }, // D3
+        { midi: 57, amplitude: 0.35 }, // A3
+        { midi: 54, amplitude: 0.3 }, // F#3
+        { midi: 62, amplitude: 0.3 }, // D4
+      ]),
+    );
+
+    const estimate = detector.analyze();
+    expect(estimate).not.toBeNull();
+    expect(estimate!.tonicPc).toBe(noteToPc('D'));
+    expect(estimate!.quality).toBe('major');
+  });
+
+  it('keeps clean major detection intact with spectral whitening plus interpolation', () => {
+    const detector = createKeyDetector({ chromaWeighting: 'spectralWhiteningInterpolated' });
     feed(
       detector,
       chordFrame([

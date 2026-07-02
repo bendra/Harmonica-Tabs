@@ -63,7 +63,7 @@ const WINDOW_MS = 6000;
 const EXPERIMENTS: KeyExperiment[] = [
   {
     id: 'raw',
-    label: 'raw magnitude (live default)',
+    label: 'raw magnitude',
     detectorConfig: { chromaWeighting: 'raw' },
   },
   {
@@ -76,12 +76,22 @@ const EXPERIMENTS: KeyExperiment[] = [
     label: 'harmonic product spectrum (overtone suppression)',
     detectorConfig: { chromaWeighting: 'harmonicSuppression' },
   },
+  {
+    id: 'spectral-whitening',
+    label: 'local spectral whitening',
+    detectorConfig: { chromaWeighting: 'spectralWhitening' },
+  },
+  {
+    id: 'spectral-whitening-interpolated',
+    label: 'local spectral whitening + bin interpolation',
+    detectorConfig: { chromaWeighting: 'spectralWhiteningInterpolated' },
+  },
 ];
 
 // Which variant is the live app default. `baseline.json` tracks this variant so the
 // committed regression reference reflects shipping behaviour, and the before/after
 // block compares raw (the naive reference) against it.
-const LIVE_DEFAULT_ID = 'harmonic-suppression';
+const LIVE_DEFAULT_ID = 'spectral-whitening-interpolated';
 
 type KeyLabel = { tonicPc: number; quality: 'major' | 'minor' };
 type Expected = KeyLabel | null;

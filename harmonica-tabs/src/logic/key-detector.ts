@@ -84,7 +84,8 @@ export type KeyDetectorConfig = {
    * dominate the pitch-class histogram; `harmonicSuppression` reinforces true
    * fundamentals and suppresses pure overtones via a harmonic product spectrum;
    * `spectralWhitening` divides each bin by its local neighbourhood average
-   * before chroma folding.
+   * before chroma folding; `spectralWhiteningInterpolated` also nudges each
+   * bin toward its local FFT peak before converting frequency to pitch class.
    */
   chromaWeighting: ChromaWeighting;
 };
@@ -93,7 +94,8 @@ export type ChromaWeighting =
   | 'raw'
   | 'softLogMagnitude'
   | 'harmonicSuppression'
-  | 'spectralWhitening';
+  | 'spectralWhitening'
+  | 'spectralWhiteningInterpolated';
 const SOFT_LOG_SCALE = 0.01;
 const WHITENING_RADIUS_BINS = 8;
 const WHITENING_FLOOR = 1e-8;
@@ -112,10 +114,10 @@ export const DEFAULT_KEY_DETECTOR_CONFIG: KeyDetectorConfig = {
   minFreq: 55,
   maxFreq: 2000,
   minRms: 0.001,
-  // Local spectral whitening beat the harmonic-suppression baseline on the
-  // 21-clip corpus (whole-clip MIREX 0.400→0.486, playability 0.748→0.803).
-  // See docs/STATE.md for the measured tradeoffs.
-  chromaWeighting: 'spectralWhitening',
+  // Whitening plus sub-bin peak interpolation recovered tonic precision on the
+  // 21-clip corpus (whole-clip MIREX 0.486→0.590, exact 3→7, playability
+  // 0.803→0.844) while reducing fifth confusions. See docs/STATE.md.
+  chromaWeighting: 'spectralWhiteningInterpolated',
 };
 
 /**
@@ -258,6 +260,25 @@ export function whitenSpectrum(
 }
 
 /**
+ * Parabolic interpolation estimates where the local spectral peak sits between
+ * FFT bins. Low notes have wide bin spacing, so rounding every bin center to the
+ * nearest MIDI note can put bass energy in the neighboring pitch class. The
+ * offset is intentionally clamped to +/-0.5 bins so one noisy neighbor cannot
+ * drag a bin beyond its immediate interval.
+ */
+export function interpolatedBinOffset(mag: Float32Array, k: number): number {
+  if (k <= 0 || k >= mag.length - 1) return 0;
+  const left = mag[k - 1];
+  const center = mag[k];
+  const right = mag[k + 1];
+  const denominator = left - 2 * center + right;
+  if (denominator === 0) return 0;
+  const offset = 0.5 * (left - right) / denominator;
+  if (!Number.isFinite(offset)) return 0;
+  return Math.max(-0.5, Math.min(0.5, offset));
+}
+
+/**
  * Streaming key detector. Feed it audio frames over a few seconds, then call
  * analyze() to get the estimated key.
  */
@@ -280,7 +301,8 @@ export function createKeyDetector(config: Partial<KeyDetectorConfig> = DEFAULT_K
     const mag =
       resolvedConfig.chromaWeighting === 'harmonicSuppression'
         ? suppressHarmonics(rawMag)
-        : resolvedConfig.chromaWeighting === 'spectralWhitening'
+        : resolvedConfig.chromaWeighting === 'spectralWhitening' ||
+            resolvedConfig.chromaWeighting === 'spectralWhiteningInterpolated'
           ? whitenSpectrum(rawMag)
           : rawMag;
     const N = samples.length;
@@ -289,7 +311,11 @@ export function createKeyDetector(config: Partial<KeyDetectorConfig> = DEFAULT_K
 
     let added = false;
     for (let k = minBin; k <= maxBin; k++) {
-      const freq = (k * sampleRate) / N;
+      const binOffset =
+        resolvedConfig.chromaWeighting === 'spectralWhiteningInterpolated'
+          ? interpolatedBinOffset(mag, k)
+          : 0;
+      const freq = ((k + binOffset) * sampleRate) / N;
       const midi = 69 + 12 * Math.log2(freq / 440);
       const pc = normalizePc(Math.round(midi));
       const weight = chromaWeightForMagnitude(mag[k], resolvedConfig.chromaWeighting);
