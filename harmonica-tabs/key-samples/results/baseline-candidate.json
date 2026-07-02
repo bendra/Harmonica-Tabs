@@ -1,24 +1,24 @@
 {
-  "generatedAt": "2026-07-02T17:46:21.469Z",
+  "generatedAt": "2026-07-02T18:20:39.254Z",
   "dir": "./key-samples",
   "windowMs": 6000,
   "keyConfidenceMin": 0.4,
-  "sourceVariant": "spectral-whitening",
+  "sourceVariant": "spectral-whitening-interpolated",
   "aggregates": {
     "clipsScored": 21,
-    "mirexWholeClip": 0.4857,
-    "mirexWindowMean": 0.4595,
-    "mirexWindowBest": 0.6095,
-    "playabilityMean": 0.8027,
-    "pentatonicMean": 0.8571,
-    "exact": 3,
-    "tonicOnly": 4,
+    "mirexWholeClip": 0.5905,
+    "mirexWindowMean": 0.5452,
+    "mirexWindowBest": 0.7048,
+    "playabilityMean": 0.8435,
+    "pentatonicMean": 0.8381,
+    "exact": 7,
+    "tonicOnly": 7,
     "confusion": {
-      "exact": 3,
-      "fifth": 11,
-      "relative": 5,
-      "parallel": 1,
-      "other": 1
+      "exact": 7,
+      "fifth": 9,
+      "relative": 3,
+      "parallel": 0,
+      "other": 2
     }
   },
   "clips": [
@@ -32,8 +32,8 @@
       "detected": {
         "note": "A",
         "quality": "minor",
-        "confidence": 0.785,
-        "margin": 0.137
+        "confidence": 0.69,
+        "margin": 0.02
       },
       "category": "relative",
       "score": 0.3,
@@ -42,18 +42,18 @@
       "playability": 0.857,
       "pentatonicContainment": 1,
       "chroma": [
-        0.659,
-        0.198,
-        0.515,
-        0.189,
-        0.645,
-        0.425,
-        0.366,
-        0.812,
-        0.372,
+        0.697,
+        0.32,
+        0.491,
+        0.285,
+        0.715,
+        0.525,
+        0.42,
+        0.992,
+        0.44,
         1,
-        0.382,
-        0.709
+        0.476,
+        0.81
       ]
     },
     {
@@ -66,8 +66,8 @@
       "detected": {
         "note": "A",
         "quality": "major",
-        "confidence": 0.747,
-        "margin": 0.131
+        "confidence": 0.702,
+        "margin": 0.059
       },
       "category": "exact",
       "score": 1,
@@ -76,18 +76,18 @@
       "playability": 0.857,
       "pentatonicContainment": 0.6,
       "chroma": [
-        0.335,
-        0.395,
-        0.623,
-        0.253,
-        0.728,
-        0.413,
-        0.633,
-        0.48,
-        0.603,
+        0.32,
+        0.527,
+        0.605,
+        0.381,
+        0.809,
+        0.467,
+        0.755,
+        0.531,
+        0.723,
         1,
-        0.601,
-        0.67
+        0.707,
+        0.798
       ]
     },
     {
@@ -98,29 +98,29 @@
         "quality": "minor"
       },
       "detected": {
-        "note": "B",
+        "note": "E",
         "quality": "minor",
-        "confidence": 0.728,
-        "margin": 0.161
+        "confidence": 0.7,
+        "margin": 0.076
       },
-      "category": "fifth",
-      "score": 0.5,
-      "windowMeanScore": 0.5,
-      "windowBestScore": 0.5,
-      "playability": 0.714,
+      "category": "exact",
+      "score": 1,
+      "windowMeanScore": 0.75,
+      "windowBestScore": 1,
+      "playability": 0.857,
       "pentatonicContainment": 1,
       "chroma": [
-        0.26,
-        0.225,
-        0.494,
-        0.302,
-        0.59,
-        0.413,
-        0.576,
-        0.702,
-        0.348,
-        0.685,
-        0.463,
+        0.261,
+        0.266,
+        0.353,
+        0.367,
+        0.762,
+        0.327,
+        0.586,
+        0.7,
+        0.387,
+        0.598,
+        0.498,
         1
       ]
     },
@@ -132,30 +132,30 @@
         "quality": "minor"
       },
       "detected": {
-        "note": "A",
-        "quality": "minor",
-        "confidence": 0.758,
-        "margin": 0.02
+        "note": "F",
+        "quality": "major",
+        "confidence": 0.755,
+        "margin": 0.117
       },
-      "category": "fifth",
-      "score": 0.5,
-      "windowMeanScore": 0.4,
+      "category": "relative",
+      "score": 0.3,
+      "windowMeanScore": 0.25,
       "windowBestScore": 0.5,
-      "playability": 0.714,
-      "pentatonicContainment": 1,
+      "playability": 0.857,
+      "pentatonicContainment": 0.6,
       "chroma": [
         0.681,
-        0.166,
-        0.716,
-        0.196,
-        0.583,
-        0.789,
-        0.405,
-        0.61,
-        0.43,
+        0.317,
+        0.717,
+        0.343,
+        0.668,
+        0.935,
+        0.489,
+        0.756,
+        0.516,
         1,
-        0.649,
-        0.54
+        0.9,
+        0.671
       ]
     },
     {
@@ -168,28 +168,28 @@
       "detected": {
         "note": "D",
         "quality": "major",
-        "confidence": 0.628,
-        "margin": 0.071
+        "confidence": 0.517,
+        "margin": 0.05
       },
       "category": "exact",
       "score": 1,
-      "windowMeanScore": 0.5,
-      "windowBestScore": 1,
+      "windowMeanScore": 0.4,
+      "windowBestScore": 0.5,
       "playability": 0.857,
       "pentatonicContainment": 0.6,
       "chroma": [
-        0.444,
-        0.316,
-        0.612,
-        0.306,
-        0.555,
-        0.431,
-        0.596,
-        0.612,
-        0.556,
+        0.376,
+        0.478,
+        0.604,
+        0.43,
+        0.641,
+        0.504,
+        0.702,
+        0.758,
+        0.64,
         1,
-        0.629,
-        0.621
+        0.783,
+        0.792
       ]
     },
     {
@@ -200,30 +200,30 @@
         "quality": "major"
       },
       "detected": {
-        "note": "A",
+        "note": "E",
         "quality": "minor",
-        "confidence": 0.673,
-        "margin": 0.111
+        "confidence": 0.646,
+        "margin": 0.1
       },
-      "category": "relative",
-      "score": 0.3,
-      "windowMeanScore": 0.3,
+      "category": "other",
+      "score": 0,
+      "windowMeanScore": 0.15,
       "windowBestScore": 0.3,
-      "playability": 0.857,
+      "playability": 0.714,
       "pentatonicContainment": 1,
       "chroma": [
-        0.616,
-        0.31,
-        0.639,
-        0.328,
-        0.78,
-        0.551,
-        0.541,
-        0.791,
-        0.542,
-        1,
-        0.63,
-        0.867
+        0.623,
+        0.398,
+        0.62,
+        0.434,
+        0.874,
+        0.608,
+        0.607,
+        0.905,
+        0.607,
+        0.992,
+        0.705,
+        1
       ]
     },
     {
@@ -236,8 +236,8 @@
       "detected": {
         "note": "Gb",
         "quality": "minor",
-        "confidence": 0.749,
-        "margin": 0.201
+        "confidence": 0.727,
+        "margin": 0.191
       },
       "category": "fifth",
       "score": 0.5,
@@ -246,18 +246,18 @@
       "playability": 0.714,
       "pentatonicContainment": 1,
       "chroma": [
-        0.375,
-        0.557,
-        0.65,
-        0.291,
-        0.557,
-        0.427,
-        0.976,
-        0.467,
-        0.687,
+        0.283,
+        0.617,
+        0.566,
+        0.397,
+        0.568,
+        0.435,
         1,
-        0.764,
-        0.748
+        0.47,
+        0.72,
+        0.908,
+        0.752,
+        0.874
       ]
     },
     {
@@ -270,8 +270,8 @@
       "detected": {
         "note": "A",
         "quality": "minor",
-        "confidence": 0.788,
-        "margin": 0.245
+        "confidence": 0.622,
+        "margin": 0.158
       },
       "category": "fifth",
       "score": 0.5,
@@ -280,18 +280,18 @@
       "playability": 0.714,
       "pentatonicContainment": 1,
       "chroma": [
-        0.637,
-        0.265,
-        0.538,
-        0.296,
-        0.564,
+        0.631,
+        0.407,
+        0.546,
+        0.416,
+        0.653,
+        0.735,
+        0.501,
+        0.872,
         0.633,
-        0.423,
-        0.721,
-        0.522,
         1,
-        0.57,
-        0.624
+        0.72,
+        0.762
       ]
     },
     {
@@ -304,28 +304,28 @@
       "detected": {
         "note": "Bb",
         "quality": "minor",
-        "confidence": 0.586,
-        "margin": 0.027
+        "confidence": 0.744,
+        "margin": 0.267
       },
       "category": "exact",
       "score": 1,
-      "windowMeanScore": 0.6,
+      "windowMeanScore": 1,
       "windowBestScore": 1,
       "playability": 0.857,
       "pentatonicContainment": 1,
       "chroma": [
-        0.495,
-        0.518,
-        0.573,
-        0.474,
-        0.474,
-        0.806,
-        0.632,
-        0.577,
-        0.775,
-        0.756,
+        0.366,
+        0.612,
+        0.379,
+        0.62,
+        0.444,
+        0.752,
+        0.622,
+        0.569,
+        0.747,
+        0.588,
         1,
-        0.553
+        0.559
       ]
     },
     {
@@ -338,8 +338,8 @@
       "detected": {
         "note": "Bb",
         "quality": "minor",
-        "confidence": 0.451,
-        "margin": 0.112
+        "confidence": 0.59,
+        "margin": 0.159
       },
       "category": "fifth",
       "score": 0.5,
@@ -348,18 +348,18 @@
       "playability": 0.714,
       "pentatonicContainment": 1,
       "chroma": [
-        0.512,
-        0.533,
-        0.486,
-        0.593,
-        0.467,
-        0.923,
-        0.639,
-        0.546,
-        0.93,
-        0.924,
+        0.363,
+        0.583,
+        0.296,
+        0.646,
+        0.436,
+        0.834,
+        0.612,
+        0.508,
+        0.867,
+        0.679,
         1,
-        0.733
+        0.736
       ]
     },
     {
@@ -370,30 +370,30 @@
         "quality": "major"
       },
       "detected": {
-        "note": "A",
-        "quality": "minor",
-        "confidence": 0.695,
-        "margin": 0.08
+        "note": "G",
+        "quality": "major",
+        "confidence": 0.57,
+        "margin": 0.023
       },
-      "category": "relative",
-      "score": 0.3,
-      "windowMeanScore": 0.3,
-      "windowBestScore": 0.3,
-      "playability": 0.857,
-      "pentatonicContainment": 1,
+      "category": "fifth",
+      "score": 0.5,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 1,
+      "playability": 1,
+      "pentatonicContainment": 0.8,
       "chroma": [
-        0.713,
-        0.227,
-        0.616,
-        0.283,
-        0.73,
-        0.589,
-        0.485,
-        0.933,
-        0.496,
+        0.68,
+        0.352,
+        0.511,
+        0.382,
+        0.717,
+        0.662,
+        0.522,
         1,
-        0.655,
-        0.738
+        0.543,
+        0.898,
+        0.719,
+        0.789
       ]
     },
     {
@@ -406,8 +406,8 @@
       "detected": {
         "note": "G",
         "quality": "minor",
-        "confidence": 0.771,
-        "margin": 0.295
+        "confidence": 0.7,
+        "margin": 0.017
       },
       "category": "fifth",
       "score": 0.5,
@@ -416,18 +416,18 @@
       "playability": 0.714,
       "pentatonicContainment": 1,
       "chroma": [
-        0.636,
-        0.234,
-        0.726,
-        0.667,
-        0.486,
-        0.536,
-        0.507,
+        0.586,
+        0.339,
+        0.58,
+        0.748,
+        0.494,
+        0.559,
+        0.523,
         1,
-        0.682,
-        0.911,
-        0.981,
-        0.637
+        0.827,
+        0.664,
+        0.975,
+        0.691
       ]
     },
     {
@@ -438,30 +438,30 @@
         "quality": "major"
       },
       "detected": {
-        "note": "D",
+        "note": "E",
         "quality": "major",
-        "confidence": 0.539,
-        "margin": 0.08
+        "confidence": 0.603,
+        "margin": 0.186
       },
-      "category": "other",
-      "score": 0,
-      "windowMeanScore": 0,
-      "windowBestScore": 0,
-      "playability": 0.571,
-      "pentatonicContainment": 0.2,
+      "category": "exact",
+      "score": 1,
+      "windowMeanScore": 1,
+      "windowBestScore": 1,
+      "playability": 0.857,
+      "pentatonicContainment": 0.6,
       "chroma": [
-        0.503,
-        0.326,
-        0.728,
-        0.453,
-        0.737,
-        0.609,
-        0.69,
-        0.724,
-        0.767,
+        0.464,
+        0.481,
+        0.658,
+        0.612,
         1,
-        0.734,
-        0.793
+        0.604,
+        0.797,
+        0.853,
+        0.9,
+        0.995,
+        0.913,
+        0.959
       ]
     },
     {
@@ -473,29 +473,29 @@
       },
       "detected": {
         "note": "G",
-        "quality": "major",
-        "confidence": 0.578,
-        "margin": 0.004
+        "quality": "minor",
+        "confidence": 0.616,
+        "margin": 0.086
       },
-      "category": "fifth",
-      "score": 0.5,
+      "category": "other",
+      "score": 0,
       "windowMeanScore": 0.25,
       "windowBestScore": 0.5,
-      "playability": 1,
+      "playability": 0.857,
       "pentatonicContainment": 0.8,
       "chroma": [
-        0.723,
-        0.284,
-        0.729,
-        0.416,
-        0.678,
-        0.717,
-        0.561,
+        0.627,
+        0.363,
+        0.59,
+        0.502,
+        0.637,
+        0.72,
+        0.537,
         1,
-        0.577,
-        0.946,
-        0.855,
-        0.771
+        0.542,
+        0.804,
+        0.842,
+        0.799
       ]
     },
     {
@@ -506,30 +506,30 @@
         "quality": "minor"
       },
       "detected": {
-        "note": "A",
-        "quality": "minor",
-        "confidence": 0.703,
-        "margin": 0.106
+        "note": "F",
+        "quality": "major",
+        "confidence": 0.528,
+        "margin": 0.014
       },
-      "category": "fifth",
-      "score": 0.5,
+      "category": "relative",
+      "score": 0.3,
       "windowMeanScore": 0.75,
       "windowBestScore": 1,
-      "playability": 0.714,
-      "pentatonicContainment": 1,
+      "playability": 0.857,
+      "pentatonicContainment": 0.6,
       "chroma": [
-        0.593,
-        0.275,
-        0.657,
-        0.306,
-        0.528,
-        0.622,
-        0.394,
-        0.695,
-        0.505,
+        0.581,
+        0.412,
+        0.645,
+        0.475,
+        0.606,
+        0.731,
+        0.479,
+        0.826,
+        0.615,
         1,
-        0.677,
-        0.49
+        0.885,
+        0.622
       ]
     },
     {
@@ -541,29 +541,29 @@
       },
       "detected": {
         "note": "A",
-        "quality": "minor",
-        "confidence": 0.711,
-        "margin": 0.058
+        "quality": "major",
+        "confidence": 0.645,
+        "margin": 0.005
       },
-      "category": "parallel",
-      "score": 0.2,
-      "windowMeanScore": 0.2,
-      "windowBestScore": 0.2,
-      "playability": 0.714,
+      "category": "exact",
+      "score": 1,
+      "windowMeanScore": 0.75,
+      "windowBestScore": 1,
+      "playability": 0.857,
       "pentatonicContainment": 0.6,
       "chroma": [
-        0.518,
-        0.366,
-        0.507,
-        0.26,
-        0.779,
-        0.428,
-        0.544,
-        0.624,
-        0.49,
+        0.491,
+        0.494,
+        0.479,
+        0.381,
+        0.859,
+        0.476,
+        0.651,
+        0.697,
+        0.577,
         1,
-        0.588,
-        0.672
+        0.643,
+        0.827
       ]
     },
     {
@@ -576,8 +576,8 @@
       "detected": {
         "note": "D",
         "quality": "major",
-        "confidence": 0.762,
-        "margin": 0.195
+        "confidence": 0.664,
+        "margin": 0.059
       },
       "category": "fifth",
       "score": 0.5,
@@ -586,18 +586,18 @@
       "playability": 1,
       "pentatonicContainment": 0.8,
       "chroma": [
-        0.459,
-        0.243,
-        0.731,
-        0.344,
-        0.533,
-        0.313,
-        0.598,
-        0.701,
-        0.401,
+        0.445,
+        0.397,
+        0.747,
+        0.481,
+        0.653,
+        0.379,
+        0.711,
+        0.925,
+        0.486,
         1,
-        0.572,
-        0.733
+        0.75,
+        0.923
       ]
     },
     {
@@ -610,28 +610,28 @@
       "detected": {
         "note": "Gb",
         "quality": "major",
-        "confidence": 0.861,
-        "margin": 0.224
+        "confidence": 0.887,
+        "margin": 0.131
       },
       "category": "fifth",
       "score": 0.5,
-      "windowMeanScore": 0.5,
-      "windowBestScore": 0.5,
+      "windowMeanScore": 0.75,
+      "windowBestScore": 1,
       "playability": 1,
       "pentatonicContainment": 0.8,
       "chroma": [
-        0.366,
-        0.631,
-        0.35,
-        0.571,
-        0.348,
-        0.335,
+        0.236,
+        0.694,
+        0.257,
+        0.623,
+        0.36,
+        0.336,
         1,
-        0.353,
-        0.723,
-        0.574,
-        0.767,
-        0.763
+        0.359,
+        0.742,
+        0.411,
+        0.75,
+        0.849
       ]
     },
     {
@@ -644,28 +644,28 @@
       "detected": {
         "note": "E",
         "quality": "minor",
-        "confidence": 0.683,
-        "margin": 0.045
+        "confidence": 0.734,
+        "margin": 0.182
       },
       "category": "fifth",
       "score": 0.5,
-      "windowMeanScore": 0.75,
-      "windowBestScore": 1,
+      "windowMeanScore": 0.5,
+      "windowBestScore": 0.5,
       "playability": 0.714,
       "pentatonicContainment": 1,
       "chroma": [
-        0.698,
-        0.297,
-        0.652,
-        0.3,
-        0.949,
+        0.646,
+        0.339,
+        0.562,
+        0.383,
+        0.928,
         0.515,
-        0.535,
-        0.868,
-        0.61,
-        1,
-        0.65,
-        0.994
+        0.532,
+        0.896,
+        0.623,
+        0.875,
+        0.678,
+        1
       ]
     },
     {
@@ -676,30 +676,30 @@
         "quality": "major"
       },
       "detected": {
-        "note": "A",
-        "quality": "minor",
-        "confidence": 0.667,
-        "margin": 0.028
+        "note": "G",
+        "quality": "major",
+        "confidence": 0.648,
+        "margin": 0.085
       },
-      "category": "relative",
-      "score": 0.3,
-      "windowMeanScore": 0.4,
+      "category": "fifth",
+      "score": 0.5,
+      "windowMeanScore": 0.5,
       "windowBestScore": 0.5,
-      "playability": 0.857,
-      "pentatonicContainment": 1,
+      "playability": 1,
+      "pentatonicContainment": 0.8,
       "chroma": [
-        0.632,
-        0.263,
-        0.671,
-        0.323,
-        0.663,
-        0.609,
-        0.564,
-        0.882,
-        0.524,
+        0.629,
+        0.36,
+        0.624,
+        0.461,
+        0.698,
+        0.676,
+        0.62,
         1,
-        0.532,
-        0.8
+        0.569,
+        0.946,
+        0.622,
+        0.892
       ]
     },
     {
@@ -710,29 +710,29 @@
         "quality": "minor"
       },
       "detected": {
-        "note": "G",
-        "quality": "major",
-        "confidence": 0.669,
-        "margin": 0.018
+        "note": "E",
+        "quality": "minor",
+        "confidence": 0.699,
+        "margin": 0.101
       },
-      "category": "relative",
-      "score": 0.3,
-      "windowMeanScore": 0.65,
-      "windowBestScore": 1,
+      "category": "exact",
+      "score": 1,
+      "windowMeanScore": 0.35,
+      "windowBestScore": 0.5,
       "playability": 0.857,
-      "pentatonicContainment": 0.6,
+      "pentatonicContainment": 1,
       "chroma": [
-        0.465,
-        0.206,
-        0.598,
-        0.27,
-        0.699,
-        0.371,
-        0.467,
-        0.839,
-        0.384,
-        0.88,
-        0.522,
+        0.369,
+        0.258,
+        0.442,
+        0.304,
+        0.706,
+        0.333,
+        0.458,
+        0.79,
+        0.376,
+        0.739,
+        0.508,
         1
       ]
     }
